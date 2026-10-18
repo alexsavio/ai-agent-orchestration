@@ -1,0 +1,25 @@
+[
+  {
+    "id": "synthetic-pr-001",
+    "state": "OPEN",
+    "url": "https://github.com/example-org/example-repo/pull/101",
+    "number": 101,
+    "title": "Synthetic watcher fixture",
+    "isDraft": false,
+    "updatedAt": "2024-01-01T12:00:00Z",
+    "headRefOid": "synthetic-head-001",
+    "author": {"__typename": "User", "login": "fixture-author"},
+    "repository": {"nameWithOwner": "example-org/example-repo"},
+    "mergeable": "MERGEABLE",
+    "mergeStateStatus": "CLEAN",
+    "reviewDecision": "APPROVED",
+    "reviewThreads": {
+      "pageInfo": {"hasNextPage": false, "endCursor": null},
+      "nodes": [{"id": "synthetic-thread-resolved", "isResolved": true}]
+    },
+    "commits": {
+      "nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]
+    },
+    "latestReviews": {"nodes": [{"id": "synthetic-review-001", "state": "APPROVED"}]}
+  }
+]

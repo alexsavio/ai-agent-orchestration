@@ -1,0 +1,892 @@
+#!/usr/bin/env bash
+# Installs, updates and repairs the ai-agent-orchestration setup: one clone, symlinked into ~/.claude.
+# Safe to run any number of times. Run it without a clone (arguments go after the final _):
+#   /bin/bash -c 's=$(gh api repos/combinaut/ai-agent-orchestration/contents/install.sh -H "Accept: application/vnd.github.raw") && [ -n "$s" ] && exec /bin/bash -c "$s" install.sh "$@"; echo "Download failed. Fix: install gh (https://cli.github.com) && gh auth login" >&2; exit 1' _
+set -eu
+
+REPO_SLUG="combinaut/ai-agent-orchestration"
+CLAUDE_DIR="${HOME:?HOME is not set}/.claude"
+CONFIG="${ORCH_CONFIG:-$CLAUDE_DIR/orchestration.env}"
+STAMP=$(date +%Y%m%d%H%M%S)
+BACKUP_DIR="$CLAUDE_DIR/backups/$STAMP"
+# State directories the watchers write to; created under ~/.claude, never linked.
+RUNTIME_DIRS="coordinator/watchers/bindings coordinator/watchers/prod-context"
+LOCK="$CLAUDE_DIR/.orch-install.lock"
+MANIFEST="$CLAUDE_DIR/.orch-links"
+MANAGED=""
+HOOK_CMD="bash ~/.claude/hooks/orch-update-check.sh"
+GUARD_BASH_CMD="python3 ~/.claude/hooks/guard-bash.py"
+STATUSLINE_CMD="bash ~/.claude/statusline-command.sh"
+# shellcheck disable=SC2016 # jq variables are evaluated by jq, not Bash.
+BASH_MATCHER_JQ='def bash_matcher: . as $matcher | ($matcher == null or $matcher == "" or $matcher == "*" or ($matcher | test("(^|[|, ])Bash($|[|, ])")) or (try ("Bash" | test($matcher)) catch false));'
+MANAGED_GUARD_RE='^ORCH_CONFIG=.*[[:space:]]+python3[[:space:]]+~/.claude/hooks/guard-bash\.py[[:space:]]*$'
+# shellcheck disable=SC2016 # The regex matches a literal $HOME in hook commands.
+SUPPORTED_GUARD_RE='^[[:space:]]*(?:(?:(?:[^[:space:]]*/)?env(?:[[:space:]]+(?:[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+|-[^[:space:]]+))*[[:space:]]+)?[^[:space:]]*python[0-9.]*[[:space:]]+)?(?:~/.claude|[\"]?\$HOME/.claude|/[^[:space:]]*\.claude)/hooks/guard-bash\.py\"?[[:space:]]*$'
+CHROME_HOST="com.combinaut.pr_tabs"
+
+n_linked=0
+SERVICES_FAILED=0
+n_ok=0
+n_backup=0
+n_skipped=0
+WATCHER_MIGRATION_PENDING=0
+
+say() { printf '%-15s %s\n' "$1" "$2"; }
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+# backup_name <path>: a free path under $BACKUP_DIR mirroring <path>; its parent exists.
+backup_name() {
+  local base name n=0
+  case "$1" in
+    "$CLAUDE_DIR"/*) base="$BACKUP_DIR/${1#"$CLAUDE_DIR"/}" ;;
+    "$HOME"/*) base="$BACKUP_DIR/home/${1#"$HOME"/}" ;;
+    *) base="$BACKUP_DIR/root$1" ;;
+  esac
+  mkdir -p "$(dirname "$base")"
+  name=$base
+  while [ -e "$name" ] || [ -L "$name" ]; do
+    n=$((n + 1))
+    name="$base.$n"
+  done
+  printf '%s' "$name"
+}
+
+# One install at a time. The lock is a symlink whose target is the owner's pid; exec into the link stage keeps the pid.
+take_lock() {
+  local owner attempt=0
+  mkdir -p "$CLAUDE_DIR"
+  while ! ln -s "$$" "$LOCK" 2>/dev/null; do
+    owner=$(readlink "$LOCK" 2>/dev/null || true)
+    [ "$owner" != $$ ] || break
+    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+      die "another install.sh is running (pid $owner). Run this again when it ends."
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -le 5 ] || die "cannot take $LOCK. If no install.sh is running, remove $LOCK and $LOCK.reclaim."
+    if mkdir "$LOCK.reclaim" 2>/dev/null; then
+      if [ "$(readlink "$LOCK" 2>/dev/null || true)" = "$owner" ]; then
+        rm -f "$LOCK"
+        say "took over" "stale lock $LOCK (pid ${owner:-unknown} is gone)"
+      fi
+      rmdir "$LOCK.reclaim"
+    else
+      sleep 1
+    fi
+  done
+  trap release_lock EXIT
+}
+
+release_lock() {
+  [ "$(readlink "$LOCK" 2>/dev/null || true)" != $$ ] || rm -f "$LOCK"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: install.sh [--env <name>|--env none]
+
+Clones or updates the ai-agent-orchestration repo (ORCH_REPO_PATH, default ~/.claude/ai-agent-orchestration),
+then symlinks its shared files into ~/.claude. Install, update and repair are the same run.
+
+  --env <name>   Also run env/<name>/install.sh (e.g. herdr). "none" skips the env step.
+                 Without --env: ORCH_ENV from the config, else a prompt on a terminal, else no env step.
+USAGE
+}
+
+ENV_NAME=""
+ENV_GIVEN=0
+STAGE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --env)
+      [ $# -ge 2 ] || die "--env needs a name (see --help)"
+      ENV_NAME=$2 ENV_GIVEN=1
+      shift 2
+      ;;
+    --env=*) ENV_NAME=${1#--env=} ENV_GIVEN=1 && shift ;;
+    --stage=link) STAGE="link" && shift ;;
+    -h | --help) usage && exit 0 ;;
+    *) die "unknown option: $1 (see --help)" ;;
+  esac
+done
+
+if [ -n "${ORCH_CONFIG:-}" ] && [ ! -f "$CONFIG" ]; then
+  die "ORCH_CONFIG is not a regular file: $CONFIG"
+fi
+
+# config_value <key>: the environment wins, then the config file; a leading ~/ becomes $HOME/.
+config_value() {
+  local key=$1 value=""
+  if [ -n "${!key+x}" ]; then
+    value=${!key}
+  elif [ -f "$CONFIG" ]; then
+    # shellcheck disable=SC1090
+    value=$(set +u && . "$CONFIG" >/dev/null 2>&1 && printf '%s' "${!key:-}") || value=""
+  fi
+  case "$value" in \~/*) value="$HOME/${value#\~/}" ;; esac
+  printf '%s' "$value"
+}
+
+# config_file_value <ORCH_KEY>: the value the config file gives, ignoring the installer's environment (what services load).
+config_file_value() {
+  [ -f "$CONFIG" ] || return 0
+  # shellcheck disable=SC1090
+  (unset "$1" && set +u && . "$CONFIG" >/dev/null 2>&1 && printf '%s' "${!1:-}") || true
+}
+
+# config_has <ORCH_KEY>: the key is set in the environment or assigned in the config file, even to an empty value.
+config_has() {
+  [ -n "${!1+x}" ] || { [ -f "$CONFIG" ] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?$1=" "$CONFIG"; }
+}
+
+# refuse_local_changes <dir> <label>: exits when <dir> has uncommitted edits or commits not on origin.
+refuse_local_changes() {
+  local dir=$1 label=$2 dirty unpushed
+  dirty=$(git -C "$dir" status --porcelain)
+  unpushed=$(git -C "$dir" log --oneline HEAD --not --remotes=origin)
+  [ -z "$dirty$unpushed" ] && return 0
+  {
+    echo "REFUSED: $label at $dir has local changes:"
+    if [ -n "$dirty" ]; then
+      echo "  uncommitted:"
+      printf '%s\n' "$dirty" | sed 's/^/    /'
+    fi
+    if [ -n "$unpushed" ]; then
+      echo "  commits not on origin:"
+      printf '%s\n' "$unpushed" | sed 's/^/    /'
+    fi
+    echo "Changes go through a PR. Nothing was updated; commit them to a branch and open a PR, then run install.sh again."
+  } >&2
+  exit 1
+}
+
+preflight() {
+  command -v git >/dev/null 2>&1 || die "git not found. Fix: $(platform_dependency_fix git)"
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "ERROR: gh (GitHub CLI) not found. Fix: $(platform_dependency_fix gh) && gh auth login" >&2
+    exit 1
+  fi
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "ERROR: gh is not logged in. Fix: gh auth login (then run this again)" >&2
+    exit 1
+  fi
+  command -v jq >/dev/null 2>&1 || die "jq not found. Fix: $(platform_dependency_fix jq)"
+}
+
+sync_clone() {
+  local repo=$1 before after upstream
+  if [ ! -e "$repo" ]; then
+    mkdir -p "$(dirname "$repo")"
+    if [ -n "${ORCH_REPO_URL:-}" ]; then
+      git clone -q "$ORCH_REPO_URL" "$repo"
+    else
+      gh repo clone "$REPO_SLUG" "$repo" -- -q
+    fi
+    say "cloned" "$repo"
+    return
+  fi
+  [ -e "$repo/.git" ] || die "$repo exists but is not a git clone. Move it away or set ORCH_REPO_PATH."
+  git -C "$repo" fetch -q origin
+  refuse_local_changes "$repo" "the ai-agent-orchestration clone"
+  upstream=$(git -C "$repo" rev-parse -q --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+  case "$upstream" in
+    origin/*) ;;
+    "") die "$repo has no upstream branch. Fix: git -C $repo switch main" ;;
+    *) die "$repo follows $upstream, not a branch on origin. Fix: git -C $repo branch -u origin/main" ;;
+  esac
+  before=$(git -C "$repo" rev-parse HEAD)
+  git -C "$repo" merge -q --ff-only '@{u}'
+  after=$(git -C "$repo" rev-parse HEAD)
+  if [ "$before" = "$after" ]; then
+    say "up to date" "$repo"
+  else
+    say "updated" "$repo ${before:0:7}..${after:0:7}"
+  fi
+}
+
+ORCH_REPO=$(config_value ORCH_REPO_PATH)
+[ -n "$ORCH_REPO" ] || ORCH_REPO="$CLAUDE_DIR/ai-agent-orchestration"
+
+PLATFORM=$(uname -s)
+case "$PLATFORM" in
+  Darwin) PLATFORM=macos ;;
+  Linux) PLATFORM=linux ;;
+  *) die "unsupported platform: $PLATFORM" ;;
+esac
+SRC=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+  SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+fi
+if [ -n "$SRC" ]; then
+  # An explicitly executed local installer trusts its adjacent adapter. A downloaded
+  # bash -c installer has no source path and must fetch its adapter instead.
+  [ "$STAGE" != link ] || [ "$SRC" = "$(cd "$ORCH_REPO" && pwd -P)" ] || die "the link stage runs from $ORCH_REPO, not $SRC"
+  if [ "$STAGE" = link ]; then ORCH_REPO=$SRC; fi
+  # shellcheck disable=SC1090
+  . "$SRC/lib/platform/$PLATFORM.sh"
+else
+  [ "$STAGE" != link ] || die "the link stage runs from $ORCH_REPO, not $SRC"
+  adapter=$(gh api "repos/$REPO_SLUG/contents/lib/platform/$PLATFORM.sh" -H "Accept: application/vnd.github.raw") || die "cannot download platform adapter. Fix: gh auth login"
+  [ -n "$adapter" ] || die "empty platform adapter download"
+  eval "$adapter"
+fi
+
+preflight
+if [ "$STAGE" != link ]; then
+  take_lock
+  sync_clone "$ORCH_REPO"
+  export ORCH_REPO_PATH="$ORCH_REPO"
+  if [ "$ENV_GIVEN" = 1 ]; then
+    exec /bin/bash "$ORCH_REPO/install.sh" --stage=link --env "$ENV_NAME"
+  fi
+  exec /bin/bash "$ORCH_REPO/install.sh" --stage=link
+fi
+
+take_lock
+. "$SRC/lib/platform/watcher-state.sh"
+
+# real_parents <path>: a symlinked parent below ~/.claude that points into the clone, or any symlinked
+# parent under ~/.claude/coordinator, is backed up and replaced by a real directory.
+real_parents() {
+  local rel path=$CLAUDE_DIR part target backup
+  case "$1" in "$CLAUDE_DIR"/*) ;; *) return 0 ;; esac
+  rel=$(dirname "${1#"$CLAUDE_DIR"/}")
+  [ "$rel" != . ] || return 0
+  while [ -n "$rel" ]; do
+    part=${rel%%/*}
+    [ "$part" != "$rel" ] && rel=${rel#*/} || rel=""
+    path="$path/$part"
+    [ -L "$path" ] || continue
+    target=$(cd "$path" 2>/dev/null && pwd -P) || target=""
+    case "$path/" in
+      "$CLAUDE_DIR/coordinator/"*) ;;
+      *) case "$target/" in "$ORCH_REPO/"*) ;; *) continue ;; esac ;;
+    esac
+    backup=$(backup_name "$path")
+    mv "$path" "$backup"
+    mkdir -p "$path"
+    say "backed up" "$path -> $backup (a linked directory; its files are linked one by one)"
+    n_backup=$((n_backup + 1))
+  done
+}
+
+# link_entry <source> <dest>: dest becomes a symlink to source; anything else in the way is backed up.
+link_entry() {
+  local src=$1 dest=$2 backup
+  real_parents "$dest"
+  MANAGED="$MANAGED$dest
+"
+  if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; then
+    say "already linked" "$dest"
+    n_ok=$((n_ok + 1))
+    return
+  fi
+  if [ -L "$dest" ] || [ -e "$dest" ]; then
+    backup=$(backup_name "$dest")
+    mv "$dest" "$backup"
+    say "backed up" "$dest -> $backup"
+    n_backup=$((n_backup + 1))
+  fi
+  mkdir -p "$(dirname "$dest")"
+  ln -s "$src" "$dest"
+  say "linked" "$dest -> $src"
+  n_linked=$((n_linked + 1))
+}
+
+skip() {
+  say "skipped" "$1"
+  n_skipped=$((n_skipped + 1))
+}
+
+# Links this installer made on an earlier run (listed in $MANIFEST) whose source left the clone.
+remove_stale_links() {
+  local link target
+  [ -f "$MANIFEST" ] || return 0
+  while IFS= read -r link; do
+    [ -L "$link" ] || continue
+    target=$(readlink "$link")
+    case "$target" in "$ORCH_REPO"/*) ;; *) continue ;; esac
+    [ -e "$target" ] && continue
+    rm "$link"
+    say "removed stale" "$link"
+  done <"$MANIFEST"
+}
+
+write_manifest() {
+  printf '%s' "$MANAGED" >"$MANIFEST.tmp"
+  mv "$MANIFEST.tmp" "$MANIFEST"
+}
+
+link_shared_files() {
+  local d f name backup
+  for d in heavy-slots context-usage; do
+    if [ ! -d "$CLAUDE_DIR/$d" ]; then
+      mkdir -p "$CLAUDE_DIR/$d"
+      say "created" "$CLAUDE_DIR/$d/"
+    fi
+  done
+  for d in "$ORCH_REPO"/skills/*/; do
+    [ -d "$d" ] || continue
+    name=$(basename "$d")
+    link_entry "$ORCH_REPO/skills/$name" "$CLAUDE_DIR/skills/$name"
+    f="$CLAUDE_DIR/commands/$name.md"
+    if [ -L "$f" ] || [ -e "$f" ]; then
+      backup=$(backup_name "$f")
+      mv "$f" "$backup"
+      say "backed up" "$f -> $backup (replaced by the /$name skill)"
+      n_backup=$((n_backup + 1))
+    fi
+  done
+  # Real directories, linked files: the watchers write state next to themselves.
+  while IFS= read -r f; do
+    link_entry "$ORCH_REPO/$f" "$CLAUDE_DIR/$f"
+  done < <(cd "$ORCH_REPO" && find coordinator -type f ! -name '*.pyc' | LC_ALL=C sort)
+  for d in $RUNTIME_DIRS; do
+    [ -d "$ORCH_REPO/$(dirname "$d")" ] || continue
+    real_parents "$CLAUDE_DIR/$d/."
+    [ ! -d "$CLAUDE_DIR/$d" ] || continue
+    mkdir -p "$CLAUDE_DIR/$d"
+    say "created" "$CLAUDE_DIR/$d/"
+  done
+  for f in "$ORCH_REPO"/rules/*.md; do
+    [ -e "$f" ] || continue
+    link_entry "$f" "$CLAUDE_DIR/rules/$(basename "$f")"
+  done
+  link_entry "$ORCH_REPO/statusline-command.sh" "$CLAUDE_DIR/statusline-command.sh"
+  link_entry "$ORCH_REPO/heavy-slot" "$HOME/.local/bin/heavy-slot"
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) say "PATH setup" "Add export PATH=\"\$HOME/.local/bin:\$PATH\" to your shell startup file (e.g. $(platform_shell_profile)); then open a new shell for heavy-slot commands." ;;
+  esac
+  link_entry "$ORCH_REPO/worker-reports/machine-rules.md" "$CLAUDE_DIR/worker-reports/machine-rules.md"
+  link_entry "$ORCH_REPO/hooks/orch-update-check.sh" "$CLAUDE_DIR/hooks/orch-update-check.sh"
+  link_entry "$ORCH_REPO/hooks/guard-bash.py" "$CLAUDE_DIR/hooks/guard-bash.py"
+}
+
+# Backups an earlier installer left beside the skills move under $BACKUP_DIR.
+move_skill_backups() {
+  local entry target
+  [ ! -L "$CLAUDE_DIR/skills" ] || return 0
+  for entry in "$CLAUDE_DIR"/skills/*.bak.*; do
+    [[ ${entry##*/} =~ \.bak\.[0-9]{14}(\.[0-9]+)?$ ]] || continue
+    target=$(backup_name "$entry")
+    mv "$entry" "$target"
+    say "moved backup" "$entry -> $target"
+  done
+}
+
+interactive() { [ -t 0 ] && [ -t 1 ]; }
+
+# ask <prompt> <default>: sets ANSWER from the terminal; the default when the answer is empty.
+ask() {
+  printf '%s [%s]: ' "$1" "$2"
+  read -r ANSWER || ANSWER=""
+  echo
+  ANSWER=${ANSWER:-$2}
+}
+
+# detect_default <ORCH_KEY>: a value found on this machine, else empty.
+detect_default() {
+  local value=""
+  case "$1" in
+    ORCH_PR_AUTHOR) value=$(gh api user -q .login 2>/dev/null || true) ;;
+    ORCH_CODEX_WORKER_MODEL | ORCH_CODEX_SMART_MODEL)
+      value=$(sed -n 's/^model[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null | head -n 1)
+      ;;
+    ORCH_HERDR_BIN)
+      value=$(PATH="$PATH:$HOME/.local/bin" type -P herdr 2>/dev/null || true)
+      case "$value" in
+        */*) value="$(cd "$(dirname "$value")" 2>/dev/null && pwd -P)/${value##*/}" ;;
+        *) value="" ;;
+      esac
+      [ -f "$value" ] && [ -x "$value" ] || value=""
+      ;;
+    ORCH_HERDR_SOCKET)
+      value="${XDG_CONFIG_HOME:-$HOME/.config}/herdr/herdr.sock"
+      [ -S "$value" ] || value=""
+      ;;
+  esac
+  printf '%s' "$value"
+}
+
+# write_config_key <ORCH_KEY> <value>: sets an empty or placeholder key in $CONFIG, or appends it.
+write_config_key() {
+  local quoted tmp
+  quoted=$(printf '%s' "$2" | sed 's/[\\"$`]/\\&/g')
+  tmp=$(mktemp)
+  if grep -Eq "^[[:space:]]*(export[[:space:]]+)?$1=" "$CONFIG"; then
+    KEY="$1" LINE="$1=\"$quoted\"" awk '$0 ~ "^[[:space:]]*(export[[:space:]]+)?" ENVIRON["KEY"] "=" { if (!done) print ENVIRON["LINE"]; done = 1; next } { print }' "$CONFIG" >"$tmp"
+  else
+    cat "$CONFIG" >"$tmp"
+    printf '%s="%s"\n' "$1" "$quoted" >>"$tmp"
+  fi
+  cat "$tmp" >"$CONFIG"
+  rm -f "$tmp"
+  say "set" "$CONFIG: $1"
+}
+
+# First run on a terminal: asks for each empty or placeholder key; "-" leaves it empty.
+ask_config_keys() {
+  local key value
+  interactive || return 0
+  for key in ORCH_PR_REPOS ORCH_PR_AUTHOR ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET; do
+    value=$(config_value "$key")
+    [ -n "$value" ] || value=$(unset "$key" && config_value "$key")
+    case "$value" in
+      "" | "<"*">") ;;
+      *)
+        printf -v "$key" '%s' "$value"
+        continue
+        ;;
+    esac
+    ask "$key (- leaves it empty)" "$(detect_default "$key")"
+    if [ -z "$ANSWER" ] || [ "$ANSWER" = - ]; then
+      [ -n "$value" ] || continue
+      ANSWER=""
+    fi
+    write_config_key "$key" "$ANSWER"
+    printf -v "$key" '%s' "$ANSWER"
+  done
+}
+
+personal_config() {
+  local example="$ORCH_REPO/config/orchestration.env.example" k v fill="" new="" old_key new_key consequence
+  if [ -L "$CONFIG" ] || [ -e "$CONFIG" ]; then
+    say "kept" "$CONFIG (yours, never overwritten)"
+  else
+    mkdir -p "$(dirname "$CONFIG")"
+    cp "$example" "$CONFIG"
+    say "created" "$CONFIG"
+  fi
+  local missing_project_keys=""
+  for k in ORCH_BIG_REPO_REMOTES ORCH_LEGACY_REPOS ORCH_PR_TABS_ORG ORCH_PR_TABS_DEFAULT_REPO ORCH_PR_TABS_OPEN_ALL ORCH_PR_TABS_TOPICS ORCH_FOCUS_SKIP_ARCHITECTS; do
+    grep -Eq "^[[:space:]]*(export[[:space:]]+)?$k=" "$CONFIG" 2>/dev/null || missing_project_keys="$missing_project_keys $k"
+  done
+  [ -z "$missing_project_keys" ] || say "configure" "Project features are off until you configure missing keys in $CONFIG:$missing_project_keys"
+  for k in ORCH_PR_REPOS ORCH_PR_AUTHOR ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET; do
+    v=$(config_value "$k")
+    case "$v" in "" | "<"*">") fill="$fill $k" ;; esac
+  done
+  while IFS= read -r k; do
+    grep -q "^$k=" "$CONFIG" 2>/dev/null || new="$new $k"
+  done < <(sed -n 's/^\(ORCH_[A-Z0-9_]*\)=.*/\1/p' "$example")
+  [ -z "$fill" ] || say "fill in" "$CONFIG:$fill"
+  [ -z "$new" ] || say "new keys" "in $example, not in your config (defaults apply):$new"
+  for old_key in ORCH_V2_LAUNCHD ORCH_V2_PR_SCOPE ORCH_V2_WORKER_MODEL ORCH_V2_PRIMARY_REPO; do
+    grep -q "^$old_key=" "$CONFIG" 2>/dev/null || continue
+    case "$old_key" in
+      ORCH_V2_LAUNCHD) new_key=ORCH_WATCHERS_SERVICE; consequence="services are not rendered" ;;
+      ORCH_V2_PR_SCOPE) new_key=ORCH_WATCHERS_PR_SCOPE; consequence="PR watching cannot start" ;;
+      ORCH_V2_WORKER_MODEL) new_key=ORCH_WATCHERS_WORKER_MODEL; consequence="dispatch records omit the worker model" ;;
+      ORCH_V2_PRIMARY_REPO) new_key=ORCH_WATCHERS_PRIMARY_REPO; consequence="dispatch records omit the primary repository" ;;
+      *) new_key=${old_key/ORCH_V2_/ORCH_WATCHERS_} ;;
+    esac
+    say "migrate" "$CONFIG: rename $old_key to $new_key; $consequence until renamed"
+  done
+}
+
+# Adds our hooks, and the status line when none is set. Touches nothing else.
+merge_settings() {
+  local settings="$CLAUDE_DIR/settings.json" has_hook has_guard managed_guard current_guard current filter="." tmp created=0 backup
+  GUARD_BASH_CMD="ORCH_CONFIG=$(printf '%q' "$(placeholder_value ORCH_CONFIG)") python3 ~/.claude/hooks/guard-bash.py"
+  if [ ! -e "$settings" ]; then
+    printf '{}\n' >"$settings"
+    say "created" "$settings"
+    created=1
+  fi
+  if ! jq -e 'def hook_entries: type == "array" and all(type == "object" and ((.hooks? // []) | type == "array" and all(type == "object"))); type == "object" and ((.hooks? // {}) | type == "object") and ((.hooks.SessionStart? // []) | hook_entries) and ((.hooks.PreToolUse? // []) | hook_entries and all((.matcher? == null) or (.matcher | type == "string")))' "$settings" >/dev/null 2>&1; then
+    skip "$settings is not a supported hooks object; add hooks by hand"
+    return
+  fi
+  has_hook=$(jq --arg c "$HOOK_CMD" '[.hooks.SessionStart[]?.hooks[]?.command] | index($c) != null' "$settings")
+  if [ "$has_hook" = true ]; then
+    say "already set" "$settings: SessionStart hook"
+  else
+    filter="$filter | .hooks.SessionStart = ((.hooks.SessionStart // []) + [{hooks: [{type: \"command\", command: \$hook}]}])"
+  fi
+  has_guard=$(jq --arg guard "$GUARD_BASH_CMD" --arg managed "$MANAGED_GUARD_RE" --arg supported "$SUPPORTED_GUARD_RE" --arg literal "'\$HOME/.claude/hooks/guard-bash.py'" --arg quoted '"~/.claude/hooks/guard-bash.py"' "$BASH_MATCHER_JQ [.hooks.PreToolUse[]? | select(.matcher | bash_matcher) | .hooks[]?.command | select(type == \"string\") | select(. == \"python3 ~/.claude/hooks/guard-bash.py\" or . == \$guard or test(\$managed) or (test(\$supported) and (contains(\$literal) | not) and (contains(\$quoted) | not)))] | any" "$settings")
+  managed_guard=$(jq --arg guard "$GUARD_BASH_CMD" --arg managed "$MANAGED_GUARD_RE" "$BASH_MATCHER_JQ [.hooks.PreToolUse[]? | select(.matcher | bash_matcher) | .hooks[]?.command | select(type == \"string\") | select(. == \"python3 ~/.claude/hooks/guard-bash.py\" or (. != \$guard and test(\$managed)))] | any" "$settings")
+  current_guard=$(jq --arg guard "$GUARD_BASH_CMD" "$BASH_MATCHER_JQ [.hooks.PreToolUse[]? | select(.matcher | bash_matcher) | .hooks[]?.command | select(. == \$guard)] | any" "$settings")
+  if [ "$has_guard" = true ]; then
+    if [ "$managed_guard" = true ]; then
+      filter="$filter | .hooks.PreToolUse |= map(.matcher as \$matcher | if (\$matcher | bash_matcher) then (.hooks |= map(if .command == \"python3 ~/.claude/hooks/guard-bash.py\" or ((.command | type) == \"string\" and (.command | test(\$managed))) then .command = \$guard else . end)) else . end)"
+    elif [ "$current_guard" = true ]; then
+      say "already set" "$settings: PreToolUse Bash hook"
+    else
+      filter="$filter | .hooks.PreToolUse = ((.hooks.PreToolUse // []) + [{matcher: \"Bash\", hooks: [{type: \"command\", command: \$guard}]}])"
+      say "added" "$settings: PreToolUse Bash hook ($GUARD_BASH_CMD)"
+    fi
+  else
+    filter="$filter | .hooks.PreToolUse = ((.hooks.PreToolUse // []) + [{matcher: \"Bash\", hooks: [{type: \"command\", command: \$guard}]}])"
+  fi
+  current=$(jq -r '.statusLine.command // empty' "$settings")
+  if [ -z "$current" ]; then
+    filter="$filter | .statusLine = {type: \"command\", command: \$status}"
+  elif [ "$current" = "$STATUSLINE_CMD" ]; then
+    say "already set" "$settings: statusLine"
+  else
+    skip "$settings: statusLine is yours ($current); ours is \"$STATUSLINE_CMD\""
+  fi
+  [ "$filter" != "." ] || return 0
+  if [ "$created" = 0 ]; then
+    backup=$(backup_name "$settings")
+    cp "$settings" "$backup"
+    say "backed up" "$settings -> $backup"
+    n_backup=$((n_backup + 1))
+  fi
+  tmp=$(mktemp)
+  jq --arg hook "$HOOK_CMD" --arg guard "$GUARD_BASH_CMD" --arg status "$STATUSLINE_CMD" --arg managed "$MANAGED_GUARD_RE" "$BASH_MATCHER_JQ $filter" "$settings" >"$tmp"
+  cat "$tmp" >"$settings"
+  rm -f "$tmp"
+  [ "$has_hook" = true ] || say "added" "$settings: SessionStart hook ($HOOK_CMD)"
+  [ "$has_guard" = true ] || say "added" "$settings: PreToolUse Bash hook ($GUARD_BASH_CMD)"
+  [ -n "$current" ] || say "added" "$settings: statusLine ($STATUSLINE_CMD)"
+}
+
+# The linked guard must deny a forbidden command with exit 2 and the attribution reason on stderr.
+verify_guard() {
+  local status=0 reason
+  reason=$(printf '%s' '{"tool_name":"Bash","cwd":"/","tool_input":{"command":"git commit -m \"Co-Authored-By: Claude\""}}' |
+    python3 "$CLAUDE_DIR/hooks/guard-bash.py" 2>&1 >/dev/null) || status=$?
+  case "$status:$reason" in
+    "2:No AI attribution"*) say "verified" "$CLAUDE_DIR/hooks/guard-bash.py denies a forbidden command" ;;
+    *) die "$CLAUDE_DIR/hooks/guard-bash.py did not deny a forbidden command (exit $status: ${reason:-no reason}); Bash is unguarded" ;;
+  esac
+}
+
+# placeholder_value <ORCH_KEY>: the config value with $HOME expanded, else the key's default.
+placeholder_value() {
+  local v
+  if [ "$1" = ORCH_CONFIG ]; then
+    case "$CONFIG" in
+      /*) v=$CONFIG ;;
+      *) v="$(pwd -P)/$CONFIG" ;;
+    esac
+    printf '%s' "$v"
+    return
+  fi
+  v=$(config_value "$1")
+  if [ -z "$v" ]; then
+    case "$1" in
+      ORCH_CLAUDE_DIR) v=$CLAUDE_DIR ;;
+      ORCH_PATH) v="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" ;;
+      ORCH_PYTHON3) v=python3 ;;
+      ORCH_LEGACY_MAP_REPO) v=$(legacy_map_default_repo) ;;
+    esac
+  fi
+  # shellcheck disable=SC2016
+  local braced='${HOME}' plain='$HOME'
+  v=${v//"$braced"/"$HOME"}
+  v=${v//"$plain"/"$HOME"}
+  if [ "$1" = ORCH_PYTHON3 ] && [ -n "$v" ]; then
+    case "$v" in /*) ;; *) v=$(command -v "$v" || true) ;; esac
+  fi
+  printf '%s' "$v"
+}
+
+# render_service <template> <start command>: renders one service template beside its link.
+render_service() {
+  local t=$1 start=$2 dest key value script missing tmp backup unit
+  dest="$CLAUDE_DIR/${t#"$ORCH_REPO"/}"
+  dest=${dest%.template}
+  script="" missing=""
+  for key in $(grep -o '@ORCH_[A-Z0-9_]*@' "$t" | tr -d @ | sort -u); do
+    value=$(placeholder_value "$key")
+    if [ -z "$value" ]; then
+      missing="$missing $key"
+      continue
+    fi
+    value=$(platform_escape_service_value "$value")
+    value=$(printf '%s' "$value" | sed 's/[\\|&]/\\&/g')
+    script="$script s|@$key@|$value|g;"
+  done
+  [ -z "$missing" ] || die "ORCH_WATCHERS_SERVICE=1 needs$missing set in $CONFIG (used by $t)"
+  tmp=$(mktemp)
+  sed "$script" "$t" >"$tmp"
+  if [ -f "$dest" ] && [ ! -L "$dest" ] && cmp -s "$tmp" "$dest"; then
+    rm -f "$tmp"
+    say "already set" "$dest"
+    n_ok=$((n_ok + 1))
+    RENDER_CHANGED=0
+    return
+  fi
+  RENDER_CHANGED=1
+  if [ -L "$dest" ] || [ -e "$dest" ]; then
+    backup=$(backup_name "$dest")
+    mv "$dest" "$backup"
+    say "backed up" "$dest -> $backup"
+    n_backup=$((n_backup + 1))
+  fi
+  mkdir -p "$(dirname "$dest")"
+  mv "$tmp" "$dest"
+  chmod 644 "$dest"
+  while IFS= read -r key; do
+    mkdir -p "$key"
+  done < <(sed -n 's|.*<string>\(/.*\)/[^/]*\.std[a-z]*</string>.*|\1|p' "$dest" | sort -u)
+  unit=$(basename "${dest%.*}")
+  case "$dest" in *.timer) unit=$(basename "$dest") ;; esac
+  say "rendered" "$dest (start: $start $(printf '%q' "$dest"); stop: $(platform_service_stop_hint "$unit"))"
+  n_linked=$((n_linked + 1))
+}
+
+# Renders only the current platform's watcher service templates beside their links.
+render_services() {
+  local t dest found=0 enabled service_dir template_suffix start_hint label
+  SERVICES="" CHANGED_SERVICES=""
+  enabled=$(config_value ORCH_WATCHERS_SERVICE)
+  service_dir=$(platform_service_dir)
+  template_suffix=$(platform_service_suffix)
+  start_hint=$(platform_service_start_hint)
+  while IFS= read -r t; do
+    found=1
+    [ "$enabled" = 1 ] || continue
+    case "$t" in
+      *coord-watcher-audit.* | *coord-watcher-pulls.*)
+        if [ -z "$(config_file_value ORCH_PR_REPOS)" ] || [ -z "$(config_file_value ORCH_PR_AUTHOR)" ]; then
+          label=$(basename "$t" .template)
+          skip "${label%.*} watcher (set ORCH_PR_REPOS and ORCH_PR_AUTHOR in $CONFIG)"
+          continue
+        fi
+        ;;
+    esac
+    render_service "$t" "$start_hint"
+    dest="$CLAUDE_DIR/${t#"$ORCH_REPO"/}"
+    SERVICES="$SERVICES${dest%.template}
+"
+    [ "$RENDER_CHANGED" = 0 ] || CHANGED_SERVICES="$CHANGED_SERVICES${dest%.template}
+"
+  done < <(find "$service_dir" -name "*$template_suffix" -type f 2>/dev/null | LC_ALL=C sort)
+  if [ "$found" = 0 ]; then
+    [ "$enabled" != 1 ] || skip "watcher services (ORCH_WATCHERS_SERVICE=1, but $service_dir has no templates yet)"
+    return 0
+  fi
+  [ "$enabled" = 1 ] || skip "watcher services (set ORCH_WATCHERS_SERVICE=\"1\" in $CONFIG to render them)"
+}
+
+# Registers every rendered watcher service so it runs now and starts at login; removes our services no template renders.
+# When the checkout's revision or the config file differs from the last registration, running watchers restart.
+register_services() {
+  local file current changed status revision marker updated=0 failed=0
+  if [ "$WATCHER_MIGRATION_PENDING" = 1 ]; then
+    [ -z "$SERVICES" ] || skip "watcher service registration (finish the migration above, then run install.sh again)"
+    return 0
+  fi
+  if [ -z "$SERVICES" ]; then
+    if ! platform_remove_stale_services ""; then
+      rm -f "$CLAUDE_DIR/coordinator/watchers/.registered-revision"
+      SERVICES_FAILED=1
+    fi
+    return 0
+  fi
+  current=$(printf '%s' "$SERVICES" | sed 's|.*/||' | LC_ALL=C sort)
+  if ! platform_remove_stale_services "$current"; then
+    rm -f "$CLAUDE_DIR/coordinator/watchers/.registered-revision"
+    skip "watcher service registration (stop the services named above, then run install.sh again)"
+    SERVICES_FAILED=1
+    return 0
+  fi
+  marker="$CLAUDE_DIR/coordinator/watchers/.registered-revision"
+  revision="$(git -C "$ORCH_REPO" rev-parse HEAD 2>/dev/null || echo unknown) $(cksum <"$CONFIG" 2>/dev/null | cut -d' ' -f1)"
+  [ "$(cat "$marker" 2>/dev/null)" = "$revision" ] || updated=1
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    changed=0
+    printf '%s' "$CHANGED_SERVICES" | grep -qxF "$file" && changed=1
+    status=0
+    platform_register_service "$file" "$changed" || status=$?
+    case "$status" in
+      0)
+        say "registered" "$file (runs now and at login)"
+        n_linked=$((n_linked + 1))
+        ;;
+      2)
+        case "$updated:$file" in
+          "1:$CLAUDE_DIR/coordinator/watchers/"*)
+            if platform_restart_service "$file"; then
+              say "restarted" "$file (new code)"
+            else
+              say "not restarted" "$file"
+              failed=1
+            fi
+            ;;
+          *) say "already set" "$file (registered)" ;;
+        esac
+        n_ok=$((n_ok + 1))
+        ;;
+      *)
+        say "not registered" "$file (run: $(platform_service_start_hint) $(printf '%q' "$file"))"
+        failed=1
+        ;;
+    esac
+  done <<<"$SERVICES"
+  if [ "$failed" = 1 ]; then
+    SERVICES_FAILED=1
+    rm -f "$marker"
+  else
+    printf '%s\n' "$revision" >"$marker"
+  fi
+}
+
+# legacy_map_default_repo: the ORCH_GIT_WATCH_REPOS clone named like an ORCH_LEGACY_REPOS repo, else empty.
+legacy_map_default_repo() {
+  local path repo repos
+  repos=$(config_value ORCH_LEGACY_REPOS)
+  for path in $(config_value ORCH_GIT_WATCH_REPOS); do
+    for repo in $repos; do
+      [ "${path##*/}" != "${repo##*/}" ] || { printf '%s' "$path" && return; }
+    done
+  done
+}
+
+# Renders the daily legacy map units of the current platform for registration; off until a repo to map is known.
+render_legacy_map_service() {
+  local t start dest
+  [ "$(config_value ORCH_WATCHERS_SERVICE)" = 1 ] || return 0
+  if [ -z "$(placeholder_value ORCH_LEGACY_MAP_REPO)" ]; then
+    skip "daily legacy map job (set ORCH_LEGACY_MAP_REPO in $CONFIG to the local clone to map)"
+    return 0
+  fi
+  while IFS= read -r t; do
+    start=$(platform_service_start_hint)
+    case "$t" in *.service.template) start="systemctl --user link" ;; esac
+    render_service "$t" "$start"
+    dest="$CLAUDE_DIR/${t#"$ORCH_REPO"/}"
+    SERVICES="$SERVICES${dest%.template}
+"
+    [ "$RENDER_CHANGED" = 0 ] || CHANGED_SERVICES="$CHANGED_SERVICES${dest%.template}
+"
+  done < <(find "$ORCH_REPO/coordinator/service/$PLATFORM" -name '*.template' -type f 2>/dev/null | LC_ALL=C sort)
+}
+
+# write_rendered <dest> <mode>: stdin becomes dest; an equal file stays, anything else in the way is backed up.
+write_rendered() {
+  local dest=$1 mode=$2 tmp backup
+  mkdir -p "$(dirname "$dest")"
+  tmp=$(mktemp "$dest.XXXXXX")
+  cat >"$tmp"
+  chmod "$mode" "$tmp"
+  if [ -f "$dest" ] && [ ! -L "$dest" ] && cmp -s "$tmp" "$dest"; then
+    rm -f "$tmp"
+    chmod "$mode" "$dest"
+    say "already set" "$dest"
+    n_ok=$((n_ok + 1))
+    return
+  fi
+  if [ -L "$dest" ] || [ -e "$dest" ]; then
+    backup=$(backup_name "$dest")
+    mv "$dest" "$backup"
+    say "backed up" "$dest -> $backup"
+    n_backup=$((n_backup + 1))
+  fi
+  mv "$tmp" "$dest"
+  say "rendered" "$dest"
+  n_linked=$((n_linked + 1))
+}
+
+# Registers the PR tabs native messaging host with Chrome when a Chrome profile exists.
+register_chrome_host() {
+  local chrome_dir python launcher id
+  chrome_dir=$(platform_chrome_dir)
+  if [ ! -d "$chrome_dir" ]; then
+    skip "Chrome PR tabs host (no Chrome profile at $chrome_dir)"
+    return 0
+  fi
+  python=$(placeholder_value ORCH_PYTHON3)
+  if [ -z "$python" ]; then
+    skip "Chrome PR tabs host (python3 not found; set ORCH_PYTHON3)"
+    return 0
+  fi
+  id=$(tr -d '[:space:]' <"$ORCH_REPO/chrome/pr-tabs/extension.id")
+  launcher="$CLAUDE_DIR/chrome-pr-tabs/pr-tabs-host"
+  write_rendered "$launcher" 755 < <(
+    printf '#!/bin/bash\nexport PATH=%q\nexport ORCH_CONFIG=%q\nexec %q %q\n' "$(placeholder_value ORCH_PATH)" "$(placeholder_value ORCH_CONFIG)" "$python" "$ORCH_REPO/chrome/pr-tabs/host/pr_tabs_host.py"
+  )
+  write_rendered "$chrome_dir/NativeMessagingHosts/$CHROME_HOST.json" 644 < <(
+    jq -n --arg name "$CHROME_HOST" --arg path "$launcher" --arg origin "chrome-extension://$id/" \
+      '{name: $name, description: "gh access for the PR tabs extension", path: $path, type: "stdio", allowed_origins: [$origin]}'
+  )
+  guide_chrome_load "$chrome_dir" "$id"
+}
+
+# chrome_extension_loaded <chrome dir> <id>: a profile's Preferences or Secure Preferences lists the extension.
+chrome_extension_loaded() {
+  local prefs
+  for prefs in "$1"/*/Preferences "$1"/*/"Secure Preferences"; do
+    [ -f "$prefs" ] || continue
+    jq -e --arg id "$2" '.extensions.settings[$id] != null' "$prefs" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
+# Until a profile has the extension, opens chrome://extensions, copies the extension path and prints the steps.
+guide_chrome_load() {
+  local path="$ORCH_REPO/chrome/pr-tabs/extension" what=paste
+  chrome_extension_loaded "$1" "$2" && return 0
+  platform_gui_session || return 0
+  platform_open_chrome_extensions || return 0
+  printf '%s' "$path" | platform_copy_to_clipboard || what=$path
+  say "load once" "$(platform_load_unpacked_steps "$what")"
+}
+
+claude_md_hint() {
+  if grep -q "Agent orchestration: architect, never worker" "$CLAUDE_DIR/CLAUDE.md" 2>/dev/null; then
+    say "already set" "$CLAUDE_DIR/CLAUDE.md: orchestration sections"
+  else
+    say "paste" "$ORCH_REPO/snippets/CLAUDE.md.snippet into $CLAUDE_DIR/CLAUDE.md"
+  fi
+}
+
+run_env() {
+  local envs="" d answer
+  if [ "$ENV_GIVEN" = 0 ]; then
+    ENV_NAME=$(config_value ORCH_ENV)
+  fi
+  for d in "$ORCH_REPO"/env/*/; do
+    [ -f "$d/install.sh" ] && envs="$envs $(basename "$d")"
+  done
+  if [ -z "$ENV_NAME" ] && [ -t 0 ] && [ -t 1 ]; then
+    printf 'Environment to set up (%s, none) [none]: ' "${envs# }"
+    read -r answer || answer=""
+    ENV_NAME=${answer:-none}
+  fi
+  if [ -z "$ENV_NAME" ] || [ "$ENV_NAME" = none ]; then
+    skip "env step (choose one with --env <name>:$envs)"
+    return
+  fi
+  [ -f "$ORCH_REPO/env/$ENV_NAME/install.sh" ] || die "unknown env: $ENV_NAME (available:$envs)"
+  ENV_DIR="$ORCH_REPO/env/$ENV_NAME"
+  # shellcheck disable=SC1090
+  (
+    . "$ENV_DIR/install.sh"
+    env_check
+    env_install
+  )
+}
+
+remove_stale_links
+move_skill_backups
+link_shared_files
+write_manifest
+personal_config
+merge_settings
+verify_guard
+run_env
+ask_config_keys
+render_services
+render_legacy_map_service
+register_chrome_host
+platform_migrate_legacy_watchers
+register_services
+claude_md_hint
+
+echo
+# shellcheck disable=SC2031
+if [ "$SERVICES_FAILED" = 1 ]; then
+  # shellcheck disable=SC2031
+  echo "Failed: $n_linked linked, $n_ok already linked, $n_backup backed up, $n_skipped skipped; a watcher service was not removed, registered or restarted (see above), run install.sh again." >&2
+  exit 1
+fi
+# shellcheck disable=SC2031
+echo "Done: $n_linked linked, $n_ok already linked, $n_backup backed up, $n_skipped skipped."

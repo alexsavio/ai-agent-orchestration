@@ -1,0 +1,70 @@
+# Installer details
+
+How `install.sh` works, what it refuses to do, and how to fix its errors. The short version is in the [README](../README.md#install-and-update).
+
+## Local edits and "REFUSED"
+
+The clone and the Radar checkout are never updated over local work. With uncommitted edits or commits that are not on origin, the installer prints `REFUSED: … has local changes`, lists them, and stops. It never stashes or resets. Changes go through a PR: commit them to a branch, open a PR against `main`,. After it merges, run the install command again.
+
+## What the installer does
+
+1. Checks `gh` is installed and logged in (prints the fix and stops when not), then `git` and `jq`.
+2. Clones this repo into `ORCH_REPO_PATH` (default `~/.claude/ai-agent-orchestration`), or fast-forwards it. A clone with uncommitted edits or commits that are not on origin is never updated: it prints them and stops. Changes go through a PR. It never stashes or resets.
+3. Runs the `install.sh` of that clone, which symlinks the files in the [file table](#files-linked-into-claude) into `~/.claude`. Each line says what happened: `linked`, `already linked`, `backed up` (a real file in the way moves to `~/.claude/backups/<timestamp>/` under its path relative to `~/.claude` (a file elsewhere in your home under `home/`), with `.1`, `.2` … when that name is taken; nothing is deleted), `moved backup` (a `<name>.bak.<timestamp>` an earlier installer left in `~/.claude/skills`, where Claude would load it as a second skill, moves to the backups directory), `skipped`, `removed stale` (a link this installer made, listed in `~/.claude/.orch-links`, whose file left the repo). One run at a time: `~/.claude/.orch-install.lock` is a symlink to the running installer's pid; a second run stops while that pid is alive, and a lock whose process is gone is taken over. Files under `coordinator/` (including `watchers/` with its tests, fixtures and platform service templates) are linked one by one into real directories, because the watchers write state next to themselves; a symlinked directory there (or any directory link below `~/.claude` into the clone) is backed up and replaced by a real one. The watchers state directories `~/.claude/coordinator/watchers/bindings/` and `prod-context/` are created empty; state never lands in the clone. The legacy `~/.claude/commands/{architect,coordinate}.md` move to a backup.
+4. Creates `~/.claude/orchestration.env` from the example on the first run only, and lists the keys still to fill and keys new in the example.
+5. Adds to `~/.claude/settings.json` (backup first): the SessionStart hook, the PreToolUse Bash guard, and the status line when you have none. An existing guard entry counts only when it runs the guard through `python3`; a bare path to `guard-bash.py` gets a working `python3` entry added. Nothing else in the file changes; a second run adds nothing. Then it feeds the linked guard a forbidden command and stops with an error unless the guard denies it (exit 2 with the attribution reason on stderr). When the guard fails open, it appends a line with the time, the error and the first 200 characters of the command to `~/.claude/hooks/guard-bash.log`.
+6. Runs the env adapter (`--env <name>`, else `ORCH_ENV`, else a prompt on a terminal; nothing without a terminal), then asks on a terminal for the empty keys (see [First run](../README.md#first-run)). See [`env/README.md`](../env/README.md).
+7. With `ORCH_WATCHERS_SERVICE="1"`: renders the current platform service templates beside their links (macOS plist or Linux systemd user unit) and registers every watcher so it runs now and starts at login. The daily legacy map job is rendered only when `ORCH_LEGACY_MAP_REPO` (or a matching `ORCH_GIT_WATCH_REPOS` clone) names a clone. On macOS it runs at load; on Linux its timer fires daily at 06:00 and catches up a missed run; the audit and pulls watchers only once `ORCH_PR_REPOS` and `ORCH_PR_AUTHOR` are set. macOS: the plist is copied (not linked) into `~/Library/LaunchAgents`, where launchd reads it at login, then booted out and bootstrapped when the copy changed or the job is not loaded. Linux: `systemctl --user enable --now` for each unit (the legacy map's service is linked and its timer enabled). Our LaunchAgents or user units that this run did not render, such as `com.combinaut.coord-*-v2*` or a legacy map without a repo, are stopped and deleted. When the checkout's revision or the config file differs from the last registration (`coordinator/watchers/.registered-revision`), every running watcher restarts onto the new code (`launchctl kickstart -k` or `systemctl --user restart`); the revision is recorded only when every service registered or restarted, so a failure is retried on the next run. A re-run without changes touches nothing, except that a stopped watcher is started again. A changed macOS plist replaces the installed copy only after the old job is unloaded. Turning `ORCH_WATCHERS_SERVICE` off stops and removes our registered services. While old macOS watcher jobs still need the printed migration commands, nothing is registered. Off by default.
+8. With `--env herdr`: a Herdr 0.9 or newer that is already installed is kept as it is. The Herdr on your `PATH` is the one used, even when an old copy sits in `~/.local/bin`. Without Herdr, it installs it using its [official installer](https://herdr.dev/docs/install/) into `~/.local/bin`, and upgrades an old one there; an old Herdr installed elsewhere, or one whose version cannot be read, stops the run with a fix. It installs missing mise using its [official installer](https://mise.jdx.dev/getting-started.html), installs `env/herdr/node.pin` through mise, and links the pinned combinaut Radar fork. Foreign Radar installations are replaced. Herdr's `config.toml` is compared outside Radar's managed blocks before and after Radar starts; when it changed there, the previous file is saved to the backups directory and a `WARNING` line names it.
+
+It never edits `CLAUDE.md`; it tells you to paste `snippets/CLAUDE.md.snippet` when its sections are missing.
+
+## Files linked into `~/.claude`
+
+| File | Linked to | What it does |
+|---|---|---|
+| `skills/coordinate/` | `~/.claude/skills/coordinate` (directory link) | `/coordinate`: the Coordinator's operating model |
+| `skills/architect/` | `~/.claude/skills/architect` (directory link) | `/architect`: the architect's operating model |
+| `coordinator/watchers/coord-audit-watch.sh` | `~/.claude/coordinator/watchers/` | PR problems, blocked workers, stale heavy slots, git pile-ups |
+| `coordinator/watchers/context-watch.sh` | `~/.claude/coordinator/watchers/` | Writes context alerts for the inbox notifier |
+| `coordinator/watchers/coord-host-watch.sh` | `~/.claude/coordinator/watchers/` | Host pressure: memory, swap, processes, open files, load (macOS and Linux) |
+| `coordinator/watchers/coord-hog-watch.sh` | `~/.claude/coordinator/watchers/` | Logs big processes and long or big `git` processes (macOS and Linux) |
+| `coordinator/watchers/coord-lib.sh` | `~/.claude/coordinator/watchers/` | Config loading and loud failures, sourced by the watchers |
+| `statusline-command.sh` | `~/.claude/` | Status line; also writes tokens used to `~/.claude/context-usage/<session-id>.tokens` and remaining context percentage to `<session-id>` |
+| `heavy-slot` | `~/.local/bin/heavy-slot` | Atomic shared cap for heavy jobs: `heavy-slot take <architect>-<job> -- <command>`; `count` and `list` inspect slots |
+| `worker-reports/machine-rules.md` | `~/.claude/worker-reports/` | Template of machine rules to paste into every worker brief |
+| `hooks/orch-update-check.sh` | `~/.claude/hooks/` | SessionStart hook: says when this setup is out of date |
+| `hooks/guard-bash.py` | `~/.claude/hooks/` | PreToolUse Bash guard: blocks unsafe Git commands, including every `git grep` (even path-scoped) in configured big repos |
+| `coordinator/legacy-map.sh` | `~/.claude/coordinator/` | Writes `legacy-map.tsv` (old-style front-end files on the configured project’s `origin/main`) for the architect's legacy check |
+| `coordinator/service/<platform>/*.template` | linked like the rest of `coordinator/`; with `ORCH_WATCHERS_SERVICE=1` and a repo to map also rendered beside the link | daily legacy map job (launchd plist, or systemd service and timer), registered for login by the installer; the repo defaults to the `ORCH_GIT_WATCH_REPOS` clone named like an `ORCH_LEGACY_REPOS` repo |
+| `coordinator/watchers/` | `~/.claude/coordinator/watchers/` (file by file; `bindings/` and `prod-context/` created empty) | Coordinator watchers, see [`coordinator/watchers/README.md`](../coordinator/watchers/README.md) |
+| `coordinator/watchers/service/<platform>/*.template` | linked like the rest of `coordinator/`; with `ORCH_WATCHERS_SERVICE=1` also rendered to a `.plist` or `.service` beside the link | platform watcher services, registered by the installer to run now and at login |
+| `env/<name>/install.sh` | not linked | Env adapters, see [`env/README.md`](../env/README.md) |
+| `config/orchestration.env.example` | `~/.claude/orchestration.env` (copied once) | The one settings file |
+| `snippets/CLAUDE.md.snippet` | not installed | Two sections to paste into your own `~/.claude/CLAUDE.md` |
+| `chrome/pr-tabs/host/pr_tabs_host.py` | `~/.claude/chrome-pr-tabs/pr-tabs-host` (rendered launcher) and Chrome's `NativeMessagingHosts/com.combinaut.pr_tabs.json`, only when a Chrome profile exists | Native messaging host for the [Chrome PR tabs](pr-tabs.md) extension |
+
+## Troubleshooting
+
+The installer prints the fix with each error.
+
+| Message | Fix |
+|---|---|
+| `Download failed. Fix: install gh (https://cli.github.com) && gh auth login` | Install `gh`, log in, and run the command again. Check the account can read this repo. |
+| `gh is not logged in. Fix: gh auth login` | `gh auth login`, then run again. |
+| `git not found. Fix: …` | macOS: `xcode-select --install`. Debian/Ubuntu: `sudo apt-get install git`. |
+| `jq not found. Fix: …` | macOS: `brew install jq`. Debian/Ubuntu: `sudo apt-get install jq`. |
+| `curl not found. Fix: …` | macOS: `brew install curl`. Debian/Ubuntu: `sudo apt-get install curl`. |
+| `python3 not found. Fix: …` | macOS: `brew install python3`. Debian/Ubuntu: `sudo apt-get install python3`. |
+| `cannot download …` | Check network access to [Herdr](https://herdr.dev/install.sh) and [mise](https://mise.run), then run again. |
+| `Herdr install failed` | Check the official installer output and run again. Herdr must report 0.9 or newer. |
+| `mise Node version does not match …` | Install the version specified in `env/herdr/node.pin` with mise, then run again. Radar’s Node version is pinned in `env/herdr/node.pin`. |
+| `REFUSED: … has local changes` | Commit to a branch and open a PR, then run again. See above. |
+| `… exists but is not a git clone. Move it away or set ORCH_REPO_PATH.` | Move the folder aside, or point `ORCH_REPO_PATH` (or `ORCH_RADAR_PATH`) elsewhere. |
+| `… has no upstream branch. Fix: git -C <dir> switch main` | Run the printed command. |
+| `… follows <x>, not a branch on origin. Fix: git -C <dir> branch -u origin/main` | Run the printed command. |
+| `another install.sh is running (pid …)` | Wait for it to end, then run again. |
+| `cannot take …lock` | If no install is running, remove the lock file it names. |
+| `pinned commit … not found … Fix: git -C <dir> remote set-url origin …` | Run the printed command. |
+| `ERROR: …` from a watcher, exit status 2 | A setting or command is missing; fill the key in `~/.claude/orchestration.env`. |
+| `setup out of date, run install.sh` at session start | Run the install command again. |

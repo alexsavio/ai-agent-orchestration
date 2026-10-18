@@ -1,0 +1,709 @@
+#!/usr/bin/env bats
+# shellcheck disable=SC2154 # bats provides status and output after run.
+
+load test_helper
+
+# on_tty <answers> <args...>: runs the clone installer on a pseudo-terminal, typing one answer per prompt.
+on_tty() {
+  run env PTY_ANSWERS="$1" python3 "$ROOT/tests/pty_run.py" /bin/bash "$CLONE/install.sh" "${@:2}"
+}
+
+config_line() { grep "^$1=" "$HOME/.claude/orchestration.env"; }
+
+foreign_config() {
+  mkdir -p "$HOME/.config/herdr"
+  cat >"$HOME/.config/herdr/config.toml" <<'EOF'
+# my own settings
+[keys]
+prefix = "ctrl-a"
+
+# >>> my-plugin block
+[plugins.mine]
+enabled = true
+# <<< my-plugin block
+
+[ui]
+sidebar = "left"
+EOF
+  cp "$HOME/.config/herdr/config.toml" "$TMP/config.toml.orig"
+}
+
+@test "a replaced skill directory is backed up outside the skills directory" {
+  fresh_install
+  rm "$HOME/.claude/skills/architect"
+  mkdir "$HOME/.claude/skills/architect"
+  printf mine >"$HOME/.claude/skills/architect/SKILL.md"
+  install_ok --env none
+  [ -L "$HOME/.claude/skills/architect" ]
+  [ "$(find "$HOME/.claude/skills" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 2 ]
+  for backup in "$HOME"/.claude/backups/*/skills/architect/SKILL.md; do [ "$(cat "$backup")" = mine ]; done
+}
+
+@test "skill backups from an earlier installer move out of the skills directory" {
+  fresh_install
+  mkdir "$HOME/.claude/skills/architect.bak.20260101000000" "$HOME/.claude/skills/architect.bak.20260101000000.1"
+  mkdir "$HOME/.claude/skills/mine.bak.notes" "$HOME/.claude/skills/mine.bak.20260101000000.notes"
+  install_ok --env none
+  contains "$output" 'moved backup'
+  [ ! -e "$HOME/.claude/skills/architect.bak.20260101000000" ]
+  [ ! -e "$HOME/.claude/skills/architect.bak.20260101000000.1" ]
+  [ -d "$HOME/.claude/skills/mine.bak.notes" ]
+  [ -d "$HOME/.claude/skills/mine.bak.20260101000000.notes" ]
+  [ "$(find "$HOME"/.claude/backups/*/skills -mindepth 1 -maxdepth 1 -name 'architect.bak.*' | wc -l | tr -d ' ')" = 2 ]
+}
+
+@test "a symlinked skills directory is not scanned for old backups" {
+  fresh_install
+  mkdir -p "$TMP/shared-skills/mine.bak.20260101000000"
+  mv "$HOME/.claude/skills" "$TMP/old-skills"
+  ln -s "$TMP/shared-skills" "$HOME/.claude/skills"
+  install_ok --env none
+  [ -d "$TMP/shared-skills/mine.bak.20260101000000" ]
+}
+
+@test "settings backup lands under the backups directory" {
+  fresh_install
+  printf '%s\n' '{"theme":"dark"}' >"$HOME/.claude/settings.json"
+  install_ok --env none
+  for backup in "$HOME"/.claude/backups/*/settings.json; do [ "$(cat "$backup")" = '{"theme":"dark"}' ]; done
+  [ -z "$(find "$HOME/.claude" -maxdepth 1 -name 'settings.json.bak*')" ]
+}
+
+@test "first run on a terminal asks for empty keys and writes the answers" {
+  fresh_install
+  mkdir -p "$HOME/.codex"
+  printf 'model = "codex-fixture"\n' >"$HOME/.codex/config.toml"
+  on_tty $'owner/a owner/b\n\n\nsmart-fixture\n\n-' --env none
+  [ "$status" -eq 0 ]
+  contains "$output" 'ORCH_PR_AUTHOR (- leaves it empty) [octo-login]: '
+  stub=$(cd "$BATS_SERVICE_STUB_BIN" && pwd -P)/herdr
+  contains "$output" "ORCH_HERDR_BIN (- leaves it empty) [$stub]: "
+  contains "$output" 'ORCH_HERDR_SOCKET (- leaves it empty) []: '
+  [ "$(config_line ORCH_PR_REPOS)" = 'ORCH_PR_REPOS="owner/a owner/b"' ]
+  [ "$(config_line ORCH_PR_AUTHOR)" = 'ORCH_PR_AUTHOR="octo-login"' ]
+  [ "$(config_line ORCH_CODEX_WORKER_MODEL)" = 'ORCH_CODEX_WORKER_MODEL="codex-fixture"' ]
+  [ "$(config_line ORCH_CODEX_SMART_MODEL)" = 'ORCH_CODEX_SMART_MODEL="smart-fixture"' ]
+  [ "$(config_line ORCH_HERDR_BIN)" = "ORCH_HERDR_BIN=\"$stub\"" ]
+  [ "$(config_line ORCH_HERDR_SOCKET)" = 'ORCH_HERDR_SOCKET=""' ]
+}
+
+@test "a dash empties a placeholder key" {
+  fresh_install
+  on_tty $'-\n-\n-\n-\n-\n-' --env none
+  [ "$status" -eq 0 ]
+  [ "$(config_line ORCH_CODEX_WORKER_MODEL)" = 'ORCH_CODEX_WORKER_MODEL=""' ]
+  [ "$(config_line ORCH_CODEX_SMART_MODEL)" = 'ORCH_CODEX_SMART_MODEL=""' ]
+}
+
+@test "an answer replaces every assignment of its key" {
+  fresh_install
+  printf '%s\n' 'ORCH_HERDR_BIN="<later-placeholder>"' >>"$HOME/.claude/orchestration.env"
+  on_tty $'-\n-\n-\n-\n/opt/herdr/bin/herdr\n-' --env none
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^ORCH_HERDR_BIN=' "$HOME/.claude/orchestration.env")" = 1 ]
+  # shellcheck disable=SC1090,SC1091
+  [ "$(. "$HOME/.claude/orchestration.env" && printf '%s' "$ORCH_HERDR_BIN")" = /opt/herdr/bin/herdr ]
+}
+
+@test "an answer wins over an empty exported value for the rest of the run" {
+  fresh_install
+  printf '%s\n' 'ORCH_WATCHERS_SERVICE="1"' 'ORCH_PR_AUTHOR="a"' 'ORCH_PR_REPOS="o/r"' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' 'ORCH_HERDR_BIN=""' 'ORCH_HERDR_SOCKET=""' >"$HOME/.claude/orchestration.env"
+  ORCH_HERDR_BIN="" ORCH_HERDR_SOCKET="" LAUNCHCTL_NOT_LOADED=1 on_tty "$BIN/herdr"$'\n/tmp/herdr-fixture.sock\n' --env none
+  [ "$status" -eq "$(unloaded_status)" ]
+  contains "$output" 'rendered'
+  not_contains "$output" 'needs'
+}
+
+@test "an empty exported value does not hide a filled key" {
+  fresh_install
+  sed -i.orig 's|^ORCH_PR_AUTHOR=.*|ORCH_PR_AUTHOR="mine"|' "$HOME/.claude/orchestration.env"
+  ORCH_PR_AUTHOR="" on_tty $'-\n-\n-\n-\n-\n-' --env none
+  [ "$status" -eq 0 ]
+  not_contains "$output" 'ORCH_PR_AUTHOR ('
+  [ "$(config_line ORCH_PR_AUTHOR)" = 'ORCH_PR_AUTHOR="mine"' ]
+}
+
+@test "the notifier wrapper loads the config with shell semantics and the environment wins" {
+  cfg="$TMP/alert.env"
+  # shellcheck disable=SC2016 # Evaluated when the wrapper sources the file.
+  printf '%s\n' 'export ORCH_ALERT_DIGEST_S=60' 'ORCH_ALERT_QUIET_S=$((30 * 60))' 'ORCH_ALERT_ESCALATE_RATIO="3"' >"$cfg"
+  printf '#!/bin/sh\nenv | grep "^ORCH_ALERT_" | sort\necho "args: $*"\n' >"$TMP/fake-python"
+  chmod +x "$TMP/fake-python"
+  run env ORCH_CONFIG="$cfg" ORCH_PYTHON3="$TMP/fake-python" ORCH_ALERT_ESCALATE_RATIO=2 "$ROOT/coordinator/watchers/notify-inbox.sh" --deliver
+  [ "$status" -eq 0 ]
+  contains "$output" 'ORCH_ALERT_DIGEST_S=60'
+  contains "$output" 'ORCH_ALERT_QUIET_S=1800'
+  contains "$output" 'ORCH_ALERT_ESCALATE_RATIO=2'
+  contains "$output" "args: $ROOT/coordinator/watchers/notify-inbox.py --deliver"
+}
+
+@test "rendered inbox services start the config-loading wrapper" {
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  install_ok --env none
+  for unit in "$HOME"/.claude/coordinator/watchers/service/*/com.combinaut.coord-watcher-inbox-context.*; do
+    case "$unit" in *.template) continue ;; esac
+    contains "$(cat "$unit")" "$HOME/.claude/coordinator/watchers/notify-inbox.sh"
+    not_contains "$(cat "$unit")" 'notify-inbox.py'
+  done
+}
+
+@test "an answer replaces exported assignments of its key" {
+  fresh_install
+  printf '%s\n' '  export ORCH_HERDR_BIN="<later-placeholder>"' >>"$HOME/.claude/orchestration.env"
+  on_tty $'-\n-\n-\n-\n/opt/herdr/bin/herdr\n-' --env none
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'ORCH_HERDR_BIN=' "$HOME/.claude/orchestration.env")" = 1 ]
+  # shellcheck disable=SC1090,SC1091
+  [ "$(. "$HOME/.claude/orchestration.env" && printf '%s' "$ORCH_HERDR_BIN")" = /opt/herdr/bin/herdr ]
+}
+
+@test "printed service start commands run as printed when the path has a space" {
+  use_home "$TMP/home with space"
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  LAUNCHCTL_NOT_LOADED=1 on_tty '' --env none
+  [ "$status" -eq "$(unloaded_status)" ]
+  # shellcheck disable=SC1003 # A literal backslash in the expected text.
+  contains "$output" 'home\ with\ space/.claude/coordinator/watchers/service/'
+  line=$(printf '%s\n' "$output" | tr -d '\r' | sed -n 's/^rendered .*(start: \(.*\); stop: .*)$/\1/p' | head -n 1)
+  eval "set -- $line"
+  case "$1" in
+    launchctl) [ "$#" -eq 4 ] ;;
+    systemctl) [ "$#" -eq 5 ] ;;
+    *) false ;;
+  esac
+}
+
+@test "a Herdr found through a relative PATH entry is offered as an absolute path" {
+  fresh_install
+  hide_herdr
+  mkdir -p "$TMP/rel-bin"
+  printf '#!/bin/sh\necho "herdr 0.9.1"\n' >"$TMP/rel-bin/herdr"
+  chmod +x "$TMP/rel-bin/herdr"
+  cd "$TMP"
+  PATH="rel-bin:$PATH" on_tty $'-\n-\n-\n-\n\n-' --env none
+  [ "$status" -eq 0 ]
+  contains "$output" "ORCH_HERDR_BIN (- leaves it empty) [$(cd "$TMP/rel-bin" && pwd -P)/herdr]: "
+  [ "$(config_line ORCH_HERDR_BIN)" = "ORCH_HERDR_BIN=\"$(cd "$TMP/rel-bin" && pwd -P)/herdr\"" ]
+}
+
+@test "macOS migration commands quote paths with spaces" {
+  [ "$(uname -s)" = Darwin ] || skip "only the macOS adapter prints migration commands"
+  use_home "$TMP/home with space"
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  install_ok --env none
+  # shellcheck disable=SC1003 # A literal backslash in the expected text.
+  contains "$output" 'home\ with\ space/.claude/ai-agent-orchestration/install.sh'
+  printf '%s\n' "$output" | grep -E "^  launchctl bootstrap gui/$(id -u) [^ ]*home\\\\ with\\\\ space/\.claude/coordinator/watchers/service/macos/" >/dev/null
+}
+
+@test "the pty helper fails when it times out" {
+  run env PTY_TIMEOUT=1 python3 "$ROOT/tests/pty_run.py" /bin/sleep 5
+  [ "$status" -eq 124 ]
+  contains "$output" 'pty_run: timeout'
+}
+
+@test "filled keys are never asked or overwritten" {
+  fresh_install
+  sed -i.orig 's|^ORCH_PR_REPOS=.*|ORCH_PR_REPOS="mine/kept"|; s|^ORCH_CODEX_SMART_MODEL=.*|ORCH_CODEX_SMART_MODEL="kept-model"|' "$HOME/.claude/orchestration.env"
+  on_tty $'-\n-\n-\n-' --env none
+  [ "$status" -eq 0 ]
+  not_contains "$output" 'ORCH_PR_REPOS ('
+  not_contains "$output" 'ORCH_CODEX_SMART_MODEL ('
+  [ "$(config_line ORCH_PR_REPOS)" = 'ORCH_PR_REPOS="mine/kept"' ]
+  [ "$(config_line ORCH_CODEX_SMART_MODEL)" = 'ORCH_CODEX_SMART_MODEL="kept-model"' ]
+}
+
+@test "answers with shell characters are written literally" {
+  fresh_install
+  # shellcheck disable=SC2016 # The literal value is the point.
+  value='own"er/$HOME`x`\a'
+  on_tty "$value"$'\n-\n-\n-\n-\n-' --env none
+  [ "$status" -eq 0 ]
+  # shellcheck disable=SC1090,SC1091
+  [ "$(. "$HOME/.claude/orchestration.env" && printf '%s' "$ORCH_PR_REPOS")" = "$value" ]
+}
+
+@test "a run without a terminal never asks and leaves the config alone" {
+  fresh_install
+  before=$(cat "$HOME/.claude/orchestration.env")
+  install_ok --env none
+  not_contains "$output" ']: '
+  contains "$output" 'fill in'
+  contains "$output" 'ORCH_HERDR_BIN ORCH_HERDR_SOCKET'
+  [ "$(cat "$HOME/.claude/orchestration.env")" = "$before" ]
+}
+
+@test "watcher services register for login, a re-run changes nothing and stale services go" {
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  use_service_state
+  case "$(uname -s)" in
+    Darwin)
+      dir="$HOME/Library/LaunchAgents" suffix=plist calls=$LAUNCHCTL_CALLS state=$LAUNCHCTL_STATE PLATFORM_DIR=macos
+      mkdir -p "$dir"
+      printf stale >"$dir/com.combinaut.coord-watcher-gone.plist"
+      printf stale >"$dir/com.combinaut.coord-watcher-gone.plist"
+      ;;
+    Linux)
+      dir="$HOME/.config/systemd/user" suffix=service calls=$SYSTEMCTL_CALLS state=$SYSTEMCTL_STATE PLATFORM_DIR=linux
+      mkdir -p "$dir"
+      printf stale >"$dir/com.combinaut.coord-context-v2.service"
+      printf stale >"$dir/com.combinaut.coord-watcher-gone.service"
+      ;;
+  esac
+  printf 'other\n' >"$dir/com.example.other.$suffix"
+  on_tty '' --env none
+  [ "$status" -eq 0 ]
+  expected=$(find "$ROOT/coordinator/watchers/service/$PLATFORM_DIR" -name '*.template' | sed 's|.*/||; s|\.template$||' | LC_ALL=C sort)
+  [ "$(printf '%s\n' "$expected" | wc -l)" -ge 8 ]
+  case "$(uname -s)" in
+    Darwin)
+      [ "$(find "$dir" -name 'com.combinaut.coord-*' | sed 's|.*/||' | LC_ALL=C sort)" = "$expected" ]
+      for name in $expected; do
+        cmp -s "$dir/$name" "$HOME/.claude/coordinator/watchers/service/macos/$name"
+      done
+      ;;
+    Linux)
+      [ ! -e "$dir/com.combinaut.coord-context-v2.service" ] && [ ! -e "$dir/com.combinaut.coord-watcher-gone.service" ]
+      contains "$(cat "$calls")" 'disable --now com.combinaut.coord-context-v2.service'
+      ;;
+  esac
+  [ "$(LC_ALL=C sort "$state" | sed 's/\.service$//')" = "$(printf '%s\n' "$expected" | sed 's/\.[a-z]*$//')" ]
+  [ -f "$dir/com.example.other.$suffix" ]
+  before=$(cat "$calls")
+  on_tty '' --env none
+  [ "$status" -eq 0 ]
+  not_contains "$(sed "1,$(printf '%s\n' "$before" | wc -l)d" "$calls")" 'bootstrap'
+  not_contains "$(sed "1,$(printf '%s\n' "$before" | wc -l)d" "$calls")" 'enable --now'
+  not_contains "$output" 'registered      '
+  not_contains "$output" 'restarted'
+  [ "$(printf '%s\n' "$output" | tr -d '\r' | grep -c '(registered)$')" -eq "$(printf '%s\n' "$expected" | wc -l)" ]
+  printf 'older-revision\n' >"$HOME/.claude/coordinator/watchers/.registered-revision"
+  before=$(wc -l <"$calls")
+  on_tty '' --env none
+  [ "$status" -eq 0 ]
+  restarts=$(sed "1,${before}d" "$calls" | grep -E '^kickstart -k gui/[0-9]+/|^--user restart ' | sed 's|.*/||; s|^--user restart ||' | LC_ALL=C sort)
+  [ "$restarts" = "$(printf '%s\n' "$expected" | sed 's/\.plist$//')" ]
+  [ "$(printf '%s\n' "$output" | tr -d '\r' | grep -c '^restarted ')" -eq "$(printf '%s\n' "$expected" | wc -l)" ]
+  [ "$(cut -d' ' -f1 "$HOME/.claude/coordinator/watchers/.registered-revision")" = "$(git -C "$HOME/.claude/ai-agent-orchestration" rev-parse HEAD)" ]
+  printf '%s\n' 'ORCH_ALERT_QUIET_S="900"' >>"$HOME/.claude/orchestration.env"
+  on_tty '' --env none
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | tr -d '\r' | grep -c '^restarted ')" -eq "$(printf '%s\n' "$expected" | wc -l)" ]
+}
+
+@test "a watcher that fails to restart onto new code makes install exit non-zero" {
+  fresh_install
+  [ "$status" -eq 0 ]
+  use_service_state
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  on_tty '' --env none
+  [ "$status" -eq 0 ]
+  printf 'older-revision\n' >"$HOME/.claude/coordinator/watchers/.registered-revision"
+  LAUNCHCTL_KICKSTART_FAIL=1 SYSTEMCTL_RESTART_FAIL=1 on_tty '' --env none
+  [ "$status" -eq 1 ]
+  contains "$output" 'not restarted'
+  contains "$output" 'Failed:'
+  not_contains "$output" 'Done:'
+}
+
+@test "a failed registration keeps the revision so the next run retries" {
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  printf 'current\n' >"$HOME/.claude/coordinator/watchers/.registered-revision"
+  LAUNCHCTL_NOT_LOADED=1 SYSTEMCTL_FAIL=1 on_tty '' --env none
+  [ "$status" -eq 1 ]
+  contains "$output" 'not registered'
+  [ ! -e "$HOME/.claude/coordinator/watchers/.registered-revision" ]
+}
+
+@test "a stale service that will not stop keeps its file and the revision" {
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  use_service_state
+  case "$(uname -s)" in
+    Darwin)
+      stale="$HOME/Library/LaunchAgents/com.combinaut.coord-watcher-gone.plist"
+      printf '%s\n' com.combinaut.coord-watcher-gone >"$LAUNCHCTL_STATE"
+      use_stuck_service com.combinaut.coord-watcher-gone ""
+      ;;
+    Linux)
+      stale="$HOME/.config/systemd/user/com.combinaut.coord-context-v2.service"
+      printf '%s\n' com.combinaut.coord-context-v2.service >"$SYSTEMCTL_STATE"
+      use_stuck_service "" com.combinaut.coord-context-v2.service
+      ;;
+  esac
+  mkdir -p "$(dirname "$stale")"
+  printf stale >"$stale"
+  on_tty '' --env none
+  [ "$status" -eq 1 ]
+  contains "$output" 'not removed'
+  [ -f "$stale" ]
+  [ ! -e "$HOME/.claude/coordinator/watchers/.registered-revision" ]
+  contains "$output" 'watcher service registration (stop the services named above'
+  not_contains "$(cat "$LAUNCHCTL_CALLS" "$SYSTEMCTL_CALLS" 2>/dev/null)" 'bootstrap gui'
+  not_contains "$(cat "$LAUNCHCTL_CALLS" "$SYSTEMCTL_CALLS" 2>/dev/null)" 'enable --now'
+}
+
+@test "a stopped watcher starts again, a stuck one keeps its old copy, and turning services off removes them" {
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  use_service_state
+  on_tty '' --env none
+  [ "$status" -eq 0 ]
+  case "$(uname -s)" in
+    Darwin)
+      dir="$HOME/Library/LaunchAgents" calls=$LAUNCHCTL_CALLS
+      grep -vxF com.combinaut.coord-watcher-host "$LAUNCHCTL_STATE" >"$TMP/state" && mv "$TMP/state" "$LAUNCHCTL_STATE"
+      before=$(wc -l <"$calls")
+      on_tty '' --env none
+      contains "$(sed "1,${before}d" "$calls")" "bootstrap gui/$(id -u) $dir/com.combinaut.coord-watcher-host.plist"
+      printf 'old copy\n' >"$dir/com.combinaut.coord-watcher-hog.plist"
+      LAUNCHCTL_STUCK=com.combinaut.coord-watcher-hog on_tty '' --env none
+      contains "$output" 'not registered'
+      [ "$(cat "$dir/com.combinaut.coord-watcher-hog.plist")" = 'old copy' ]
+      ;;
+    Linux)
+      dir="$HOME/.config/systemd/user" calls=$SYSTEMCTL_CALLS
+      before=$(wc -l <"$calls")
+      SYSTEMCTL_INACTIVE=com.combinaut.coord-watcher-host.service on_tty '' --env none
+      contains "$(sed "1,${before}d" "$calls")" "enable --now $HOME/.claude/coordinator/watchers/service/linux/com.combinaut.coord-watcher-host.service"
+      mkdir -p "$dir"
+      : >"$dir/com.combinaut.coord-watcher-host.service"
+      ;;
+  esac
+  sed 's/^ORCH_WATCHERS_SERVICE=.*/ORCH_WATCHERS_SERVICE="0"/' "$HOME/.claude/orchestration.env" >"$TMP/env" && mv "$TMP/env" "$HOME/.claude/orchestration.env"
+  on_tty '' --env none
+  [ "$status" -eq 0 ]
+  [ -z "$(find "$dir" -name 'com.combinaut.coord-watcher-*')" ]
+}
+
+@test "an update restores a missing current watcher registration" {
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  use_service_state
+  on_tty '' --env none
+  [ "$status" -eq 0 ]
+  case "$(uname -s)" in
+    Darwin)
+      dir="$HOME/Library/LaunchAgents"
+      watcher=com.combinaut.coord-watcher-hog
+      rm "$dir/$watcher.plist"
+      grep -vxF "$watcher" "$LAUNCHCTL_STATE" >"$TMP/state" && mv "$TMP/state" "$LAUNCHCTL_STATE"
+      before=$(wc -l <"$LAUNCHCTL_CALLS")
+      on_tty '' --env none
+      [ "$status" -eq 0 ]
+      [ -f "$dir/$watcher.plist" ]
+      contains "$(sed "1,${before}d" "$LAUNCHCTL_CALLS")" "bootstrap gui/$(id -u) $dir/$watcher.plist"
+
+      rm "$dir/$watcher.plist"
+      before=$(wc -l <"$LAUNCHCTL_CALLS")
+      LAUNCHCTL_STUCK="$watcher" on_tty '' --env none
+      [ "$status" -eq 1 ]
+      [ -f "$dir/$watcher.plist" ]
+      contains "$output" "not registered  $HOME/.claude/coordinator/watchers/service/macos/$watcher.plist"
+      ;;
+    Linux)
+      watcher=com.combinaut.coord-watcher-hog.service
+      grep -vxF "$watcher" "$SYSTEMCTL_STATE" >"$TMP/state" && mv "$TMP/state" "$SYSTEMCTL_STATE"
+      before=$(wc -l <"$SYSTEMCTL_CALLS")
+      on_tty '' --env none
+      [ "$status" -eq 0 ]
+      grep -qxF "$watcher" "$SYSTEMCTL_STATE"
+      contains "$(sed "1,${before}d" "$SYSTEMCTL_CALLS")" "enable --now $HOME/.claude/coordinator/watchers/service/linux/$watcher"
+      ;;
+  esac
+}
+
+@test "macOS registration persists a missing watcher before launchd confirms it" {
+  rendered="$TMP/com.combinaut.coord-watcher-hog.plist"
+  agents="$TMP/LaunchAgents"
+  calls="$TMP/launchctl.calls"
+  loaded=0
+  stuck=0
+  printf '<plist/>\n' >"$rendered"
+  # shellcheck disable=SC1090
+  source "$ROOT/lib/platform/macos.sh"
+  platform_launch_agents_dir() { printf '%s' "$agents"; }
+  launchctl() {
+    printf '%s\n' "$*" >>"$calls"
+    case "$1" in
+      print) [ "$loaded" = 1 ] ;;
+      bootstrap) [ -f "$3" ] && loaded=1 ;;
+      bootout) [ "$stuck" = 1 ] || loaded=0 ;;
+    esac
+  }
+
+  platform_register_service "$rendered"
+  [ -f "$agents/com.combinaut.coord-watcher-hog.plist" ]
+  contains "$(cat "$calls")" "bootstrap gui/$(id -u) $agents/com.combinaut.coord-watcher-hog.plist"
+
+  rm "$agents/com.combinaut.coord-watcher-hog.plist"
+  : >"$calls"
+  platform_register_service "$rendered"
+  [ -f "$agents/com.combinaut.coord-watcher-hog.plist" ]
+  [ "$(grep -c '^bootout ' "$calls")" -eq 1 ]
+  [ "$(grep -c '^bootstrap ' "$calls")" -eq 1 ]
+}
+
+@test "macOS registration waits for a slow unload before it bootstraps" {
+  rendered="$TMP/com.combinaut.coord-watcher-hog.plist"
+  agents="$TMP/LaunchAgents"
+  calls="$TMP/launchctl.calls"
+  prints_left=0
+  mkdir -p "$agents"
+  printf '<plist new/>\n' >"$rendered"
+  printf '<plist old/>\n' >"$agents/com.combinaut.coord-watcher-hog.plist"
+  # shellcheck disable=SC1090
+  source "$ROOT/lib/platform/macos.sh"
+  platform_launch_agents_dir() { printf '%s' "$agents"; }
+  launchctl() {
+    printf '%s\n' "$*" >>"$calls"
+    case "$1" in
+      print) if [ "$prints_left" -gt 0 ]; then prints_left=$((prints_left - 1)); return 0; fi; return 1 ;;
+      bootout) prints_left=2 ;;
+      bootstrap) [ "$prints_left" -eq 0 ] ;;
+    esac
+  }
+  platform_register_service "$rendered"
+  [ "$(cat "$agents/com.combinaut.coord-watcher-hog.plist")" = '<plist new/>' ]
+  [ "$(grep -c '^bootstrap ' "$calls")" -eq 1 ]
+}
+
+@test "macOS registration retries a bootstrap that fails right after the unload" {
+  rendered="$TMP/com.combinaut.coord-watcher-hog.plist"
+  agents="$TMP/LaunchAgents"
+  calls="$TMP/launchctl.calls"
+  loaded=0
+  failures=2
+  printf '<plist/>\n' >"$rendered"
+  # shellcheck disable=SC1090
+  source "$ROOT/lib/platform/macos.sh"
+  platform_launch_agents_dir() { printf '%s' "$agents"; }
+  launchctl() {
+    printf '%s\n' "$*" >>"$calls"
+    case "$1" in
+      print) [ "$loaded" = 1 ] ;;
+      bootstrap)
+        if [ "$failures" -gt 0 ]; then failures=$((failures - 1)); return 5; fi
+        loaded=1
+        ;;
+    esac
+  }
+  platform_register_service "$rendered"
+  [ "$loaded" = 1 ]
+  [ "$(grep -c '^bootstrap ' "$calls")" -eq 3 ]
+}
+
+@test "macOS registration accepts a failed bootstrap when launchd reports the job loaded" {
+  rendered="$TMP/com.combinaut.coord-watcher-hog.plist"
+  agents="$TMP/LaunchAgents"
+  prints=0
+  printf '<plist/>\n' >"$rendered"
+  # shellcheck disable=SC1090
+  source "$ROOT/lib/platform/macos.sh"
+  platform_launch_agents_dir() { printf '%s' "$agents"; }
+  launchctl() {
+    case "$1" in
+      print) prints=$((prints + 1)); [ "$prints" -gt 2 ] ;;
+      bootstrap) return 5 ;;
+    esac
+  }
+  platform_register_service "$rendered"
+}
+
+@test "install exits non-zero and says so when a watcher service is not registered" {
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  LAUNCHCTL_NOT_LOADED=1 SYSTEMCTL_FAIL=1 on_tty '' --env none
+  [ "$status" -ne 0 ]
+  contains "$output" 'not registered'
+  contains "$output" 'Failed:'
+  not_contains "$output" 'Done:'
+}
+
+@test "a service folder that cannot be written reports the failure and bootstraps nothing" {
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  use_service_state
+  case "$(uname -s)" in
+    Darwin) dir="$HOME/Library/LaunchAgents" stale=com.combinaut.coord-watcher-gone.plist ;;
+    Linux) dir="$HOME/.config/systemd/user" stale=com.combinaut.coord-watcher-gone.service ;;
+  esac
+  mkdir -p "$dir"
+  printf stale >"$dir/$stale"
+  chmod 555 "$dir"
+  on_tty '' --env none
+  chmod 755 "$dir"
+  [ "$status" -eq 1 ]
+  contains "$output" "not removed     $dir/$stale"
+  [ -f "$dir/$stale" ]
+  [ "$(uname -s)" != Darwin ] || not_contains "$(cat "$LAUNCHCTL_CALLS")" bootstrap
+  [ ! -e "$HOME/.claude/coordinator/watchers/.registered-revision" ]
+}
+
+@test "turning services off with a stale service that will not stop drops the revision" {
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  use_service_state
+  on_tty '' --env none
+  [ "$status" -eq 0 ]
+  [ -e "$HOME/.claude/coordinator/watchers/.registered-revision" ]
+  case "$(uname -s)" in
+    Darwin)
+      stale="$HOME/Library/LaunchAgents/com.combinaut.coord-watcher-gone.plist"
+      printf '%s\n' com.combinaut.coord-watcher-gone >>"$LAUNCHCTL_STATE"
+      use_stuck_service com.combinaut.coord-watcher-gone ""
+      ;;
+    Linux)
+      stale="$HOME/.config/systemd/user/com.combinaut.coord-watcher-gone.service"
+      printf '%s\n' com.combinaut.coord-watcher-gone.service >>"$SYSTEMCTL_STATE"
+      use_stuck_service "" com.combinaut.coord-watcher-gone.service
+      ;;
+  esac
+  mkdir -p "$(dirname "$stale")"
+  printf stale >"$stale"
+  sed 's/^ORCH_WATCHERS_SERVICE=.*/ORCH_WATCHERS_SERVICE="0"/' "$HOME/.claude/orchestration.env" >"$TMP/env" && mv "$TMP/env" "$HOME/.claude/orchestration.env"
+  on_tty '' --env none
+  [ "$status" -eq 1 ]
+  contains "$output" 'not removed'
+  [ ! -e "$HOME/.claude/coordinator/watchers/.registered-revision" ]
+}
+
+@test "failed stale cleanup with no rendered services makes install fail" {
+  fresh_install
+  [ "$status" -eq 0 ]
+  use_service_state
+  case "$(uname -s)" in
+    Darwin)
+      stale="$HOME/Library/LaunchAgents/com.combinaut.coord-watcher-gone.plist"
+      printf '%s\n' com.combinaut.coord-watcher-gone >"$LAUNCHCTL_STATE"
+      use_stuck_service com.combinaut.coord-watcher-gone ""
+      ;;
+    Linux)
+      stale="$HOME/.config/systemd/user/com.combinaut.coord-watcher-gone.service"
+      printf '%s\n' com.combinaut.coord-watcher-gone.service >"$SYSTEMCTL_STATE"
+      use_stuck_service "" com.combinaut.coord-watcher-gone.service
+      ;;
+  esac
+  mkdir -p "$(dirname "$stale")"
+  printf stale >"$stale"
+  printf 'old revision\n' >"$HOME/.claude/coordinator/watchers/.registered-revision"
+  on_tty '' --env none
+  [ "$status" -eq 1 ]
+  contains "$output" 'not removed'
+  contains "$output" 'Failed:'
+  not_contains "$output" 'Done:'
+  [ -f "$stale" ]
+  [ ! -e "$HOME/.claude/coordinator/watchers/.registered-revision" ]
+}
+
+@test "services are not offered while macOS legacy jobs are still loaded" {
+  [ "$(uname -s)" = Darwin ] || skip "only the macOS adapter defers the migration"
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  rm -f "$HOME/.claude/coordinator/watchers/.migration-state-copied"
+  on_tty 'y' --env none
+  [ "$status" -eq 0 ]
+  contains "$output" 'MIGRATE WATCHERS'
+  contains "$output" 'watcher service registration (finish the migration above, then run install.sh again)'
+  not_contains "$(cat "$LAUNCHCTL_CALLS")" bootstrap
+}
+
+@test "legacy watcher state is copied before services are offered" {
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  rm -f "$HOME/.claude/coordinator/watchers/.migration-state-copied"
+  mkdir -p "$HOME/.claude/coordinator/v2/prod-context"
+  printf '{"legacy":true}' >"$HOME/.claude/coordinator/v2/prod-context/host.json"
+  LAUNCHCTL_NOT_LOADED=1 on_tty 'y' --env none
+  [ "$status" -eq "$(unloaded_status)" ]
+  copied=$(printf '%s\n' "$output" | grep -n 'copied state' | head -n 1 | cut -d: -f1)
+  started=$(printf '%s\n' "$output" | grep -n -E '^(registered|not registered) ' | head -n 1 | cut -d: -f1)
+  [ -n "$copied" ] && [ -n "$started" ] && [ "$copied" -lt "$started" ]
+  [ "$(cat "$HOME/.claude/coordinator/watchers/prod-context/host.json")" = '{"legacy":true}' ]
+}
+
+@test "Radar daemon started by the installer survives the installer's exit" {
+  fresh_install
+  run env HERDR_DAEMON_PID="$TMP/daemon.pid" python3 -c 'import os, sys
+os.setpgrp()
+open(sys.argv[1], "w").write(str(os.getpgrp()))
+os.execvp(sys.argv[2], sys.argv[2:])' "$TMP/install.pgid" /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/daemon.pid" ]
+  kill -HUP -- "-$(cat "$TMP/install.pgid")" 2>/dev/null || true
+  kill -TERM -- "-$(cat "$TMP/install.pgid")" 2>/dev/null || true
+  sleep 1
+  kill -0 "$(cat "$TMP/daemon.pid")"
+}
+
+@test "existing Herdr keeps its install and its config outside Radar's blocks" {
+  fresh_install
+  foreign_config
+  printf upstream >"$HERDR_PLUGIN"
+  run env HERDR_RADAR_BLOCK=1 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  contains "$output" 'already installed (0.9.1'
+  [ ! -e "$CURL_CALLS" ] || not_contains "$(cat "$CURL_CALLS")" https://herdr.dev/install.sh
+  [ ! -e "$HOME/.local/bin/herdr" ]
+  contains "$(cat "$HERDR_CALLS")" 'plugin uninstall hhdebb.herdr-radar'
+  [ "$(cat "$HERDR_PLUGIN")" = "$(cd "$HOME/.claude" && pwd -P)/herdr-radar-runtime" ]
+  contains "$output" 'your blocks unchanged'
+  contains "$(cat "$HOME/.config/herdr/config.toml")" '# >>> herdr-radar theme block'
+  sed '/^# >>> herdr-radar .* block$/,/^# <<< herdr-radar .* block$/d' "$HOME/.config/herdr/config.toml" >"$TMP/config.toml.outside"
+  cmp "$TMP/config.toml.orig" "$TMP/config.toml.outside"
+}
+
+@test "a change after an unmatched Radar marker is reported" {
+  fresh_install
+  mkdir -p "$HOME/.config/herdr"
+  printf '%s\n' '[keys]' 'prefix = "ctrl-a"' '# >>> herdr-radar theme block' '[ui]' 'sidebar = "left"' >"$HOME/.config/herdr/config.toml"
+  run env HERDR_EDIT_TAIL=1 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  contains "$output" 'WARNING'
+}
+
+@test "a filled config value wins over an empty exported one for the rest of the run" {
+  fresh_install
+  prepare_custom_service_config "$HOME/.claude/orchestration.env"
+  printf '%s\n' 'ORCH_CODEX_WORKER_MODEL="w"' 'ORCH_CODEX_SMART_MODEL="s"' >>"$HOME/.claude/orchestration.env"
+  ORCH_HERDR_BIN="" LAUNCHCTL_NOT_LOADED=1 on_tty '' --env none
+  [ "$status" -eq "$(unloaded_status)" ]
+  not_contains "$output" 'ORCH_HERDR_BIN ('
+  contains "$output" 'rendered'
+}
+
+@test "a failed Radar start still checks the config and keeps the previous file" {
+  fresh_install
+  foreign_config
+  run env HERDR_CLOBBER_CONFIG=1 HERDR_FAIL_START=1 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -ne 0 ]
+  contains "$output" 'WARNING'
+  contains "$output" 'Radar state-start failed'
+  for backup in "$HOME"/.claude/backups/*/home/.config/herdr/config.toml; do cmp "$TMP/config.toml.orig" "$backup"; done
+}
+
+@test "a config change outside Radar's blocks is reported with the previous file kept" {
+  fresh_install
+  foreign_config
+  run env HERDR_CLOBBER_CONFIG=1 /bin/bash "$CLONE/install.sh" --env herdr
+  [ "$status" -eq 0 ]
+  contains "$output" 'WARNING'
+  for backup in "$HOME"/.claude/backups/*/home/.config/herdr/config.toml; do cmp "$TMP/config.toml.orig" "$backup"; done
+}

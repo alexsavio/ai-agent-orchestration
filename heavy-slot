@@ -1,0 +1,356 @@
+#!/usr/bin/env bash
+# A small, shared semaphore for machine-wide heavy jobs.  Bash 3.2 compatible.
+
+set -u
+
+CONFIG=${ORCH_CONFIG:-"$HOME/.claude/orchestration.env"}
+CONFIG_PARENT=$(dirname "$CONFIG")
+ORCH_HEAVY_SLOTS_MAX_WAS_SET=${ORCH_HEAVY_SLOTS_MAX+x}
+ORCH_HEAVY_SLOTS_MAX_SAVED=${ORCH_HEAVY_SLOTS_MAX:-}
+config_error() {
+  printf 'heavy-slot: cannot load %s: %s\n' "$CONFIG" "$1" >&2
+  exit 78
+}
+
+config_warning() { printf 'heavy-slot: cannot load %s: %s; using defaults\n' "$CONFIG" "$1" >&2; }
+
+config_unavailable() {
+  if [ -n "$ORCH_HEAVY_SLOTS_MAX_WAS_SET" ]; then
+    config_warning "$1"
+  else
+    config_error "$1"
+  fi
+}
+
+if [ -n "${ORCH_CONFIG:-}" ] && [ ! -f "$CONFIG" ]; then
+  config_error 'not a regular file'
+fi
+
+if [ -e "$CONFIG" ] || [ -L "$CONFIG" ]; then
+  if [ ! -f "$CONFIG" ]; then
+    config_unavailable 'not a regular file'
+  elif [ ! -r "$CONFIG" ]; then
+    config_unavailable 'not readable'
+  elif ! bash -n "$CONFIG" 2>/dev/null; then
+    config_unavailable 'syntax error'
+  else
+    set +u
+    # shellcheck disable=SC1090 # User-selected Bash settings file.
+    . "$CONFIG"
+    set -u
+  fi
+else
+  CONFIG_ANCESTOR=$CONFIG_PARENT
+  while { [ ! -e "$CONFIG_ANCESTOR" ] && [ ! -L "$CONFIG_ANCESTOR" ]; } && [ "$CONFIG_ANCESTOR" != / ]; do
+    CONFIG_NEXT=$(dirname "$CONFIG_ANCESTOR")
+    [ "$CONFIG_NEXT" = "$CONFIG_ANCESTOR" ] && break
+    CONFIG_ANCESTOR=$CONFIG_NEXT
+  done
+  if { [ -e "$CONFIG_ANCESTOR" ] || [ -L "$CONFIG_ANCESTOR" ]; } && { [ ! -d "$CONFIG_ANCESTOR" ] || [ ! -x "$CONFIG_ANCESTOR" ]; }; then
+    config_unavailable 'parent directory not searchable'
+  fi
+fi
+[ -z "$ORCH_HEAVY_SLOTS_MAX_WAS_SET" ] || ORCH_HEAVY_SLOTS_MAX=$ORCH_HEAVY_SLOTS_MAX_SAVED
+SLOT_DIR=${ORCH_HEAVY_SLOTS_DIR:-"$HOME/.claude/heavy-slots"}
+SLOT_MAX=${ORCH_HEAVY_SLOTS_MAX:-4}
+LOCK_DIR="$SLOT_DIR/.lock"
+RECLAIM_DIR="$SLOT_DIR/.lock-reclaim"
+LOCK_MAX_AGE=30
+WAIT_MAX=1800
+KILL_GRACE=${ORCH_HEAVY_SLOTS_KILL_GRACE:-10}
+CHILD_PID=
+SLOT_FILE=
+LOCK_HELD=0
+
+case $SLOT_MAX in ''|*[!0-9]*|0) printf 'heavy-slot: ORCH_HEAVY_SLOTS_MAX must be a positive integer\n' >&2; exit 64 ;; esac
+case $KILL_GRACE in ''|*[!0-9]*) printf 'heavy-slot: ORCH_HEAVY_SLOTS_KILL_GRACE must be a non-negative integer\n' >&2; exit 64 ;; esac
+
+usage() {
+  printf 'usage: heavy-slot {count|list|take <architect>-<job> [--wait-max seconds] -- <command> [args...]}\n       take exits 73 when the slot directory is not writable' >&2
+  exit 64
+}
+
+die() { printf 'heavy-slot: %s\n' "$*" >&2; exit 64; }
+
+cannot_write_slot_dir() {
+  printf 'heavy-slot: cannot write %s (sandbox?); run this command escalated\n' "$SLOT_DIR" >&2
+  [ "${CLEANUP_MODE:-0}" -eq 1 ] && return 73
+  exit 73
+}
+
+cannot_use_lock_path() {
+  printf 'heavy-slot: not a directory: %s\n' "$1" >&2
+  [ "${CLEANUP_MODE:-0}" -eq 1 ] && return 73
+  exit 73
+}
+
+lock_path_is_not_directory() {
+  { [ -e "$1" ] || [ -L "$1" ]; } && [ ! -d "$1" ]
+}
+
+probe_slot_dir() {
+  local probe="$SLOT_DIR/.write-probe.$$"
+  mkdir -p "$SLOT_DIR" 2>/dev/null || { cannot_write_slot_dir; return $?; }
+  if mkdir "$probe" 2>/dev/null && rmdir "$probe" 2>/dev/null; then
+    return 0
+  else
+    rmdir "$probe" 2>/dev/null || true
+    cannot_write_slot_dir
+    return $?
+  fi
+}
+
+is_pid_live() {
+  case ${1:-} in ''|*[!0-9]*|0|0[0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null
+}
+
+is_group_live() {
+  case ${1:-} in ''|*[!0-9]*|0|0[0-9]*) return 1 ;; esac
+  kill -0 -- "-$1" 2>/dev/null
+}
+
+file_mtime() {
+  if stat -f %m "$1" >/dev/null 2>&1; then
+    stat -f %m "$1"
+  else
+    stat -c %Y "$1"
+  fi
+}
+
+file_age() {
+  local mtime now
+  mtime=$(file_mtime "$1" 2>/dev/null) || { printf '%s' 999999; return; }
+  now=$(date +%s)
+  printf '%s' "$((now - mtime))"
+}
+
+live_count() {
+  local file pid pgid count
+  count=0
+  [ -d "$SLOT_DIR" ] || { printf '0\n'; return; }
+  for file in "$SLOT_DIR"/*; do
+    [ -f "$file" ] || continue
+    read -r pid pgid <"$file" || true
+    if [ -n "$pgid" ]; then is_group_live "$pgid"; else is_pid_live "$pid"; fi && count=$((count + 1))
+  done
+  printf '%s\n' "$count"
+}
+
+list_slots() {
+  local file pid pgid age state
+  [ -d "$SLOT_DIR" ] || return 0
+  for file in "$SLOT_DIR"/*; do
+    [ -f "$file" ] || continue
+    read -r pid pgid <"$file" || true
+    age=$(file_age "$file")
+    state=live
+    if [ -n "$pgid" ]; then is_group_live "$pgid"; else is_pid_live "$pid"; fi || state=stale
+    printf '%s pid=%s age=%ss %s\n' "${file##*/}" "${pid:-invalid}" "$age" "$state"
+  done
+}
+
+clear_lock() {
+  local expected_holder=$1 expected_started=$2 deadline=${3:-} holder started displaced="$LOCK_DIR.stale.$$"
+  while ! mkdir "$RECLAIM_DIR" 2>/dev/null; do
+    if ! test -d "$RECLAIM_DIR"; then
+      probe_slot_dir
+    else
+      [ -n "$deadline" ] && [ "$(date +%s)" -ge "$deadline" ] && return 75
+      [ "$(file_age "$RECLAIM_DIR")" -gt "$LOCK_MAX_AGE" ] && rmdir "$RECLAIM_DIR" 2>/dev/null && continue
+    fi
+    if [ -n "$deadline" ] && [ "$(date +%s)" -ge "$deadline" ]; then
+      lock_path_is_not_directory "$RECLAIM_DIR" && { cannot_use_lock_path "$RECLAIM_DIR"; return $?; }
+      return 75
+    fi
+    sleep 1
+  done
+  [ -d "$LOCK_DIR" ] || { rmdir "$RECLAIM_DIR" 2>/dev/null || true; return 0; }
+  holder=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
+  started=$(cat "$LOCK_DIR/started" 2>/dev/null || true)
+  if [ "$holder" != "$expected_holder" ] || [ "$started" != "$expected_started" ]; then
+    rmdir "$RECLAIM_DIR" 2>/dev/null || true
+    return 1
+  fi
+  mv "$LOCK_DIR" "$displaced" 2>/dev/null || { rmdir "$RECLAIM_DIR" 2>/dev/null || true; return 1; }
+  rm -f "$displaced/pid" "$displaced/started"
+  rmdir "$displaced" 2>/dev/null || { rmdir "$RECLAIM_DIR" 2>/dev/null || true; return 1; }
+  rmdir "$RECLAIM_DIR" 2>/dev/null || true
+  return 0
+}
+
+take_lock() {
+  local deadline=${1:-} holder started reclaim_status
+  mkdir -p "$SLOT_DIR" 2>/dev/null || { cannot_write_slot_dir; return $?; }
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    if ! test -d "$LOCK_DIR"; then
+      probe_slot_dir
+    else
+      holder=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
+      started=$(cat "$LOCK_DIR/started" 2>/dev/null || true)
+      if { [ -n "$holder" ] && ! is_pid_live "$holder"; } || { [ -z "$holder" ] && [ "$(file_age "$LOCK_DIR")" -gt "$LOCK_MAX_AGE" ]; }; then
+        clear_lock "$holder" "$started" "$deadline"
+        reclaim_status=$?
+        [ "$reclaim_status" -eq 75 ] && return 75
+        if [ "$reclaim_status" -ne 0 ]; then
+          [ -n "$deadline" ] && [ "$(date +%s)" -ge "$deadline" ] && return 75
+          sleep 1
+          continue
+        fi
+        continue
+      fi
+    fi
+    if [ -n "$deadline" ] && [ "$(date +%s)" -ge "$deadline" ]; then
+      lock_path_is_not_directory "$LOCK_DIR" && { cannot_use_lock_path "$LOCK_DIR"; return $?; }
+      return 75
+    fi
+    sleep 1
+  done
+  printf '%s\n' "$$" >"$LOCK_DIR/pid"
+  date +%s >"$LOCK_DIR/started"
+  LOCK_HELD=1
+}
+
+release_lock() {
+  [ -d "$LOCK_DIR" ] || return 0
+  [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" = "$$" ] || return 0
+  rm -f "$LOCK_DIR/pid" "$LOCK_DIR/started"
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+  LOCK_HELD=0
+}
+
+cleanup() {
+  local status=$? slot_pid='' pid_group='' deadline
+  [ "$LOCK_HELD" -eq 1 ] && release_lock
+  [ -n "$SLOT_FILE" ] || return 0
+  deadline=$(( $(date +%s) + 1 ))
+  CLEANUP_MODE=1
+  if take_lock "$deadline"; then
+    read -r slot_pid pid_group 2>/dev/null <"$SLOT_FILE" || true
+    if [ "$slot_pid" = "$CHILD_PID" ]; then
+      pid_group=${pid_group:-$CHILD_PID}
+      terminate_group "$pid_group"
+      rm -f "$SLOT_FILE"
+    fi
+    release_lock
+  else
+    terminate_group "$CHILD_PID"
+  fi
+  CLEANUP_MODE=0
+  return "$status"
+}
+
+terminate_group() {
+  local pgid=$1 deadline
+  is_group_live "$pgid" || return 0
+  kill -TERM -- "-$pgid" 2>/dev/null || true
+  deadline=$(( $(date +%s) + KILL_GRACE ))
+  while is_group_live "$pgid" && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done
+  is_group_live "$pgid" && kill -KILL -- "-$pgid" 2>/dev/null || true
+}
+
+forward_signal() {
+  local code=$2
+  if [ -n "$CHILD_PID" ] && is_pid_live "$CHILD_PID"; then
+    # Bash starts asynchronous children with SIGINT ignored. On macOS's Bash
+    # 3.2, a child cannot install an INT trap when it inherited that ignored
+    # disposition, so use TERM for reliable teardown of the child.
+    terminate_group "$CHILD_PID"
+    wait "$CHILD_PID" 2>/dev/null || true
+  fi
+  exit "$code"
+}
+
+valid_name() {
+  case $1 in
+    .*|*[!A-Za-z0-9_.-]*|*/*|*' '*|-*|*-) return 1 ;;
+  esac
+  case $1 in *-*-*) ;; *-*) return 0 ;; *) return 1 ;; esac
+}
+
+take_slot() {
+  local name=$1 max=$2 existing_pid='' existing_group='' count status deadline now remaining pause
+  shift 2
+  probe_slot_dir
+  SLOT_FILE="$SLOT_DIR/$name"
+  deadline=$(( $(date +%s) + max ))
+  while :; do
+    if ! take_lock "$deadline"; then
+      printf 'NEED SLOT: %s waited %ss for one of %s heavy slots\n' "$name" "$WAIT_MAX" "$SLOT_MAX" >&2
+      exit 75
+    fi
+    read -r existing_pid existing_group 2>/dev/null <"$SLOT_FILE" || true
+    if { [ -n "${existing_group:-}" ] && is_group_live "$existing_group"; } || is_pid_live "$existing_pid"; then
+      release_lock
+      printf 'heavy-slot: slot %s is already live (pid %s)\n' "$name" "$existing_pid" >&2
+      exit 65
+    fi
+    { [ -e "$SLOT_FILE" ] || [ -L "$SLOT_FILE" ]; } && ! rm -f "$SLOT_FILE" && { release_lock; die "cannot replace $SLOT_FILE"; }
+    count=$(live_count)
+    if [ "$count" -lt "$SLOT_MAX" ]; then
+      : >"$SLOT_FILE" || { release_lock; die "cannot create $SLOT_FILE"; }
+      trap cleanup EXIT
+      trap 'forward_signal INT 130' INT
+      trap 'forward_signal TERM 143' TERM
+      trap 'forward_signal HUP 129' HUP
+      exec 3<&0
+      set -m
+      ( trap - INT; exec "$@" ) <&3 3<&- &
+      CHILD_PID=$!
+      set +m
+      exec 3<&-
+      if ! printf '%s\n' "$CHILD_PID" >"$SLOT_FILE"; then
+        terminate_group "$CHILD_PID"
+        wait "$CHILD_PID" 2>/dev/null || true
+        rm -f "$SLOT_FILE"
+        release_lock
+        die "cannot write $SLOT_FILE"
+      fi
+      release_lock
+      wait "$CHILD_PID"
+      status=$?
+      exit "$status"
+    fi
+    release_lock
+    now=$(date +%s)
+    if [ "$now" -ge "$deadline" ]; then
+      printf 'NEED SLOT: %s waited %ss for one of %s heavy slots\n' "$name" "$WAIT_MAX" "$SLOT_MAX" >&2
+      exit 75
+    fi
+    pause=$((5 + RANDOM % 6))
+    remaining=$((deadline - now))
+    [ "$pause" -le "$remaining" ] || pause=$remaining
+    sleep "$pause"
+  done
+}
+
+[ "$#" -gt 0 ] || usage
+case $1 in
+  count)
+    [ "$#" -eq 1 ] || usage
+    live_count
+    ;;
+  list)
+    [ "$#" -eq 1 ] || usage
+    list_slots
+    ;;
+  take)
+    shift
+    [ "$#" -ge 3 ] || usage
+    NAME=$1
+    shift
+    valid_name "$NAME" || die "name must be <architect>-<job> and contain no spaces or /"
+    if [ "${1:-}" = --wait-max ]; then
+      [ "$#" -ge 3 ] || usage
+      WAIT_MAX=$2
+      shift 2
+    fi
+    case $WAIT_MAX in ''|*[!0-9]*) die '--wait-max must be a non-negative number of seconds' ;; esac
+    WAIT_MAX=$((10#$WAIT_MAX))
+    [ "${1:-}" = -- ] || usage
+    shift
+    [ "$#" -gt 0 ] || usage
+    take_slot "$NAME" "$WAIT_MAX" "$@"
+    ;;
+  *) usage ;;
+esac

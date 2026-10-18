@@ -1,0 +1,140 @@
+{"events": ["HOST SWAP(16079.38MB)"], "mode": "host"}
+{"events": ["HOST SWAP(15999.38MB)"], "mode": "host"}
+{"events": ["HOST SWAP(15291.00MB) LOAD(45.95)"], "mode": "host"}
+{"events": ["HOST SWAP(15275.00MB)"], "mode": "host"}
+{"events": ["HOST SWAP(15067.00MB) LOAD(63.84)"], "mode": "host"}
+{"events": ["HOST SWAP(15043.00MB)"], "mode": "host"}
+{"events": ["HOST SWAP(14987.00MB)"], "mode": "host"}
+{"events": ["HOST SWAP(14843.00MB) LOAD(77.38)"], "mode": "host"}
+{"events": ["HOST SWAP(14535.38MB)"], "mode": "host"}
+{"events": ["HOST SWAP(12148.25MB)"], "mode": "host"}
+{"events": ["HOST SWAP(13098.06MB)"], "mode": "host"}
+{"events": ["HOST SWAP(12994.06MB)"], "mode": "host"}
+{"events": ["HOST SWAP(13110.94MB)"], "mode": "host"}
+{"events": ["HOST SWAP(12982.94MB)"], "mode": "host"}
+{"events": ["HOST SWAP(13755.75MB)"], "mode": "host"}
+{"events": ["HOST SWAP(12987.75MB)"], "mode": "host"}
+{"events": ["HOST SWAP(10731.19MB)"], "mode": "host"}
+{"events": ["HOST SWAP(12029.69MB)"], "mode": "host"}
+{"events": ["HOST SWAP(11997.69MB)"], "mode": "host"}
+{"events": ["HOST SWAP(12888.62MB)"], "mode": "host"}
+{"events": ["HOST SWAP(13719.94MB)"], "mode": "host"}
+{"events": ["HOST SWAP(16657.19MB)"], "mode": "host"}
+{"events": ["HOST SWAP(15977.19MB)"], "mode": "host"}
+{"events": ["HOST SWAP(14999.25MB)"], "mode": "host"}
+{"events": ["HOST SWAP(14075.38MB) LOAD(134.26)"], "mode": "host"}
+{"events": ["HOST SWAP(15933.19MB) LOAD(556.97)"], "mode": "host"}
+{"events": ["HOST SWAP(14932.44MB) LOAD(667.39)"], "mode": "host"}
+{"events": ["HOST SWAP(14264.81MB)"], "mode": "host"}
+{"events": ["HOST SWAP(13840.81MB)"], "mode": "host"}
+{"events": ["HOST SWAP(12976.88MB)"], "mode": "host"}
+{"events": ["HOST SWAP(10904.44MB)"], "mode": "host"}
+{"events": ["BALANCE LOAD5(20.58) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE RECOVERED"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(25.15) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(21.29) SLOTS(5) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(24.71) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(36.95) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(50.44) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(47.86) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(38.92) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(26.30) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE RECOVERED"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(23.01) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE RECOVERED"], "mode": "balance"}
+{"events": ["BALANCE READFAIL slots slot:job-1"], "mode": "balance"}
+{"events": ["BALANCE READFAIL cleared"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(20.76) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE RECOVERED"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(36.31) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(53.45) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(182.32) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(284.01) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(293.26) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(257.54) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(213.47) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(172.66) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(142.47) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(118.20) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(98.67) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(81.97) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(67.94) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(57.13) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(49.09) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(36.17) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE LOAD5(27.82) top: redacted(1%,1MB)"], "mode": "balance"}
+{"events": ["BALANCE RECOVERED"], "mode": "balance"}
+{"events": ["RECYCLE wH:p1E finder"], "mode": "context"}
+{"events": ["RECYCLE wMS:p2 remove-legacy-ce"], "mode": "context"}
+{"events": ["RECYCLE w1H:pZ frontend-migration"], "mode": "context"}
+{"events": ["RECYCLE wPB:p9 ai-setup"], "mode": "context"}
+{"events": ["RECYCLE w3C:pS coordinator"], "mode": "context"}
+{"events": ["RECYCLE wV7:p1 herdr-radar-arch"], "mode": "context"}
+{"events": ["RECYCLE w1H:p0 frontend-migration", "RECYCLE wV7:p2 herdr-radar-arch-2", "RECYCLE wH:p1F finder", "RECYCLE wMS:p3 remove-legacy-ce"], "mode": "context"}
+{"events": ["RECYCLE w3C:pT coordinator"], "mode": "context"}
+{"events": ["RECYCLE wMS:p4 rlce-arch-0740"], "mode": "context"}
+{"events": ["RECYCLE w1H:p11 fm-arch-0737"], "mode": "context"}
+{"events": ["RECYCLE wPB:pA ai-setup", "RECYCLE w3C:pV coord-0832"], "mode": "context"}
+{"events": ["RECYCLE wMS:p5 legacy-to-vue-arch-1030"], "mode": "context"}
+{"events": ["RECYCLE wV7:p3 radar-arch-0739 323k"], "mode": "context"}
+{"events": ["RECYCLE wH:p1G finder-arch-0742 302k"], "mode": "context"}
+{"events": ["RECYCLE wMS:p6 legacy-to-vue-1013b 307k"], "mode": "context"}
+{"events": ["RECYCLE wYW:p1 finder-matrix-a 331k"], "mode": "context"}
+{"events": ["RECYCLE w3C:pW coord-1240 304k"], "mode": "context"}
+{"events": ["RECYCLE wMS:p7 legacy-to-vue-1013c 303k"], "mode": "context"}
+{"events": ["RECYCLE wA:p5 custom-properties 301k"], "mode": "context"}
+{"events": ["RECYCLE w1H:p12 fm-arch-1230 309k"], "mode": "context"}
+{"events": ["RECYCLE wYX:p1 finder-matrix-b 303k"], "mode": "context"}
+{"events": ["RECYCLE wH:p1H finder-1013c 326k"], "mode": "context"}
+{"events": ["RECYCLE wMS:p8 legacy-to-vue-1013d 316k"], "mode": "context"}
+{"events": ["RECYCLE w3C:pX coord-1655 302k"], "mode": "context"}
+{"events": ["RECYCLE wMS:p9 legacy-to-vue-1013e 301k"], "mode": "context"}
+{"events": ["RECYCLE wPB:pD ai-setup-1013b 300k"], "mode": "context"}
+{"events": ["WORKER wH:p1G dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER wYM:p1 dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER wYY:p1 blocked"], "mode": "workers"}
+{"events": ["WORKER wYY:p1 RECOVERED blocked"], "mode": "workers"}
+{"events": ["WORKER wYT:p1 blocked"], "mode": "workers"}
+{"events": ["WORKER wS5:pC dead/disappeared", "WORKER wYT:p1 RECOVERED blocked"], "mode": "workers"}
+{"events": ["WORKER wMS:p6 dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER wZ3:p1 dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER wS5:pD dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER wZ4:p1 dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER wS5:pF dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER w3C:pW dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER wS5:pG dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER READFAIL wYW:p1(unknown)"], "mode": "workers"}
+{"events": ["WORKER READFAIL cleared"], "mode": "workers"}
+{"events": ["WORKER READFAIL w16:p34(unknown) w1H:p12(unknown) w3C:pX(unknown) wA:p9(unknown) wH:p1H(unknown) wK:p3(unknown) wM:p1D(unknown) wMS:p8(unknown) wP:p1E(unknown) wPB:pD(unknown) wS5:p1(unknown) wTJ:p1(unknown) wTR:p1(unknown) wTX:p1(unknown) wTY:p1(unknown) wV7:p5(unknown) wW8:p1(unknown) wXZ:p1(unknown) wY2:p1(unknown) wY6:p1(unknown) wYB:p1(unknown) wYH:p1(unknown) wYP:p1(unknown) wYR:p1(unknown) wYT:p1(unknown) wYV:p1(unknown) wYW:p1(unknown) wYX:p1(unknown) wYY:p1(unknown) wZ2:p1(unknown) wZ5:p1(unknown) wZ6:p1(unknown) wZ8:p1(unknown) wZA:p1(unknown) wZB:p1(unknown) wZC:p1(unknown) wZF:p1(unknown)"], "mode": "workers"}
+{"events": ["WORKER READFAIL cleared"], "mode": "workers"}
+{"events": ["WORKER READFAIL w1H:p13(unknown)"], "mode": "workers"}
+{"events": ["WORKER READFAIL cleared"], "mode": "workers"}
+{"events": ["WORKER wYW:p1 dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER wYV:p1 blocked"], "mode": "workers"}
+{"events": ["WORKER wYV:p1 RECOVERED blocked"], "mode": "workers"}
+{"events": ["WORKER wA:p9 blocked"], "mode": "workers"}
+{"events": ["WORKER wA:p9 RECOVERED blocked"], "mode": "workers"}
+{"events": ["WORKER wS5:pJ dead/disappeared", "WORKER wS5:pM dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER wS5:pK dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER w1H:p13 blocked"], "mode": "workers"}
+{"events": ["WORKER w1H:p13 RECOVERED blocked"], "mode": "workers"}
+{"events": ["WORKER wA:p9 blocked"], "mode": "workers"}
+{"events": ["WORKER wZK:p1 dead/disappeared"], "mode": "workers"}
+{"events": ["WORKER READFAIL wZZ:p1(unknown)"], "mode": "workers"}
+{"events": ["WORKER READFAIL cleared"], "mode": "workers"}
+{"events": ["AUDIT BASELINE git:/home/user/Projects/acme/webapp [1 active lines; see audit.json before.sources]", "AUDIT BASELINE github [52 active lines; see audit.json before.sources]", "AUDIT BASELINE herdr [0 active lines; see audit.json before.sources]", "AUDIT BASELINE slot:job-2 [0 active lines; see audit.json before.sources]", "AUDIT BASELINE slot:job-3 [0 active lines; see audit.json before.sources]", "AUDIT BASELINE slot:job-4 [0 active lines; see audit.json before.sources]", "AUDIT BASELINE slots [0 active lines; see audit.json before.sources]"], "mode": "audit"}
+{"events": ["APPROVED acme/webapp#3339 PR 3339", "APPROVED acme/webapp#3342 PR 3342", "CHANGES acme/webapp#3263 PR 3263", "CHANGES acme/webapp#3335 PR 3335", "COPILOT acme/webapp#3111 PR 3111", "COPILOT acme/webapp#3339 PR 3339", "COPILOT acme/webapp#3342 PR 3342", "THREADS acme/webapp#3335 PR 3335 [1 unresolved]", "AUDIT BASELINE slot:job-5 [0 active lines; see audit.json before.sources]", "AUDIT BASELINE slot:job-6 [0 active lines; see audit.json before.sources]"], "mode": "audit"}
+{"events": ["APPROVED-OLDHEAD acme/webapp#3339 PR 3339", "CONFLICT acme/webapp#3111 PR 3111", "CONFLICT acme/webapp#3351 PR 3351", "COPILOT acme/webapp#3339 PR 3339", "COPILOT acme/webapp#3350 PR 3350", "RED acme/webapp#3263 PR 3263", "RED acme/webapp#3323 PR 3323", "THREADS acme/webapp#3349 PR 3349 [1 unresolved]", "THREADS acme/webapp#3351 PR 3351 [3 unresolved]", "AUDIT BASELINE slot:job-7 [0 active lines; see audit.json before.sources]"], "mode": "audit"}
+{"events": ["APPROVED acme/webapp#3335 PR 3335", "APPROVED-STACKED acme/webapp#3251 PR 3251", "APPROVED-STACKED acme/webapp#3252 PR 3252", "APPROVED-STACKED acme/webapp#3253 PR 3253", "APPROVED-STACKED acme/webapp#3256 PR 3256", "APPROVED-STACKED acme/webapp#3263 PR 3263", "CHANGES acme/webapp#3351 PR 3351", "THREADS acme/webapp#3351 PR 3351 [6 unresolved]", "AUDIT BASELINE slot:job-8 [0 active lines; see audit.json before.sources]"], "mode": "audit"}
+{"events": ["COPILOT acme/webapp#3349 PR 3349", "THREADS acme/webapp#3111 PR 3111 [1 unresolved]", "THREADS acme/webapp#3357 PR 3357 [4 unresolved]"], "mode": "audit"}
+{"events": ["APPROVED acme/webapp#3111 PR 3111", "COPILOT acme/webapp#3111 PR 3111", "COPILOT acme/webapp#3356 PR 3356", "COPILOT acme/webapp#3357 PR 3357", "THREADS acme/webapp#3362 PR 3362 [1 unresolved]", "AUDIT BASELINE slot:job-6 [0 active lines; see audit.json before.sources]"], "mode": "audit"}
+{"events": ["APPROVED-OLDHEAD acme/webapp#3247 PR 3247", "APPROVED-OLDHEAD acme/webapp#3250 PR 3250", "APPROVED-OLDHEAD acme/webapp#3251 PR 3251", "APPROVED-OLDHEAD acme/webapp#3252 PR 3252", "APPROVED-OLDHEAD acme/webapp#3253 PR 3253", "APPROVED-OLDHEAD acme/webapp#3255 PR 3255", "APPROVED-OLDHEAD acme/webapp#3256 PR 3256", "APPROVED-OLDHEAD acme/webapp#3263 PR 3263", "CONFLICT acme/webapp#3351 PR 3351", "RED acme/webapp#3263 PR 3263", "RED acme/webapp#3323 PR 3323", "THREADS acme/webapp#3356 PR 3356 [1 unresolved]"], "mode": "audit"}
+{"events": ["APPROVED-STACKED acme/webapp#3246 PR 3246", "COPILOT acme/webapp#3369 PR 3369", "THREADS acme/webapp#3248 PR 3248 [3 unresolved]", "AUDIT BASELINE slot:job-9 [0 active lines; see audit.json before.sources]"], "mode": "audit"}
+{"events": ["CONFLICT acme/webapp#3371 PR 3371", "CONFLICT acme/webapp#3372 PR 3372", "COPILOT acme/webapp#3369 PR 3369", "COPILOT acme/webapp#3371 PR 3371", "THREADS acme/webapp#3372 PR 3372 [1 unresolved]", "AUDIT BASELINE slot:job-7 [0 active lines; see audit.json before.sources]"], "mode": "audit"}
+{"events": ["APPROVED-OLDHEAD acme/webapp#3111 PR 3111", "CHANGES acme/webapp#3371 PR 3371", "RED acme/webapp#3111 PR 3111", "THREADS acme/webapp#3351 PR 3351 [3 unresolved]", "THREADS acme/webapp#3371 PR 3371 [4 unresolved]", "THREADS acme/webapp#3373 PR 3373 [2 unresolved]", "AUDIT BASELINE slot:job-10 [0 active lines; see audit.json before.sources]", "AUDIT BASELINE slot:job-11 [1 active lines; see audit.json before.sources]"], "mode": "audit"}
+{"events": ["APPROVED-OLDHEAD acme/webapp#3245 PR 3245", "APPROVED-OLDHEAD acme/webapp#3246 PR 3246", "COPILOT acme/webapp#3111 PR 3111", "COPILOT acme/webapp#3371 PR 3371", "THREADS acme/webapp#3372 PR 3372 [3 unresolved]", "AUDIT BASELINE slot:job-12 [0 active lines; see audit.json before.sources]", "AUDIT BASELINE slot:job-7 [0 active lines; see audit.json before.sources]"], "mode": "audit"}
+{"events": ["APPROVED-STACKED acme/webapp#3248 PR 3248", "COPILOT acme/webapp#3111 PR 3111", "COPILOT acme/webapp#3371 PR 3371", "COPILOT acme/webapp#3373 PR 3373", "NOCHECKS acme/webapp#3259 PR 3259", "THREADS acme/webapp#3372 PR 3372 [4 unresolved]", "AUDIT BASELINE slot:job-8 [0 active lines; see audit.json before.sources]"], "mode": "audit"}
+{"events": ["READFAIL github: error\n", "BLOCKED worker w1H Task A"], "mode": "audit"}
+{"events": ["github READFAIL cleared", "APPROVED acme/webapp#3345 PR 3345", "APPROVED-OLDHEAD acme/webapp#3248 PR 3248", "COPILOT acme/webapp#3111 PR 3111", "COPILOT acme/webapp#3371 PR 3371", "COPILOT acme/webapp#3373 PR 3373", "THREADS acme/webapp#3254 PR 3254 [5 unresolved]", "THREADS acme/webapp#3336 PR 3336 [1 unresolved]", "THREADS acme/webapp#3372 PR 3372 [1 unresolved]"], "mode": "audit"}
+{"events": ["COPILOT acme/webapp#3371 PR 3371", "BLOCKED worker wA Task B"], "mode": "audit"}
+{"events": ["WORKTREES webapp has over 40 worktrees; merged ones are not being removed", "CONFLICT acme/webapp#3323 PR 3323", "THREADS acme/webapp#3336 PR 3336 [2 unresolved]", "THREADS acme/webapp#3393 PR 3393 [2 unresolved]", "THREADS acme/webapp#3395 PR 3395 [1 unresolved]", "AUDIT BASELINE slot:job-13 [0 active lines; see audit.json before.sources]"], "mode": "audit"}

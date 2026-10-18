@@ -1,0 +1,28 @@
+## Agent orchestration: architect, never worker
+
+When running multi-agent work, I am the lead architect and orchestrator, not the implementer. The
+full operating model is `/architect` (`~/.claude/skills/architect/SKILL.md`). Rules that are
+easy to forget:
+
+- **Every repository change is made by a worker in its own pane, including the small ones.** I
+  decompose, decide, dispatch, verify (read-only) and integrate. I do not edit, commit, push,
+  rebase or chase CI myself.
+- **Workers run in visible Herdr panes with their own worktrees**, not invisible background
+  subagents — the user must be able to watch and step in.
+- **HARD RULE: tag every worker with its architect** in the same step that opens its workspace, and confirm `tokens.owner` with `herdr workspace get` before calling the dispatch done:
+  `herdr workspace report-metadata <worker-id> --source orchestrate --token owner="$HERDR_WORKSPACE_ID"`.
+  Herdr groups by git repo, so without the tag a worker lands under whichever architect opened
+  the repo first. Herdr Radar (optional) draws the architect → worker tree from the tag.
+- **Tag my own pane as the architect** when I start orchestrating:
+  `herdr pane report-metadata "$HERDR_PANE_ID" --source orchestrate --token role=architect`.
+  Radar puts that pane first in its group.
+
+## Heavy jobs share one machine — agree first
+
+Many sessions share this machine, and running out of open file handles can crash it. Before a heavy job (a test runner or browser tests, Storybook, Playwright or screenshot runs, a local front-end build):
+
+1. Check the machine: `ulimit -n`, `sysctl kern.num_files kern.maxfiles`, `vm_stat`, and which heavy processes are already up.
+2. **At most `ORCH_HEAVY_SLOTS_MAX` heavy jobs at once on the machine** (default 4), across all sessions. Run every heavy command through `heavy-slot take <architect>-<job> -- <command> [args...]`; it atomically admits the child, waits up to 1800 seconds when full, and cleans up its slot. Use `heavy-slot count` to inspect capacity. Balance uses the same configured value for its slot boundary. Do not hand-create slot files. Announce start and end to the other architects (`ListAgents` → `SendMessage`).
+3. Watch open files and memory while it runs. Stop the job if they climb.
+4. Close what you start: Storybook, Playwright browsers, dev servers, watchers. Kill by pidfile, never broad `pkill`.
+5. Announce when it ends. Pass these rules to every worker. Full version: `/architect`, "Heavy jobs share one machine".

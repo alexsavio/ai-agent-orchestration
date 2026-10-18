@@ -1,0 +1,25 @@
+{
+  "result": {
+    "agents": [
+      {
+        "agent": "codex",
+        "agent_session": {"value": "session-worker-001"},
+        "agent_status": "working",
+        "cwd": "/home/dev/Projects/example-app/worktrees/fixture-task",
+        "name": "fixture-worker",
+        "pane_id": "workspace-demo:p2",
+        "terminal_title_stripped": "fixture-worker",
+        "tokens": {},
+        "workspace_id": "workspace-demo"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {"value": "session-coordinator-001"},
+        "agent_status": "working",
+        "name": "Coordinator",
+        "pane_id": "workspace-demo:p3",
+        "tokens": {"role": "coordinator"}
+      }
+    ]
+  }
+}

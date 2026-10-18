@@ -1,0 +1,7 @@
+{"events": ["HOG pid=340 rss=6.2GB age=1130033s cmd=[/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd] parents:"], "mode": "hog"}
+{"events": ["HOG pid=340 rss=7.3GB age=1135303s cmd=[/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd] parents:"], "mode": "hog"}
+{"events": ["HOG pid=340 rss=8.5GB age=1139995s cmd=[/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd] parents:"], "mode": "hog"}
+{"events": ["HOG pid=340 rss=6.2GB age=1140100s cmd=[/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd] parents:"], "mode": "hog"}
+{"events": ["HOG pid=340 rss=6.2GB age=1142134s comm=[fseventsd] cmd=[/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd] parents:"], "mode": "hog"}
+{"events": ["HOG pid=340 rss=9.1GB age=1142186s comm=[fseventsd] cmd=[/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd] parents:"], "mode": "hog"}
+{"events": ["HOG pid=340 rss=8.8GB age=1142279s comm=[fseventsd] cmd=[/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd] parents:"], "mode": "hog"}

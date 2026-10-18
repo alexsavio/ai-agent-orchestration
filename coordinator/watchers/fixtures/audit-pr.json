@@ -1,0 +1,53 @@
+{
+  "number": 7,
+  "title": "Fix menu",
+  "state": "OPEN",
+  "isDraft": false,
+  "mergeable": "MERGEABLE",
+  "baseRefName": "main",
+  "headRefOid": "head",
+  "repository": {
+    "nameWithOwner": "owner/product",
+    "defaultBranchRef": {
+      "name": "main"
+    }
+  },
+  "latestOpinionatedReviews": {
+    "nodes": []
+  },
+  "reviewDecision": null,
+  "reviewRequests": {
+    "totalCount": 1
+  },
+  "reviewThreads": {
+    "nodes": [],
+    "pageInfo": {
+      "hasNextPage": false
+    }
+  },
+  "reviews": {
+    "nodes": []
+  },
+  "commits": {
+    "nodes": [
+      {
+        "commit": {
+          "statusCheckRollup": {
+            "contexts": {
+              "nodes": [
+                {
+                  "name": "unit",
+                  "conclusion": "SUCCESS",
+                  "startedAt": "1"
+                }
+              ],
+              "pageInfo": {
+                "hasNextPage": false
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

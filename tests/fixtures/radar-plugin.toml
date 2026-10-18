@@ -1,0 +1,23 @@
+id = "hhdebb.herdr-radar"
+name = "Radar fixture"
+version = "1.0.0"
+
+[[actions]]
+id = "state-start"
+title = "Start"
+command = ["node", "bin/agent-state.js"]
+
+[[build]]
+command = ["node", "bin/setup.js"]
+
+[[panes]]
+id = "settings"
+title = "Settings"
+command = ["node", "bin/settings.js"]
+
+[[startup]]
+command = ["node", "bin/agent-icons.js"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["node", "bin/agent-state.js"]

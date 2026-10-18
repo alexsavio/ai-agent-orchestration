@@ -1,0 +1,22 @@
+{
+  "herdr": {
+    "result": {
+      "agents": [
+        {
+          "agent": "claude",
+          "agent_session": {"value": "session-architect-001"},
+          "agent_status": "working",
+          "cwd": "/home/dev/Projects/example-app",
+          "name": "Architect::Example",
+          "pane_id": "workspace-demo:p1",
+          "terminal_title_stripped": "Architect::Example",
+          "tokens": {"role": "architect"},
+          "workspace_id": "workspace-demo"
+        }
+      ]
+    }
+  },
+  "usage": {
+    "session-architect-001": {"tokens": 1200}
+  }
+}

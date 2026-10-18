@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Future owner action: run only from recipient Claude's own Bash environment.
+No token is printed. Never discovers or borrows another session's credentials.
+"""
+import argparse
+import json
+import os
+import stat
+import tempfile
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True, type=Path)
+args = parser.parse_args()
+path = os.environ["CLAUDE_CODE_MESSAGING_SOCKET"]
+token = os.environ["CLAUDE_CODE_MESSAGING_TOKEN"]
+pid = int(Path(path).stem)
+record = json.loads((Path.home() / ".claude/sessions" / f"{pid}.json").read_text())
+if record["messagingSocketPath"] != path:
+    raise ValueError("recipient registry mismatch")
+value = {"pid": pid, "socket": path, "token": token,
+         "session_id": record["sessionId"], "proc_start": record["procStart"]}
+try:
+    info = args.output.lstat()
+except FileNotFoundError:
+    pass
+else:
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+        raise ValueError("existing binding must be an owned regular mode-0600 file")
+fd, temporary = tempfile.mkstemp(prefix=f".{args.output.name}.", dir=args.output.parent)
+try:
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        json.dump(value, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, args.output)
+except BaseException:
+    try:
+        os.unlink(temporary)
+    except FileNotFoundError:
+        pass
+    raise
+print("Binding created; token omitted. Owner must verify a round-trip after cutover.")
