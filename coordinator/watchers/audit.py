@@ -25,10 +25,8 @@ nodes{... on CheckRun{name conclusion startedAt} ... on StatusContext{context st
 QUERY = '''query($q:String!,$np:Int!,$ni:Int!,$cursor:String){
 search(query:$q,type:ISSUE,first:$np,after:$cursor){pageInfo{hasNextPage endCursor}
 nodes{... on PullRequest{''' + SELECTION + '}}}}'
-LEGACY_PATTERN = re.compile(r'\$\(|jQuery|\$\.ajax|ajax:(success|complete|error|send)|jquery_ujs|jquery-ujs|rails-ujs'
-                            r'|data-remote|remote: *true|\.trigger\(|select2|legacy-select')
-BUILTIN_EXEMPT = ('scripts/legacy-deletion-ratchet.mjs', 'scripts/legacy-deletion-ratchet-rules.json',
-                  'app/frontend/tests/legacy-deletion-ratchet-cli.spec.js')
+LEGACY_PATTERN = re.compile(r'\$\(|jQuery|\$\.ajax|ajax:(success|complete|error|send)|jquery_ujs|jquery-ujs|rails-ujs|data-remote|remote: *true|\.trigger\(|select2')
+BUILTIN_EXEMPT = ('scripts/legacy-deletion-ratchet.mjs', 'scripts/legacy-deletion-ratchet-rules.json')
 LEGACY_KINDS = ('JSERB', 'JQUERY', 'LEGACY', 'TEST')
 TEST_PATH = re.compile(r'(^|/)(spec|test|tests)/|[._-](spec|test)\.[^/]*$')
 NOT_FRONTEND = ('.sh', '.bash', '.md')
@@ -48,6 +46,23 @@ def positive_setting(name, default, maximum=None):
     if value <= 0 or (maximum and value > maximum):
         raise ValueError(f'{name} must be between 1 and {maximum or "a positive integer"}')
     return value
+
+
+def legacy_patterns():
+    extra = os.environ.get('ORCH_LEGACY_EXTRA_PATTERN', '')
+    try:
+        return (LEGACY_PATTERN, re.compile(extra)) if extra else (LEGACY_PATTERN,)
+    except re.error as error:
+        raise ValueError(f'ORCH_LEGACY_EXTRA_PATTERN is not a valid regex: {error}') from error
+
+
+def exempt_paths():
+    return BUILTIN_EXEMPT + tuple(os.environ.get('ORCH_LEGACY_EXEMPT_PATHS', '').split())
+
+
+def builtin_fingerprint():
+    settings = json.dumps([os.environ.get('ORCH_LEGACY_EXTRA_PATTERN', ''), exempt_paths()])
+    return 'builtin:' + hashlib.sha256(settings.encode()).hexdigest()
 
 
 def fetch_prs(command, page_nodes=None):
@@ -81,7 +96,7 @@ def classify(path, text):
         return 'JSERB'
     if path.endswith(NOT_FRONTEND):
         return None
-    if path.endswith(FRONTEND_EXTENSIONS) and LEGACY_PATTERN.search(text):
+    if path.endswith(FRONTEND_EXTENSIONS) and any(pattern.search(text) for pattern in legacy_patterns()):
         if TEST_PATH.search(path):
             return 'TEST'
         return 'LEGACY' if path.startswith('app/assets/javascripts/') else 'JQUERY'
@@ -313,8 +328,10 @@ def legacy_scan(command, repo, number, base=None, cache=None, bridged=None):
         lines = list(files_lines(pages, ContentReader(command, repo, base)))
     if rules:
         return rules.scan(lines, bridged)
+    legacy_patterns()
+    exempt = exempt_paths()
     return [(kind, path, text) for path, _, text, added in lines
-            if added and path not in BUILTIN_EXEMPT and (kind := classify(path, text))]
+            if added and path not in exempt and (kind := classify(path, text))]
 
 
 def legacy_line(label, hits):
@@ -394,7 +411,7 @@ def legacy_entries(command, prs, cache):
         key = f"{repo}#{pr['number']}"
         old = cache.get(key)
         try:
-            fingerprint = base_rules(command, repo, pr, rules)[1]
+            fingerprint = base_rules(command, repo, pr, rules)[1] or builtin_fingerprint()
             if old and old['head'] == pr['headRefOid'] and old.get('rules') == fingerprint and old.get('base') == pr['baseRefName']:
                 entries[key] = old
             elif budget > 0:
