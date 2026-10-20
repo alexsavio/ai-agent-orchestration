@@ -16,6 +16,7 @@ case "${0##*/}" in
       touch "$LAUNCHCTL_STATE"
       case "$1" in
         print) grep -qxF "${2##*/}" "$LAUNCHCTL_STATE" ;;
+        # LAUNCHCTL_KICKSTART_FAIL is a label; SYSTEMCTL_RESTART_FAIL is an exit code.
         kickstart) last=${*: -1} && [ "${last##*/}" != "${LAUNCHCTL_KICKSTART_FAIL:-}" ] ;;
         bootstrap) label=${3##*/} && printf '%s\n' "${label%.plist}" >>"$LAUNCHCTL_STATE" ;;
         bootout)

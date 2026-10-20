@@ -544,13 +544,14 @@ EOF
   [ "$(grep -n "^kickstart gui/$(id -u)/orch.coord-watcher-hog$" "$calls" | cut -d: -f1)" -gt "$(grep -n '^bootstrap ' "$calls" | cut -d: -f1)" ]
 }
 
-@test "macOS registration unloads a job it cannot start so the start hint holds" {
+@test "macOS registration unloads a job it cannot start and tells the user to run install.sh again" {
   rendered="$TMP/orch.coord-watcher-hog.plist"
   agents="$TMP/LaunchAgents"
   loaded=0
   printf '<plist/>\n' >"$rendered"
   # shellcheck disable=SC1090
   source "$ROOT/lib/platform/macos.sh"
+  say() { printf '%-15s %s\n' "$1" "$2"; }
   platform_launch_agents_dir() { printf '%s' "$agents"; }
   launchctl() {
     case "$1" in
@@ -561,13 +562,15 @@ EOF
     esac
   }
   status=0
-  platform_register_service "$rendered" || status=$?
-  [ "$status" -eq 1 ]
+  platform_register_service "$rendered" >"$TMP/register.out" || status=$?
+  [ "$status" -eq 3 ]
   [ "$loaded" = 0 ]
   [ -f "$agents/orch.coord-watcher-hog.plist" ]
+  grep -qF "did not start and was unloaded; run install.sh again" "$TMP/register.out"
+  [ "$(grep -cF "launchctl bootstrap" "$TMP/register.out")" -eq 0 ]
 }
 
-@test "macOS registration waits for a job it cannot start to unload before it hints the bootstrap" {
+@test "macOS registration waits for a job it cannot start to unload before it reports it" {
   rendered="$TMP/orch.coord-watcher-hog.plist"
   agents="$TMP/LaunchAgents"
   loaded=0
@@ -575,6 +578,7 @@ EOF
   printf '<plist/>\n' >"$rendered"
   # shellcheck disable=SC1090
   source "$ROOT/lib/platform/macos.sh"
+  say() { :; }
   platform_launch_agents_dir() { printf '%s' "$agents"; }
   launchctl() {
     case "$1" in
@@ -592,8 +596,8 @@ EOF
     esac
   }
   status=0
-  ORCH_LAUNCHD_WAIT_SLEEP=0 ORCH_LAUNCHD_WAIT_TRIES=5 platform_register_service "$rendered" || status=$?
-  [ "$status" -eq 1 ]
+  ORCH_LAUNCHD_WAIT_SLEEP=0 ORCH_LAUNCHD_WAIT_TRIES=5 platform_register_service "$rendered" >/dev/null || status=$?
+  [ "$status" -eq 3 ]
   [ "$lingering" -eq 0 ]
 }
 
@@ -633,6 +637,22 @@ EOF
   systemctl() {
     case "$2" in
       restart) return 3 ;;
+    esac
+  }
+  status=0
+  platform_register_service "$unit" 1 || status=$?
+  [ "$status" -eq 1 ]
+}
+
+@test "Linux registration turns a daemon-reload exit code of 3 into status 1 for a unit without [Install]" {
+  unit="$TMP/orch.coord-watcher-hog.service"
+  printf '[Service]\n' >"$unit"
+  # shellcheck disable=SC1090
+  source "$ROOT/lib/platform/linux.sh"
+  platform_user_units_dir() { printf '%s' "$TMP/units"; }
+  systemctl() {
+    case "$2" in
+      daemon-reload) return 3 ;;
     esac
   }
   status=0

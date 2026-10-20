@@ -152,7 +152,8 @@ platform_register_service() {
         say "not registered" "$dest (still loaded; run: launchctl bootout gui/$uid/$label, then run install.sh again)"
         return 3
       fi
-      return 1
+      say "not registered" "$file (did not start and was unloaded; run install.sh again)"
+      return 3
     fi
     sleep "${ORCH_LAUNCHD_WAIT_SLEEP:-0.5}"
   done
