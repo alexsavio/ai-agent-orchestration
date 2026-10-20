@@ -78,8 +78,8 @@ platform_register_service() {
     [ ! -L "$link" ] || [ "$(readlink "$link")" = "$file" ] || rm -f "$link" || return 1
     [ "$changed" = 1 ] || [ ! -L "$link" ] || return 2
     [ -L "$link" ] || systemctl --user link "$file" || return 1
-    systemctl --user daemon-reload
-    return
+    systemctl --user daemon-reload || return 1
+    return 0
   fi
   if [ "$changed" = 0 ] && systemctl --user is-enabled --quiet "$name" 2>/dev/null &&
     systemctl --user is-active --quiet "$name" 2>/dev/null; then
@@ -87,7 +87,7 @@ platform_register_service() {
   fi
   systemctl --user daemon-reload || return 1
   systemctl --user enable --now "$file" || return 1
-  [ "$changed" = 0 ] || systemctl --user restart "$name"
+  [ "$changed" = 0 ] || systemctl --user restart "$name" || return 1
 }
 
 # platform_restart_service <rendered unit>: reloads unit files and restarts the unit onto the current code and config.

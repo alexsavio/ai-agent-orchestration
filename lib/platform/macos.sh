@@ -135,7 +135,8 @@ platform_register_service() {
   launchctl bootout "gui/$uid/$label" >/dev/null 2>&1 || true
   if ! platform_wait_unloaded "$uid" "$label"; then
     # An existing installed copy is replaced only after its old job unloads.
-    return 1
+    say "not registered" "$file (still loaded; run: launchctl bootout gui/$uid/$label, then run install.sh again)"
+    return 3
   fi
   if [ "$missing_copy" = 0 ]; then
     platform_copy_service "$file" "$dest" || return 1
@@ -145,13 +146,14 @@ platform_register_service() {
     if launchctl bootstrap "gui/$uid" "$dest" || launchctl print "gui/$uid/$label" >/dev/null 2>&1; then
       # Bootstrapped from launchd's Background session (a shell in a Herdr pane), the job loads but RunAtLoad does not run it.
       launchctl kickstart "gui/$uid/$label" && return 0
-      # Unloaded again so the printed bootstrap command can register it.
+      # Unloaded again so the next install run can register it.
       launchctl bootout "gui/$uid/$label" >/dev/null 2>&1 || true
       if ! platform_wait_unloaded "$uid" "$label"; then
-        say "not registered" "$dest (still loaded; run: launchctl bootout gui/$uid/$label, then: $(platform_service_start_hint) $(printf '%q' "$dest"))"
+        say "not registered" "$dest (still loaded; run: launchctl bootout gui/$uid/$label, then run install.sh again)"
         return 3
       fi
-      return 1
+      say "not registered" "$file (did not start and was unloaded; run install.sh again)"
+      return 3
     fi
     sleep "${ORCH_LAUNCHD_WAIT_SLEEP:-0.5}"
   done

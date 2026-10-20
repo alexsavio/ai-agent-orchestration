@@ -16,7 +16,8 @@ case "${0##*/}" in
       touch "$LAUNCHCTL_STATE"
       case "$1" in
         print) grep -qxF "${2##*/}" "$LAUNCHCTL_STATE" ;;
-        kickstart) [ -z "${LAUNCHCTL_KICKSTART_FAIL:-}" ] ;;
+        # LAUNCHCTL_KICKSTART_FAIL is a label; SYSTEMCTL_RESTART_FAIL is an exit code.
+        kickstart) last=${*: -1} && [ "${last##*/}" != "${LAUNCHCTL_KICKSTART_FAIL:-}" ] ;;
         bootstrap) label=${3##*/} && printf '%s\n' "${label%.plist}" >>"$LAUNCHCTL_STATE" ;;
         bootout)
           [ "${2##*/}" != "${LAUNCHCTL_STUCK:-}" ] || exit 1
@@ -40,7 +41,7 @@ case "${0##*/}" in
       case "$2 ${3:-}" in
         'is-enabled --quiet') grep -qxF "$4" "$SYSTEMCTL_STATE" ;;
         'is-active --quiet') [ "$4" != "${SYSTEMCTL_INACTIVE:-}" ] && grep -qxF "$4" "$SYSTEMCTL_STATE" ;;
-        'restart '*) [ -z "${SYSTEMCTL_RESTART_FAIL:-}" ] ;;
+        'restart '*) [ -z "${SYSTEMCTL_RESTART_FAIL:-}" ] || exit "$SYSTEMCTL_RESTART_FAIL" ;;
         'enable --now') printf '%s\n' "${4##*/}" >>"$SYSTEMCTL_STATE" ;;
         link\ *) mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" && ln -sf "$3" "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/" ;;
         'disable --now')
