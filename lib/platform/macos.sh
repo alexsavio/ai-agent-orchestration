@@ -120,6 +120,7 @@ platform_copy_service() {
 
 # platform_register_service <rendered plist>: launchd loads ~/Library/LaunchAgents at login, so the plist is copied there
 # and bootstrapped and started when the copy changed or the job is not loaded. Status 2: already registered.
+# Status 3: not started and still loaded after its bootout; the message is already printed.
 platform_register_service() {
   local file=$1 uid label dest missing_copy=0
   uid=$(id -u)
@@ -146,6 +147,10 @@ platform_register_service() {
       launchctl kickstart "gui/$uid/$label" && return 0
       # Unloaded again so the printed bootstrap command can register it.
       launchctl bootout "gui/$uid/$label" >/dev/null 2>&1 || true
+      if ! platform_wait_unloaded "$uid" "$label"; then
+        say "not registered" "$dest (still loaded; run: launchctl bootout gui/$uid/$label, then: $(platform_service_start_hint) $(printf '%q' "$dest"))"
+        return 3
+      fi
       return 1
     fi
     sleep "${ORCH_LAUNCHD_WAIT_SLEEP:-0.5}"
