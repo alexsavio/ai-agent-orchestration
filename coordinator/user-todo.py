@@ -20,10 +20,16 @@ import unicodedata
 from pathlib import Path
 
 NOW = "## Waits on the user"
+PLACEHOLDERS = {"none", "none yet", "nothing", "nothing yet", "n/a", "-"}
 
 
 def normalized(text):
     return " ".join(text.split())
+
+
+def placeholder(text):
+    """True when the whole item is an empty-section marker such as "(none yet)"."""
+    return text.casefold().strip(" ()[]{}.,;:!") in PLACEHOLDERS
 
 
 def status_items(directory, read=None):
@@ -58,7 +64,7 @@ def status_items(directory, read=None):
                 section = None
             elif section is not None and line.startswith(("- ", "* ")):
                 text = normalized(line[2:])
-                if text:
+                if text and not placeholder(text):
                     section.append({"source": path.name, "text": text,
                                     "id": path.name + "\0" + text})
     return now, unreadable
