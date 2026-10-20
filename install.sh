@@ -831,6 +831,7 @@ register_services() {
         esac
         n_ok=$((n_ok + 1))
         ;;
+      3) failed=1 ;;
       *)
         say "not registered" "$file (run: $(platform_service_start_hint) $(printf '%q' "$file"))"
         failed=1
