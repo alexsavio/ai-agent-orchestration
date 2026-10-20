@@ -520,6 +520,52 @@ EOF
   platform_register_service "$rendered"
 }
 
+@test "macOS registration starts a job that launchd loads without running" {
+  rendered="$TMP/orch.coord-watcher-hog.plist"
+  agents="$TMP/LaunchAgents"
+  calls="$TMP/launchctl.calls"
+  loaded=0
+  running=0
+  printf '<plist/>\n' >"$rendered"
+  # shellcheck disable=SC1090
+  source "$ROOT/lib/platform/macos.sh"
+  platform_launch_agents_dir() { printf '%s' "$agents"; }
+  launchctl() {
+    printf '%s\n' "$*" >>"$calls"
+    case "$1" in
+      print) [ "$loaded" = 1 ] ;;
+      bootstrap) loaded=1 ;;
+      kickstart) [ "$loaded" = 1 ] && running=1 ;;
+    esac
+  }
+  platform_register_service "$rendered"
+  [ "$running" = 1 ]
+  [ "$(grep -n "^kickstart gui/$(id -u)/orch.coord-watcher-hog$" "$calls" | cut -d: -f1)" -gt "$(grep -n '^bootstrap ' "$calls" | cut -d: -f1)" ]
+}
+
+@test "macOS registration unloads a job it cannot start so the start hint holds" {
+  rendered="$TMP/orch.coord-watcher-hog.plist"
+  agents="$TMP/LaunchAgents"
+  loaded=0
+  printf '<plist/>\n' >"$rendered"
+  # shellcheck disable=SC1090
+  source "$ROOT/lib/platform/macos.sh"
+  platform_launch_agents_dir() { printf '%s' "$agents"; }
+  launchctl() {
+    case "$1" in
+      print) [ "$loaded" = 1 ] ;;
+      bootstrap) loaded=1 ;;
+      kickstart) return 1 ;;
+      bootout) loaded=0 ;;
+    esac
+  }
+  status=0
+  platform_register_service "$rendered" || status=$?
+  [ "$status" -eq 1 ]
+  [ "$loaded" = 0 ]
+  [ -f "$agents/orch.coord-watcher-hog.plist" ]
+}
+
 @test "install exits non-zero and says so when a watcher service is not registered" {
   fresh_install
   prepare_custom_service_config "$HOME/.claude/orchestration.toml"
