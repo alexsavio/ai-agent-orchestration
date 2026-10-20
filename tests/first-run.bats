@@ -304,7 +304,7 @@ EOF
   on_tty ''
   [ "$status" -eq 0 ]
   printf 'older-revision\n' >"$HOME/.claude/coordinator/watchers/.registered-revision"
-  LAUNCHCTL_KICKSTART_FAIL=1 SYSTEMCTL_RESTART_FAIL=1 on_tty ''
+  LAUNCHCTL_KICKSTART_FAIL=orch.coord-watcher-hog SYSTEMCTL_RESTART_FAIL=1 on_tty ''
   [ "$status" -eq 1 ]
   contains "$output" 'not restarted'
   contains "$output" 'Failed:'
@@ -367,7 +367,8 @@ EOF
       contains "$(sed "1,${before}d" "$calls")" "bootstrap gui/$(id -u) $dir/orch.coord-watcher-host.plist"
       printf 'old copy\n' >"$dir/orch.coord-watcher-hog.plist"
       LAUNCHCTL_STUCK=orch.coord-watcher-hog on_tty ''
-      contains "$output" 'not registered'
+      contains "$output" 'launchctl bootout gui/'"$(id -u)"'/orch.coord-watcher-hog, then run install.sh again'
+      not_contains "$output" 'orch.coord-watcher-hog.plist (run: launchctl bootstrap'
       [ "$(cat "$dir/orch.coord-watcher-hog.plist")" = 'old copy' ]
       ;;
     Linux)
@@ -409,7 +410,7 @@ EOF
       LAUNCHCTL_STUCK="$watcher" on_tty ''
       [ "$status" -eq 1 ]
       [ -f "$dir/$watcher.plist" ]
-      contains "$output" "not registered  $HOME/.claude/coordinator/watchers/service/macos/$watcher.plist"
+      contains "$output" "not registered  $HOME/.claude/coordinator/watchers/service/macos/$watcher.plist (still loaded; run: launchctl bootout gui/$(id -u)/$watcher, then run install.sh again)"
       ;;
     Linux)
       watcher=orch.coord-watcher-hog.service
@@ -621,7 +622,22 @@ EOF
   ORCH_LAUNCHD_WAIT_SLEEP=0 ORCH_LAUNCHD_WAIT_TRIES=3 platform_register_service "$rendered" >"$TMP/register.out" || status=$?
   [ "$status" -eq 3 ]
   grep -qF "launchctl bootout gui/$(id -u)/orch.coord-watcher-hog" "$TMP/register.out"
-  grep -qF "launchctl bootstrap" "$TMP/register.out"
+  grep -qF "then run install.sh again" "$TMP/register.out"
+}
+
+@test "Linux registration turns a restart exit code of 3 into status 1" {
+  unit="$TMP/orch.coord-watcher-hog.service"
+  printf '[Service]\n[Install]\nWantedBy=default.target\n' >"$unit"
+  # shellcheck disable=SC1090
+  source "$ROOT/lib/platform/linux.sh"
+  systemctl() {
+    case "$2" in
+      restart) return 3 ;;
+    esac
+  }
+  status=0
+  platform_register_service "$unit" 1 || status=$?
+  [ "$status" -eq 1 ]
 }
 
 @test "install fails and prints the bootout command for a job that will not start or unload" {
@@ -630,9 +646,9 @@ EOF
   prepare_custom_service_config "$HOME/.claude/orchestration.toml"
   config_set ORCH_CODEX_WORKER_MODEL 'w' ORCH_CODEX_SMART_MODEL 's'
   use_service_state
-  ORCH_LAUNCHD_WAIT_SLEEP=0 ORCH_LAUNCHD_WAIT_TRIES=2 LAUNCHCTL_KICKSTART_FAIL=1 LAUNCHCTL_STUCK=orch.coord-watcher-hog on_tty ''
+  ORCH_LAUNCHD_WAIT_SLEEP=0 ORCH_LAUNCHD_WAIT_TRIES=2 LAUNCHCTL_KICKSTART_FAIL=orch.coord-watcher-hog LAUNCHCTL_STUCK=orch.coord-watcher-hog on_tty ''
   [ "$status" -eq 1 ]
-  contains "$output" 'launchctl bootout gui/'"$(id -u)"'/orch.coord-watcher-hog, then: launchctl bootstrap'
+  contains "$output" 'launchctl bootout gui/'"$(id -u)"'/orch.coord-watcher-hog, then run install.sh again'
   not_contains "$output" 'orch.coord-watcher-hog.plist (run: launchctl bootstrap'
   not_contains "$output" 'Done:'
   [ ! -e "$HOME/.claude/coordinator/watchers/.registered-revision" ]

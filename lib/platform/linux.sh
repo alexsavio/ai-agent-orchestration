@@ -87,7 +87,7 @@ platform_register_service() {
   fi
   systemctl --user daemon-reload || return 1
   systemctl --user enable --now "$file" || return 1
-  [ "$changed" = 0 ] || systemctl --user restart "$name"
+  [ "$changed" = 0 ] || systemctl --user restart "$name" || return 1
 }
 
 # platform_restart_service <rendered unit>: reloads unit files and restarts the unit onto the current code and config.
