@@ -56,6 +56,63 @@ class TodoTest(IsolatedTestCase):
             _, events = w.reduce_todo(state, {"now": now, "unreadable": unreadable})
             self.assertEqual(events, [])
 
+    def placeholder_items(self, line):
+        with tempfile.TemporaryDirectory() as tmp:
+            status = self.sample(Path(tmp), "## Waits on the user\n" + line + "\n")
+            return todo.status_items(status)[0]
+
+    def test_placeholder_none_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- none"), [])
+
+    def test_placeholder_none_yet_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- none yet"), [])
+
+    def test_placeholder_nothing_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- nothing"), [])
+
+    def test_placeholder_nothing_yet_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- nothing yet"), [])
+
+    def test_placeholder_n_a_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- n/a"), [])
+
+    def test_placeholder_dash_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- -"), [])
+
+    def test_placeholder_paren_none_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- (none)"), [])
+
+    def test_placeholder_paren_none_yet_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- (none yet)"), [])
+
+    def test_placeholder_paren_nothing_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- (nothing)"), [])
+
+    def test_placeholder_paren_nothing_yet_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- (nothing yet)"), [])
+
+    def test_placeholder_paren_n_a_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- (n/a)"), [])
+
+    def test_placeholder_paren_dash_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- (-)"), [])
+
+    def test_placeholder_upper_none_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("- None"), [])
+
+    def test_placeholder_star_none_is_not_an_item(self):
+        self.assertEqual(self.placeholder_items("* (None)"), [])
+
+    def test_real_items_that_mention_none_stay(self):
+        for line in ("- None of the PRs is green -> Coordinator", "- Nothing builds -> Architect", "- Approve none -> Coordinator"):
+            with self.subTest(line=line):
+                self.assertEqual([i["text"] for i in self.placeholder_items(line)], [line[2:]])
+
+    def test_placeholder_does_not_hide_a_real_item_beside_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            status = self.sample(Path(tmp), "## Waits on the user\n- (none)\n- Approve it -> Coordinator\n")
+            self.assertEqual([i["text"] for i in todo.status_items(status)[0]], ["Approve it -> Coordinator"])
+
     def test_two_items_batch_and_read_failure_recovery(self):
         before = {"now": {}, "unreadable": []}
         raw = {"now": [{"id": "a\0one", "source": "a", "text": "one"}, {"id": "b\0two", "source": "b", "text": "two"}],
