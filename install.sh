@@ -955,11 +955,127 @@ guide_chrome_load() {
   say "load once" "$(platform_load_unpacked_steps "$what")"
 }
 
+resolve_link_path() {
+  local path=$1 link dir hops=0 max_hops=40
+  [ -L "$path" ] || { printf '%s\n' "$path"; return; }
+  while [ -L "$path" ]; do
+    hops=$((hops + 1))
+    [ "$hops" -le "$max_hops" ] || return 1
+    link=$(readlink "$path") || return
+    case "$link" in
+      /*) path=$link ;;
+      *)
+        dir=$(cd -P "$(dirname "$path")" && pwd) || return
+        path="$dir/$link"
+        ;;
+    esac
+  done
+  dir=$(cd -P "$(dirname "$path")" && pwd) || return
+  printf '%s/%s\n' "$dir" "$(basename "$path")"
+}
+
+claude_md_mode() {
+  local mode
+  mode=$(stat -f '%Lp' "$1" 2>/dev/null) || mode=""
+  case "$mode" in
+    '' | *[!0-7]*) mode=$(stat -c '%a' "$1") ;;
+  esac
+  case "$mode" in
+    '' | *[!0-7]*) return 1 ;;
+  esac
+  printf '%s\n' "$mode"
+}
+
+replace_claude_md_block() (
+  target=$1 start_line=$2 end_line=$3 snippet=$4 mode=$5 tmp=""
+  # shellcheck disable=SC2317,SC2329 # Called by the traps below.
+  cleanup() { [ -z "$tmp" ] || rm -f "$tmp"; }
+  trap cleanup EXIT
+  trap 'cleanup; exit 1' HUP INT TERM
+  tmp=$(mktemp "$target.tmp.XXXXXX") || exit
+  if [ "$start_line" -gt 1 ]; then
+    head -n "$((start_line - 1))" "$target" >"$tmp"
+  fi
+  cat "$snippet" >>"$tmp"
+  tail -n "+$((end_line + 1))" "$target" >>"$tmp"
+  chmod "$mode" "$tmp"
+  mv "$tmp" "$target"
+  tmp=""
+)
+
+append_claude_md_block() (
+  target=$1 snippet=$2 mode=${3:-} tmp=""
+  # shellcheck disable=SC2317,SC2329 # Called by the traps below.
+  cleanup() { [ -z "$tmp" ] || rm -f "$tmp"; }
+  trap cleanup EXIT
+  trap 'cleanup; exit 1' HUP INT TERM
+  tmp=$(mktemp "$target.tmp.XXXXXX") || exit
+  if [ -f "$target" ]; then
+    cat "$target" >"$tmp"
+    if [ -s "$target" ] && [ "$(tail -c 1 "$target" | wc -l | tr -d ' ')" = 0 ]; then
+      printf '\n' >>"$tmp"
+    fi
+  fi
+  cat "$snippet" >>"$tmp"
+  [ -z "$mode" ] || chmod "$mode" "$tmp"
+  mv "$tmp" "$target"
+  tmp=""
+)
+
 claude_md_hint() {
-  if grep -q "Agent orchestration: architect, never worker" "$CLAUDE_DIR/CLAUDE.md" 2>/dev/null; then
-    say "already set" "$CLAUDE_DIR/CLAUDE.md: orchestration sections"
+  local claude_md snippet marker_info marker_state start_line end_line backup mode
+  local start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  local end='<!-- orchestration:end -->'
+  snippet="$ORCH_REPO/snippets/CLAUDE.md.snippet"
+  if ! claude_md=$(resolve_link_path "$CLAUDE_DIR/CLAUDE.md"); then
+    say "skipped" "$CLAUDE_DIR/CLAUDE.md: cannot resolve symlink; leaving it unchanged"
+    return
+  fi
+
+  marker_info=$(LC_ALL=C awk -v start="$start" -v end="$end" '
+    { line = $0; sub(/\r$/, "", line) }
+    line == start { starts++; if (!start_line) start_line = NR }
+    line == end { ends++; if (!start_line) end_before = 1; else if (!end_line) end_line = NR }
+    END {
+      if (!starts && !ends) print "absent"
+      else if (starts != 1 || ends != 1 || end_before || !end_line) print "invalid"
+      else print "managed:" start_line ":" end_line
+    }
+  ' "$claude_md" 2>/dev/null || printf '%s' absent)
+  marker_state=${marker_info%%:*}
+
+  if [ "$marker_state" = managed ]; then
+    start_line=${marker_info#*:}
+    end_line=${start_line#*:}
+    start_line=${start_line%%:*}
+    if sed -n "${start_line},${end_line}p" "$claude_md" | tr -d '\r' | cmp -s - "$snippet"; then
+      say "already set" "$claude_md: orchestration sections"
+      return
+    fi
+
+    backup=$(backup_name "$claude_md")
+    cp -p "$claude_md" "$backup"
+    say "backed up" "$claude_md -> $backup"
+    n_backup=$((n_backup + 1))
+    mode=$(claude_md_mode "$claude_md") || die "cannot determine mode for $claude_md"
+    replace_claude_md_block "$claude_md" "$start_line" "$end_line" "$snippet" "$mode"
+    say "updated" "$claude_md: orchestration sections"
+  elif [ "$marker_state" = invalid ]; then
+    say "skipped" "$claude_md: orchestration markers are incomplete or ambiguous; fix the start and end markers, then rerun install.sh"
+  elif [ -f "$claude_md" ] && grep -F -q "Agent orchestration: architect, never worker" "$claude_md"; then
+    say "wrap once" "$claude_md: surround the existing orchestration text with $start and $end"
   else
-    say "paste" "$ORCH_REPO/snippets/CLAUDE.md.snippet into $CLAUDE_DIR/CLAUDE.md"
+    if [ -f "$claude_md" ]; then
+      backup=$(backup_name "$claude_md")
+      cp -p "$claude_md" "$backup"
+      say "backed up" "$claude_md -> $backup"
+      n_backup=$((n_backup + 1))
+      mode=$(claude_md_mode "$claude_md") || die "cannot determine mode for $claude_md"
+    else
+      mode=""
+    fi
+    append_claude_md_block "$claude_md" "$snippet" "$mode"
+    say "added" "$claude_md: orchestration sections"
   fi
 }
 

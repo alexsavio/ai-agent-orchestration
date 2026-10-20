@@ -11,6 +11,210 @@ load test_helper
   [ -d "$HOME/.claude/coordinator/watchers/bindings" ]
 }
 
+@test "CLAUDE.md marked orchestration block is replaced without changing surrounding text" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf 'before\n%s\nold managed text\n%s\nafter\n' "$start" "$end" >"$claude_md"
+  chmod 640 "$claude_md"
+  install_ok
+  contains "$output" 'updated'
+  [ "$(head -n 1 "$claude_md")" = before ]
+  [ "$(tail -n 1 "$claude_md")" = after ]
+  cmp "$CLONE/snippets/CLAUDE.md.snippet" <(sed -n "/$start/,/$end/p" "$claude_md")
+  mode=$(stat -f '%Lp' "$claude_md" 2>/dev/null) || mode=$(stat -c '%a' "$claude_md")
+  [ "$mode" = 640 ]
+  for backup in "$HOME"/.claude/backups/*/CLAUDE.md; do [ -f "$backup" ]; done
+  [ "$(cat "$backup")" = "$(printf 'before\n%s\nold managed text\n%s\nafter' "$start" "$end")" ]
+}
+
+@test "CLAUDE.md replacement ignores inline marker text outside the managed block" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf 'quoted marker: %s\npersonal instructions\n%s\nold managed text\n%s\nafter\n' "$start" "$start" "$end" >"$claude_md"
+  install_ok
+  contains "$output" 'updated'
+  [ "$(head -n 2 "$claude_md")" = "$(printf 'quoted marker: %s\npersonal instructions' "$start")" ]
+  [ "$(tail -n 1 "$claude_md")" = after ]
+}
+
+@test "CLAUDE.md replacement uses a clean GNU stat mode fallback" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf 'personal instructions\n%s\nold managed text\n%s\n' "$start" "$end" >"$claude_md"
+  cat >"$BIN/stat" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = -f ]; then
+  printf 'unexpected filesystem output\n'
+  exit 0
+fi
+[ "$1" = -c ] && { printf '640\n'; exit 0; }
+exit 1
+EOF
+  chmod +x "$BIN/stat"
+  install_ok
+  contains "$output" 'updated'
+  rm "$BIN/stat"
+  mode=$(stat -f '%Lp' "$claude_md" 2>/dev/null) || mode=$(stat -c '%a' "$claude_md")
+  [ "$mode" = 640 ]
+}
+
+@test "CLAUDE.md added block on line one updates without leaving a temporary file" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf '%s\nold managed text\n%s\n' "$start" "$end" >"$claude_md"
+  install_ok
+  contains "$output" 'updated'
+  cmp "$CLONE/snippets/CLAUDE.md.snippet" "$claude_md"
+  [ -z "$(find "$HOME/.claude" -name 'CLAUDE.md.tmp.*' -print)" ]
+}
+
+@test "CLAUDE.md start marker without an end marker is skipped on every run" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  printf 'top\n%s\nUSER PRECIOUS\nmore\n' "$start" >"$claude_md"
+  before=$(cksum "$claude_md")
+  install_ok
+  contains "$output" 'skipped'
+  [ "$(cksum "$claude_md")" = "$before" ]
+  install_ok
+  contains "$output" 'skipped'
+  [ "$(cksum "$claude_md")" = "$before" ]
+}
+
+@test "CLAUDE.md CRLF markers are recognized and replaced" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf 'before\r\n%s\r\nold managed text\r\n%s\r\nafter\r\n' "$start" "$end" >"$claude_md"
+  install_ok
+  contains "$output" 'updated'
+  [ "$(head -n 1 "$claude_md")" = $'before\r' ]
+  [ "$(tail -n 1 "$claude_md")" = $'after\r' ]
+}
+
+@test "misordered CLAUDE.md markers are skipped without changing the file" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf '%s\ntext\n%s\n' "$end" "$start" >"$claude_md"
+  before=$(cksum "$claude_md")
+  install_ok
+  contains "$output" 'skipped'
+  [ "$(cksum "$claude_md")" = "$before" ]
+}
+
+@test "CLAUDE.md symlink stays linked while its target is updated" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  target="$TMP/real-CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf '%s\nold managed text\n%s\n' "$start" "$end" >"$target"
+  rm "$claude_md"
+  ln -s "$target" "$claude_md"
+  install_ok
+  [ -L "$claude_md" ]
+  cmp "$CLONE/snippets/CLAUDE.md.snippet" "$target"
+}
+
+@test "existing CLAUDE.md is backed up before the marked block is appended" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  printf 'personal instructions\n' >"$claude_md"
+  install_ok
+  contains "$output" 'backed up'
+  for backup in "$HOME"/.claude/backups/*/CLAUDE.md; do [ -f "$backup" ]; done
+  [ "$(cat "$backup")" = 'personal instructions' ]
+}
+
+@test "CLAUDE.md replacement stops safely when interrupted during its prefix copy" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  start='<!-- orchestration:start (managed by ai-agent-orchestration install.sh; edits inside are replaced) -->'
+  end='<!-- orchestration:end -->'
+  printf 'personal instructions\n%s\nold managed text\n%s\nafter\n' "$start" "$end" >"$claude_md"
+  before=$(cksum "$claude_md")
+  cat >"$BIN/head" <<'EOF'
+#!/usr/bin/env bash
+kill -TERM "$PPID"
+exit 0
+EOF
+  chmod +x "$BIN/head"
+  run /bin/bash "$CLONE/install.sh"
+  [ "$status" -ne 0 ]
+  [ "$(cksum "$claude_md")" = "$before" ]
+  [ -z "$(find "$HOME/.claude" -name 'CLAUDE.md.tmp.*' -print)" ]
+}
+
+@test "self-linked CLAUDE.md is skipped without hanging the installer" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  rm "$claude_md"
+  ln -s CLAUDE.md "$claude_md"
+  # shellcheck disable=SC2016 # Python receives this program literally.
+  run python3 -c '
+import subprocess
+import sys
+
+try:
+    result = subprocess.run(sys.argv[1:], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=20)
+except subprocess.TimeoutExpired as error:
+    if error.stdout:
+        sys.stdout.write(error.stdout)
+    print("command timed out after 20 seconds", file=sys.stderr)
+    raise SystemExit(124)
+
+sys.stdout.write(result.stdout)
+raise SystemExit(result.returncode)
+' /bin/bash "$CLONE/install.sh"
+  [ "$status" -eq 0 ]
+  contains "$output" 'skipped'
+  contains "$output" 'cannot resolve'
+  [ -L "$claude_md" ]
+}
+
+@test "CLAUDE.md marked orchestration block is a no-op when current" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  before=$(cksum "$claude_md")
+  backups_before=$(find "$HOME/.claude/backups" -type f 2>/dev/null | wc -l | tr -d ' ')
+  install_ok
+  contains "$output" 'already set'
+  [ "$(cksum "$claude_md")" = "$before" ]
+  [ "$(find "$HOME/.claude/backups" -type f 2>/dev/null | wc -l | tr -d ' ')" = "$backups_before" ]
+}
+
+@test "CLAUDE.md is appended with marked orchestration block when absent" {
+  fresh_install
+  rm "$HOME/.claude/CLAUDE.md"
+  install_ok
+  contains "$output" 'added'
+  cmp "$CLONE/snippets/CLAUDE.md.snippet" "$HOME/.claude/CLAUDE.md"
+}
+
+@test "unmarked CLAUDE.md orchestration sections are left unchanged with a marker hint" {
+  fresh_install
+  claude_md="$HOME/.claude/CLAUDE.md"
+  printf 'personal instructions\n\n## Agent orchestration: architect, never worker\nold text\n' >"$claude_md"
+  before=$(cksum "$claude_md")
+  install_ok
+  contains "$output" 'wrap once'
+  contains "$output" 'orchestration:start'
+  contains "$output" 'orchestration:end'
+  [ "$(cksum "$claude_md")" = "$before" ]
+}
+
 @test "documented context watcher command emits a JSON recycle alert" {
   fresh_install
   mkdir -p "$HOME/.claude/context-usage"
