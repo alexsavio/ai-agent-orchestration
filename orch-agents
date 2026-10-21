@@ -15,10 +15,13 @@ def herdr(*args):
     """The `result` object of a herdr command; herdr's own error message when it fails."""
     binary = os.environ.get('HERDR_BIN_PATH') or os.environ.get('ORCH_HERDR_BIN') or 'herdr'
     done = subprocess.run([binary, *args], capture_output=True, text=True, timeout=30)
-    try:
-        body = json.loads(done.stdout)
-    except ValueError:
-        body = None
+    body = None
+    for text in (done.stdout, done.stderr):
+        try:
+            body = json.loads(text)
+            break
+        except ValueError:
+            continue
     if done.returncode:
         error = body.get('error') if isinstance(body, dict) else None
         message = error.get('message') if isinstance(error, dict) else None

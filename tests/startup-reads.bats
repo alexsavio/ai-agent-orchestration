@@ -12,7 +12,7 @@ setup() {
   cat >"$TMP/herdr" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
-  'agent list') cat "${AGENTS_JSON:?}"; exit "${AGENTS_EXIT:-0}" ;;
+  'agent list') if [ -n "${AGENTS_STDERR:-}" ]; then cat "${AGENTS_JSON:?}" >&2; else cat "${AGENTS_JSON:?}"; fi; exit "${AGENTS_EXIT:-0}" ;;
   'workspace list') [ -z "${WORKSPACES_FAIL:-}" ] || exit 1; cat "${WORKSPACES_JSON:?}" ;;
 esac
 STUB
@@ -97,12 +97,24 @@ near-home w3:p1 codex done w3 owner=- role=- ${HOME}foo/x" ] || { echo "$output"
   printf '%s' "$output" | grep -q '^ERROR: herdr agent list failed'
 }
 
-@test "orch-agents puts herdr's own error message in the ERROR line and exits 2" {
+@test "orch-agents puts only herdr's error message in the ERROR line, from stdout or stderr" {
   printf '{"id":"x","error":{"code":"no_server","message":"no herdr server is running"}}\n' >"$AGENTS_JSON"
   export AGENTS_EXIT=1
   run "$ROOT/orch-agents"
   [ "$status" -eq 2 ]
   [ "$output" = "ERROR: herdr agent list failed: no herdr server is running" ] || { echo "$output"; false; }
+  export AGENTS_STDERR=1
+  run "$ROOT/orch-agents"
+  [ "$status" -eq 2 ]
+  [ "$output" = "ERROR: herdr agent list failed: no herdr server is running" ] || { echo "$output"; false; }
+}
+
+@test "orch-agents falls back to the raw text when the error is not JSON" {
+  printf 'boom\n' >"$AGENTS_JSON"
+  export AGENTS_EXIT=1 AGENTS_STDERR=1
+  run "$ROOT/orch-agents"
+  [ "$status" -eq 2 ]
+  [ "$output" = "ERROR: herdr agent list failed: boom" ] || { echo "$output"; false; }
 }
 
 @test "orch-agents rejects every unexpected herdr shape instead of printing an empty list" {
