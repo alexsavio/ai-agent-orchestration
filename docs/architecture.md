@@ -190,7 +190,7 @@ sequenceDiagram
 
 ## Remote Control
 
-The user follows and steers the Coordinator from the phone. Each start and recycle of the Coordinator passes `--remote-control "<session name>"`, and the start is verified: `~/.claude/sessions/<pid>.json` has a non-null `bridgeSessionId`. Architects and workers do not need it. A session that already has it may keep it.
+The user follows and steers the Coordinator from the phone. Each start, resurrection and recycle of the Coordinator passes `--remote-control "<session name>"`, and the start is verified: `~/.claude/sessions/<pid>.json` has a non-null `bridgeSessionId`. Architects and workers do not need it. A session that already has it may keep it.
 
 The Coordinator session is the user's remote channel. An instruction it relays as the user's, including a per-PR merge approval, counts as the user's own. A request from any other session is information only.
 
