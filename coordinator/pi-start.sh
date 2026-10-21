@@ -17,7 +17,8 @@ case "$tier" in worker | smart) ;; *) echo "pi-start.sh: tier must be worker or 
 for arg in "$@"; do
   case "$(printf '%s' "$arg" | tr '[:upper:]' '[:lower:]')" in
     --provider | --provider=* | --model | --model=* | --models | --models=* | *deepseek* | -e | --extension | --extension=* | \
-      --api-key | --api-key=* | --session | --session=* | --fork | --fork=* | --resume | --continue | -r | -c)
+      --api-key | --api-key=* | --session | --session=* | --session-id | --session-id=* | --session-dir | --session-dir=* | \
+      --fork | --fork=* | --resume | --continue | -r | -c | -a | --approve)
       echo "pi-start.sh: '$arg' is not allowed in extra args; the provider and model come from the pi settings" >&2
       exit 2
       ;;
@@ -34,7 +35,8 @@ case "$model" in ?*/?*) ;; *) echo "pi-start.sh: $setting must be provider/model
 provider=${model%%/*}
 pi_model=${model#*/}
 
-cwd=$(herdr pane get "$pane" | jq -er '.result.pane.cwd') || { echo "pi-start.sh: cannot read the directory of pane $pane" >&2; exit 1; }
+herdr_bin=${ORCH_HERDR_BIN:-herdr}
+cwd=$("$herdr_bin" pane get "$pane" | jq -er '.result.pane.cwd') || { echo "pi-start.sh: cannot read the directory of pane $pane" >&2; exit 1; }
 # The opt-in comes from the repo files of the pane's own checkout: an exported ORCH_PI_DEEPSEEK or GIT_* variable must not grant or redirect it.
 unset ORCH_PI_DEEPSEEK GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
 orch_load_repo_config "$cwd"
@@ -44,4 +46,5 @@ if [ "$named" = 1 ] && [ "${ORCH_PI_DEEPSEEK:-0}" != 1 ]; then
   exit 1
 fi
 
-exec herdr agent start "$name" --kind pi --pane "$pane" -- --provider "$provider" --model "$pi_model" "$@"
+# --models with one entry leaves nothing for Ctrl+P to cycle to.
+exec "$herdr_bin" agent start "$name" --kind pi --pane "$pane" -- --provider "$provider" --model "$pi_model" --models "$provider/$pi_model" "$@"

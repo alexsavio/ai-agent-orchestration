@@ -35,7 +35,7 @@ teardown() {
 @test "a local provider starts in any repo with the provider and model split" {
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind pi --pane pane1 -- --provider lmstudio --model qwen/qwen3.6-35b-a3b" ]
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind pi --pane pane1 -- --provider lmstudio --model qwen/qwen3.6-35b-a3b --models lmstudio/qwen/qwen3.6-35b-a3b" ]
 }
 
 @test "DeepSeek is refused in a repo that did not opt in" {
@@ -49,7 +49,7 @@ teardown() {
   printf '[pi]\ndeepseek = true\n' >"$TMP/repo/.orchestration.local.toml"
   run "$SCRIPT" w1 pane1 smart
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind pi --pane pane1 -- --provider deepseek --model some-model" ]
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind pi --pane pane1 -- --provider deepseek --model some-model --models deepseek/some-model" ]
 }
 
 @test "a committed pi.deepseek does not opt in" {
@@ -91,7 +91,7 @@ teardown() {
 @test "other extra args pass through" {
   run "$SCRIPT" w1 pane1 worker --thinking low
   [ "$status" -eq 0 ]
-  [[ "$(cat "$HERDR_CALLS")" == *"--model qwen/qwen3.6-35b-a3b --thinking low" ]] || false
+  [[ "$(cat "$HERDR_CALLS")" == *"--models lmstudio/qwen/qwen3.6-35b-a3b --thinking low" ]] || false
 }
 
 @test "a model without a provider prefix and a bad tier are refused" {
@@ -145,9 +145,26 @@ teardown() {
 }
 
 @test "extra args cannot load extensions, keys or old sessions" {
-  for arg in -e --extension --extension=x --api-key --session --fork --resume --continue -r -c; do
+  for arg in -e --extension --extension=x --api-key --session --session-id --session-id=x --session-dir --fork --resume --continue -r -c -a --approve; do
     run "$SCRIPT" w1 pane1 worker "$arg"
     [ "$status" -eq 2 ]
   done
   [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "the model scope is pinned to the one model so Ctrl+P has nothing to cycle to" {
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$HERDR_CALLS")" == *" --model qwen/qwen3.6-35b-a3b --models lmstudio/qwen/qwen3.6-35b-a3b" ]] || false
+}
+
+@test "herdr is called by the configured absolute path, not the one on PATH" {
+  mkdir -p "$TMP/real"
+  sed "s#HERDR_CALLS#HERDR_REAL_CALLS#" "$TMP/bin/herdr" >"$TMP/real/herdr"
+  chmod +x "$TMP/real/herdr"
+  printf '[herdr]\nbin = "%s"\n[models]\npi_worker = "lmstudio/q"\n' "$TMP/real/herdr" >"$ORCH_CONFIG"
+  HERDR_REAL_CALLS="$TMP/real.calls" run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+  [ ! -e "$HERDR_CALLS" ]
+  [ -s "$TMP/real.calls" ]
 }
