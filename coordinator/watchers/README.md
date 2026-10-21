@@ -342,7 +342,7 @@ use 20, with the configured thresholds deciding when to alert.
 `LEGACY <repo>#<n> <title> [<count> lines: <kind> a, <kind> b, ...]`
 lists lines an open PR adds that the repo's legacy rules count (patterns the repo is phasing out, which
 agents must not extend), one count per rule kind in rule order. The rules are `[[legacy.rules]]` in the repo
-settings ([docs/settings.md](../../docs/settings.md#legacy-rules)); the tool ships none. A repo with `legacy.scan` on and no rules gets one
+settings ([docs/settings.md](../../docs/settings.md#-legacy-rules)); the tool ships none. A repo with `legacy.scan` on and no rules gets one
 `NORULES LEGACY <repo>@<base> [...]` line per base branch and no scan. The scan runs for PRs of repos whose repo settings turn `legacy.scan` on (off by default; read from the `.orchestration.toml` of the PR's base branch, then the `.orchestration.local.toml` of a watched clone) when a PR is first seen, when its head SHA changes, when its base branch changes, or when its rules or `legacy.exempt` change, at most ORCH_LEGACY_SCANS_MAX PRs per
 pass (default 10; the rest wait for the next pass), and a head with a count above
 zero emits one line. Results are kept in `audit.json` → `before.legacy`, and the
