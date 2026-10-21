@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Event reducers. Never sends messages or mutates source state."""
+from question_lock import answers_lock, questions_directory
 import alert_policy
 import argparse
 import audit
@@ -8,6 +9,7 @@ from datetime import datetime, timezone
 import fcntl
 import importlib.util
 import json
+import uuid
 import os
 import re
 import subprocess
@@ -17,7 +19,7 @@ from pathlib import Path
 from watcher_platform import MissingMetric, herdr_bin, host_metrics, process_rows, balance_metrics
 
 ROOT = Path(__file__).resolve().parent
-MODES = ("context", "workers", "hog", "balance", "host", "prs", "audit", "pulls", "todo")
+MODES = ("context", "workers", "hog", "balance", "host", "prs", "audit", "pulls", "todo", "answers")
 
 WATCH_TIMING = {
     "context": {"soft_budget": 120, "interval": 300, "heartbeat_grace": 900},
@@ -29,6 +31,7 @@ WATCH_TIMING = {
     "audit": {"soft_budget": 1800, "interval": 1800, "heartbeat_grace": 4500},
     "pulls": {"soft_budget": 600, "interval": 150, "heartbeat_grace": 900},
     "todo": {"soft_budget": 120, "interval": 60, "heartbeat_grace": 900},
+    "answers": {"soft_budget": 120, "interval": 60, "heartbeat_grace": 900},
 }
 YOUNG_PANE_SECONDS = 120
 HISTORY_BATCHES = 100
@@ -546,6 +549,83 @@ def reduce_todo(before, raw):
     return {"now": current, "unreadable": raw["unreadable"], "read": read, "scanned": scanned}, events
 
 
+def answer_order(path):
+    claim = path.name.split(".", 2)[1]
+    if re.fullmatch(r"[0-9]{20}-[0-9a-f]{32}", claim):
+        return int(claim.split("-", 1)[0]), path.name
+    try:
+        return path.stat().st_mtime_ns, path.name
+    except OSError:
+        return 0, path.name
+
+
+def collect_answers(before, consume=True):
+    directory = questions_directory()
+    answers, unreadable, blocked = [], [], set()
+    try:
+        files = list(directory.iterdir())
+        claimed = sorted((path for path in files if path.name.endswith(".answer.processing")), key=answer_order)
+        last_order = max((answer_order(path)[0] for path in claimed), default=0)
+        paths = claimed + sorted((path for path in files if path.name.endswith(".answer")), key=answer_order)
+    except FileNotFoundError:
+        return {"answers": [], "unreadable": []}
+    except OSError:
+        return {"answers": [], "unreadable": [str(directory)]}
+    for path in paths:
+        processing = path
+        try:
+            slug = path.name.split(".", 1)[0]
+            if slug in blocked:
+                continue
+            if not (directory / f"{slug}.md").is_file():
+                if consume:
+                    path.unlink(missing_ok=True)
+                continue
+            if consume and path.suffix != ".processing":
+                last_order = max(time.time_ns(), last_order + 1)
+                processing = path.with_name(f"{slug}.{last_order:020d}-{uuid.uuid4().hex}.answer.processing")
+            if path != processing:
+                path.replace(processing)
+            text = " ".join(processing.read_text().split())
+            if not text:
+                if consume:
+                    processing.unlink()
+                answers.append((slug, "", "", "blank"))
+                continue
+            claim = processing.name.split(".", 2)[1]
+            answers.append((slug, text, str(processing), claim))
+        except (OSError, UnicodeError):
+            blocked.add(slug)
+            unreadable.append(str(processing))
+    return {"answers": answers, "unreadable": unreadable}
+
+
+def reduce_answers(before, raw):
+    committed = set((before or {}).get("committed", []))
+    try:
+        pending = {path.name.split(".", 2)[1] for path in questions_directory().iterdir()
+                   if path.name.endswith(".answer.processing")}
+    except OSError:
+        pending = committed.copy()
+    pending.update(key for _, text, _, key in raw["answers"] if text)
+    committed &= pending
+    events = [f"ANSWER {slug}: {text}" for slug, text, _, key in raw["answers"] if text and key not in committed]
+    events += [f"ANSWERS blank {slug}" for slug, text, _, _ in raw["answers"] if not text]
+    events += [f"ANSWERS READFAIL {path}" for path in raw["unreadable"]]
+    events += [f"ANSWERS READ RECOVERED {path}" for path in sorted(
+        set((before or {}).get("unreadable", [])) - set(raw["unreadable"]))]
+    committed.update(key for _, text, _, key in raw["answers"] if text)
+    return {"unreadable": raw["unreadable"], "committed": sorted(committed)}, events
+
+
+def acknowledge_answers(raw):
+    for _, _, path, _ in raw.get("answers", []):
+        if not path:
+            continue
+        processing = Path(path)
+        processing.replace(processing.with_name(processing.name.removesuffix(".processing") + ".seen"))
+
+
 def reduce(mode, before, raw):
     if mode == "audit":
         return audit.reduce(before, raw)
@@ -553,6 +633,8 @@ def reduce(mode, before, raw):
         return reduce_pulls(before, raw)
     if mode == "todo":
         return reduce_todo(before, raw)
+    if mode == "answers":
+        return reduce_answers(before, raw)
     if mode == "prs":
         after = pr_snapshot(raw)
         missing = set(before or {}) - set(after)
@@ -726,6 +808,9 @@ def load_state(state_path, mode):
 def cycle(base, mode, collector, failures=READ_FAILURES, budget=None):
     budget = WATCH_TIMING[mode]["soft_budget"] if budget is None else budget
     with runtime.deadline(2 * budget, mode):
+        if mode == "answers":
+            with answers_lock():
+                return cycle_pass(base, mode, collector, failures, budget)
         return cycle_pass(base, mode, collector, failures, budget)
 
 
@@ -740,11 +825,13 @@ def cycle_pass(base, mode, collector, failures, budget):
         state, reset_event = load_state(state_path, mode)
         events = []
         hog_hits = None
+        reduced = False
         try:
             with runtime.deadline(budget, mode, soft=True):
                 raw = collector(state["before"])
                 after, reduced_events = reduce(mode, state["before"], raw)
-            if not state.get("baseline_pending"):
+            reduced = True
+            if not state.get("baseline_pending") or mode == "answers":
                 events += reduced_events
             if mode == "hog":
                 hog_hits = after
@@ -760,6 +847,8 @@ def cycle_pass(base, mode, collector, failures, budget):
                 subprocess.TimeoutExpired, MissingMetric, AttributeError, IndexError) as error:
             events += failed_read(state, mode, failures, type(error).__name__)
         line = publish_events(base, mode, state, events)
+        if mode == "answers" and reduced:
+            acknowledge_answers(raw)
         if mode == "hog":
             log_events = log_hog_hits(base, state, hog_hits)
             if log_events:
@@ -802,6 +891,8 @@ def collect(mode, before, scope="", base=None):
         return collect_pulls(command, before)
     if mode == "todo":
         return collect_todo(before)
+    if mode == "answers":
+        return collect_answers(before)
     if mode in ("context", "workers"):
         if os.environ.get("HERDR_ENV") != "1":
             raise RuntimeError("not inside Herdr")
@@ -874,6 +965,7 @@ def main():
     parser.add_argument("mode", choices=MODES + ("all",))
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--fixture", type=Path)
+    parser.add_argument("--preview-answers", action="store_true", help="inspect answers without consuming or publishing them")
     parser.add_argument("--scope", default=os.environ.get("ORCH_WATCHERS_PR_SCOPE", ""))
     parser.add_argument("--interval", type=int)
     parser.add_argument("--loop", action="store_true")
@@ -892,7 +984,12 @@ def main():
                 if args.fixture:
                     return json.loads(args.fixture.read_text())
                 return collect(mode, before, args.scope, args.state_dir)
-            line = cycle(args.state_dir, mode, collector)
+            if mode == "answers" and args.preview_answers:
+                with runtime.deadline(2 * WATCH_TIMING["answers"]["soft_budget"], "answers preview"):
+                    _, events = reduce_answers(None, collect_answers(None, consume=False))
+                line = json.dumps({"mode": mode, "events": events}) if events else None
+            else:
+                line = cycle(args.state_dir, mode, collector)
             if line:
                 with runtime.deadline(runtime.ITERATION_TIMEOUT, f"{mode} output"):
                     print(line, flush=True)

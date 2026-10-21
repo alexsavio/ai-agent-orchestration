@@ -220,6 +220,17 @@ def todo_facts(line):
     return None
 
 
+def answer_facts(line):
+    if line.startswith("ANSWER ") and ": " in line:
+        return [dict(kind="alert", key="answers:" + line, text=line, value=None, limit=None,
+                     lower=False, clearable=False, terminal=True, danger=False)]
+    if line.startswith("ANSWERS READ RECOVERED "):
+        return [clear("answers:readfail:" + line[len("ANSWERS READ RECOVERED "):], exact=True)]
+    if line.startswith("ANSWERS READFAIL "):
+        return [fact("answers:readfail:" + line[len("ANSWERS READFAIL "):], line, clearable=True)]
+    return None
+
+
 def facts(alert):
     """A `snapshot` alert lists every current condition of its mode; keys of that mode it does not list are released."""
     mode = alert.get("mode", "?")
@@ -239,8 +250,8 @@ def facts(alert):
             out.append(clear(f"{mode}:", exclude=(f"{mode}:readfail:", f"{mode}:health:")))
             continue
         health = health_line(mode, line)
-        parsed = todo_facts(line) if mode == "todo" else readfail_facts(mode, line) if mode != "audit" or health else None
-        if parsed is None and mode == "todo":
+        parsed = todo_facts(line) if mode == "todo" else answer_facts(line) if mode == "answers" else readfail_facts(mode, line) if mode != "audit" or health else None
+        if parsed is None and mode in ("todo", "answers"):
             parsed = readfail_facts(mode, line)
         if parsed is None:
             parsed = state_reset_facts(mode, line)
