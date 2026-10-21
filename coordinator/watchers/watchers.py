@@ -116,7 +116,8 @@ def recycle_amount(value):
 def workspace_owners(raw):
     """The `owner` tag of each workspace by id; none when the workspace list was not read."""
     rows = ((raw.get("workspaces") or {}).get("result") or {}).get("workspaces") or []
-    return {row.get("workspace_id"): (row.get("tokens") or {}).get("owner") for row in rows}
+    return {row.get("workspace_id"): row["tokens"].get("owner") for row in rows
+            if isinstance(row, dict) and isinstance(row.get("tokens"), dict)}
 
 
 def worker_recycle(agent, value, owners):
@@ -294,6 +295,12 @@ def subject_cleared(line):
 
 
 RECYCLE_LINES = ("RECYCLE ", "RECYCLE-WORKER ")
+WORKSPACE_FAILS = "workspaces:unreadable"
+
+
+def workspace_failures(previous, raw):
+    """The passes in a row that `herdr workspace list` was unreadable, kept in the saved state as a string."""
+    return int(previous.get(WORKSPACE_FAILS, 0)) + 1 if raw.get("workspaces") is None else 0
 
 
 def reduce_context(before, after, raw):
@@ -310,6 +317,13 @@ def reduce_context(before, after, raw):
     events += [recycle_cleared(value) for key, value in sorted(previous.items())
                if key not in remembered and key not in after and value.startswith(RECYCLE_LINES)]
     remembered.update(after)
+    fails = workspace_failures(previous, raw)
+    if fails:
+        remembered[WORKSPACE_FAILS] = str(fails)
+    if fails == READ_FAILURES:
+        events.append(f"context read failed {READ_FAILURES} times (WorkspaceList)")
+    elif not fails and int(previous.get(WORKSPACE_FAILS, 0)) >= READ_FAILURES:
+        events.append("context READ RECOVERED")
     return remembered, events
 
 

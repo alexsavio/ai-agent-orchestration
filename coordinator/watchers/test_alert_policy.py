@@ -1222,6 +1222,15 @@ class DeliveryTest(IsolatedTestCase):
         line = self.WORKER_LINE.format("wMS")
         self.assertEqual(sent, [("architect-wMS.json", line + ". No reply needed.")])
         self.assertIn(line, self.feed_lines())
+        raw = json.loads((w.ROOT / "fixtures/context.json").read_text())
+        raw["herdr"]["result"]["agents"].pop()
+        raw["usage"] = {}
+        w.cycle(self.base, "context", lambda before: raw)
+        now = (self.base / "host.heartbeat").stat().st_mtime
+        os.utime(self.base / "context.heartbeat", (now, now))
+        self.assertEqual(self.deliver(now, modes=("host", "context")), [])
+        self.assertTrue(any(feed.startswith("context: RECYCLE-WORKER ") and feed.endswith("(clear)")
+                            for feed in self.feed_lines()), self.feed_lines())
 
     def test_only_a_worker_recycle_names_an_owner_in_a_context_line(self):
         self.assertEqual(inbox.OWNER.match(self.WORKER_LINE.format("wMS")).group(1), "wMS")

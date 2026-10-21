@@ -359,7 +359,8 @@ class WatcherTests(IsolatedTestCase):
         with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
             for name, raw in (("untagged", untagged), ("unlisted", unlisted), ("unread", unread), ("absent", absent)):
                 with self.subTest(name):
-                    self.assertEqual(w.reduce("context", None, raw), ({}, []))
+                    after, events = w.reduce("context", None, raw)
+                    self.assertEqual((events, [key for key in after if key != w.WORKSPACE_FAILS]), ([], []))
 
     def test_context_worker_owner_change_moves_its_alert(self):
         raw = worker_context(310000)
@@ -374,7 +375,7 @@ class WatcherTests(IsolatedTestCase):
         with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
             before, _ = w.reduce("context", None, raw)
             after, events = w.reduce("context", before, dict(raw, workspaces=None))
-            self.assertEqual((after, events), (before, []))
+            self.assertEqual((after, events), (dict(before, **{w.WORKSPACE_FAILS: "1"}), []))
             self.assertEqual(w.reduce("context", after, raw), (before, []))
 
     def test_context_worker_without_a_sensor_or_off_claude_stays_quiet(self):
@@ -396,6 +397,33 @@ class WatcherTests(IsolatedTestCase):
         with patch.dict(os.environ, {"ORCH_RECYCLE_PCT": "55"}):
             self.assertEqual(list(w.conditions("context", raw).values()),
                              ["RECYCLE-WORKER workspace-task:p1 owner=wArch 60%"])
+
+    def test_context_junk_workspace_rows_never_stop_the_architect_recycle(self):
+        raw = worker_context(310000)
+        raw["usage"]["session-architect-001"] = {"tokens": 310000}
+        raw["workspaces"]["result"]["workspaces"] += ["junk", None, {"workspace_id": "workspace-odd", "tokens": "x"}]
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            self.assertEqual(sorted(w.conditions("context", raw).values()),
+                             ["RECYCLE workspace-demo:p1 Architect::Example 310k", worker_line("310k")])
+
+    def test_context_the_coordinator_is_never_a_worker(self):
+        raw = worker_context(310000)
+        raw["usage"]["session-worker-001"] = {"tokens": 310000}
+        pane = w.agents(raw["herdr"])[1]
+        pane.update(name="Coordinator", tokens={"role": "coordinator"}, terminal_title_stripped="Coordinator")
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            self.assertEqual(list(w.conditions("context", raw).values()),
+                             ["RECYCLE workspace-task:p1 Coordinator 310k"])
+
+    def test_context_a_lasting_unreadable_workspace_list_reaches_the_feed_once_and_recovers(self):
+        raw = worker_context(310000)
+        unread = dict(raw, workspaces=None)
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            self.assertEqual([self.events(unread) for _ in range(4)],
+                             [[], [], ["context read failed 3 times (WorkspaceList)"], []])
+            self.assertEqual(self.events(raw), [worker_line("310k"), "context READ RECOVERED"])
+            self.assertEqual(self.events(raw), [])
+            self.assertEqual([self.events(unread) for _ in range(2)] + [self.events(raw)], [[], [], []])
 
     def herdr_reads(self, raw, workspaces):
         def read(*argv):
