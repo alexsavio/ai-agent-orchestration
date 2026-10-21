@@ -246,7 +246,20 @@ def config_path(environ):
 
 
 def print_lines(values):
+    """One NAME=value line per setting; a control character in a value would split or hide a line."""
+    for name, value in values.items():
+        if re.search(r'[\x00-\x08\x0a-\x1f\x7f]', value):
+            raise ConfigError(f'{name}: the value contains a control character; one setting must stay on one line')
     return ''.join(f'{name}={value}\n' for name, value in values.items())
+
+
+def print_path(args, environ):
+    """The global file to print: an explicit existing file, else config_path."""
+    if not args:
+        return config_path(environ)
+    if len(args) > 1 or args[0].startswith('-') or not Path(args[0]).is_file():
+        raise ConfigError(f'print: expected no argument or one existing settings file, got {" ".join(args)}')
+    return args[0]
 
 
 def load_global(path):
@@ -959,8 +972,8 @@ def main(argv):
         command = argv[1] if len(argv) > 1 else ''
         if command == 'global' and len(argv) == 3:
             sys.stdout.write(shell_lines(load_global(argv[2])))
-        elif command == 'print' and len(argv) <= 3:
-            sys.stdout.write(print_lines(resolved_global(argv[2] if len(argv) == 3 else config_path(os.environ), os.environ)))
+        elif command == 'print':
+            sys.stdout.write(print_lines(resolved_global(print_path(argv[2:], os.environ), os.environ)))
         elif command == 'repo' and len(argv) == 3:
             sys.stdout.write(shell_lines(load_repo(argv[2], {})))
         elif command == 'migrate' and len(argv) == 5:

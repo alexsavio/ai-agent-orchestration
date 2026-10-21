@@ -37,8 +37,8 @@ macOS or Linux, Bash 3.2 or newer; `git`, `jq`, `python3`, `curl`; `gh` for the 
 | `coordinator/watchers/coord-lib.sh` | `~/.claude/coordinator/watchers/` | Config loading and loud failures, sourced by the watchers |
 | `statusline-command.sh` | `~/.claude/` | Status line; also writes tokens used to `~/.claude/context-usage/<session-id>.tokens` and remaining context percentage to `<session-id>` |
 | `heavy-slot` | `~/.local/bin/heavy-slot` | Atomic shared cap for heavy jobs: `heavy-slot take <architect>-<job> -- <command>`; `count` and `list` inspect slots |
-| `orch-agents` | `~/.local/bin/orch-agents` | One line per Herdr agent (name, pane, status, workspace, owner, role, cwd); sessions read it instead of the ~10k-token `herdr agent list` JSON |
-| `orch-settings` | `~/.local/bin/orch-settings` | Prints every resolved global setting as one `ORCH_NAME=value` line; sessions read it instead of `~/.claude/orchestration.toml` |
+| `orch-agents` | `~/.local/bin/orch-agents` | One line per Herdr agent (name, pane, kind, status, workspace, owner, role, cwd); a session that needs Herdr agent data runs it instead of reading the ~10k-token `herdr agent list` JSON |
+| `orch-settings` | `~/.local/bin/orch-settings` | Prints every resolved global setting as one `ORCH_NAME=value` line; sessions run it at startup instead of reading the commented `~/.claude/orchestration.toml` |
 | `worker-reports/machine-rules.md` | `~/.claude/worker-reports/` | Template of machine rules to paste into every worker brief |
 | `hooks/orch-update-check.sh` | `~/.claude/hooks/` | SessionStart hook: says when this setup is out of date |
 | `hooks/guard-bash.py` | `~/.claude/hooks/` | PreToolUse Bash guard: blocks unsafe Git commands, including every `git grep` (even path-scoped) in configured big repos |

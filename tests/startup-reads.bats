@@ -12,7 +12,7 @@ setup() {
   cat >"$TMP/herdr" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
-  'agent list') cat "${AGENTS_JSON:?}" ;;
+  'agent list') cat "${AGENTS_JSON:?}"; exit "${AGENTS_EXIT:-0}" ;;
   'workspace list') [ -z "${WORKSPACES_FAIL:-}" ] || exit 1; cat "${WORKSPACES_JSON:?}" ;;
 esac
 STUB
@@ -20,8 +20,9 @@ STUB
   export HERDR_BIN_PATH="$TMP/herdr" AGENTS_JSON="$TMP/agents.json" WORKSPACES_JSON="$TMP/workspaces.json"
   cat >"$AGENTS_JSON" <<JSON
 {"result":{"agents":[
- {"name":"architect-x","pane_id":"w1:p1","agent_status":"working","workspace_id":"w1","cwd":"$HOME/repo","tokens":{"role":"architect","band":"long noise"},"agent_session":{"value":"uuid"}},
- {"pane_id":"w2:p1","agent_status":"idle","workspace_id":"w2","cwd":"/srv/other","tokens":{}}]}}
+ {"name":"architect-x","pane_id":"w1:p1","agent":"claude","agent_status":"working","workspace_id":"w1","cwd":"$HOME/repo","tokens":{"role":"architect","band":"long noise"},"agent_session":{"value":"uuid"}},
+ {"pane_id":"w2:p1","agent_status":"idle","workspace_id":"w2","cwd":"/srv/other","tokens":{}},
+ {"name":"near-home","pane_id":"w3:p1","agent":"codex","agent_status":"done","workspace_id":"w3","cwd":"${HOME}foo/x","tokens":{}}]}}
 JSON
   printf '{"result":{"workspaces":[{"workspace_id":"w1","tokens":{}},{"workspace_id":"w2","tokens":{"owner":"w1"}}]}}\n' >"$WORKSPACES_JSON"
 }
@@ -77,15 +78,16 @@ teardown() {
 @test "orch-agents prints one short line per agent with owner and role" {
   run "$ROOT/orch-agents"
   [ "$status" -eq 0 ]
-  [ "$output" = "architect-x w1:p1 working w1 owner=- role=architect ~/repo
-- w2:p1 idle w2 owner=w1 role=- /srv/other" ] || { echo "$output"; false; }
+  [ "$output" = "architect-x w1:p1 claude working w1 owner=- role=architect ~/repo
+- w2:p1 - idle w2 owner=w1 role=- /srv/other
+near-home w3:p1 codex done w3 owner=- role=- ${HOME}foo/x" ] || { echo "$output"; false; }
 }
 
 @test "orch-agents still lists agents when the workspace list fails" {
   export WORKSPACES_FAIL=1
   run "$ROOT/orch-agents"
   [ "$status" -eq 0 ]
-  has_line "- w2:p1 idle w2 owner=- role=- /srv/other"
+  has_line "- w2:p1 - idle w2 owner=- role=- /srv/other"
 }
 
 @test "orch-agents fails loudly when herdr fails" {
@@ -93,4 +95,53 @@ teardown() {
   run "$ROOT/orch-agents"
   [ "$status" -eq 2 ]
   printf '%s' "$output" | grep -q '^ERROR: herdr agent list failed'
+}
+
+@test "orch-agents puts herdr's own error message in the ERROR line and exits 2" {
+  printf '{"id":"x","error":{"code":"no_server","message":"no herdr server is running"}}\n' >"$AGENTS_JSON"
+  export AGENTS_EXIT=1
+  run "$ROOT/orch-agents"
+  [ "$status" -eq 2 ]
+  [ "$output" = "ERROR: herdr agent list failed: no herdr server is running" ] || { echo "$output"; false; }
+}
+
+@test "orch-agents rejects every unexpected herdr shape instead of printing an empty list" {
+  for body in '{"id":"x","error":{"message":"m"}}' '{"result":{"items":[]}}' '{"result":[]}' '[]' '{"result":{"agents":["a"]}}' '{"result":{"agents":{}}}'; do
+    printf '%s\n' "$body" >"$AGENTS_JSON"
+    run "$ROOT/orch-agents"
+    [ "$status" -eq 2 ] || { echo "$body -> $status $output"; false; }
+    printf '%s' "$output" | grep -q '^ERROR: herdr agent list failed' || { echo "$body -> $output"; false; }
+  done
+}
+
+@test "orch-settings lets an exported but empty variable win, like orch_set_default" {
+  printf '[pr]\nauthor = "me"\n' >"$ORCH_CONFIG"
+  run env ORCH_PR_AUTHOR= "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line ORCH_PR_AUTHOR=
+}
+
+@test "orch-settings rejects an option and a missing explicit file" {
+  printf '[pr]\nauthor = "dash"\n' >"$TMP/-x"
+  cd "$TMP"
+  for arg in --help -x "$TMP/nope.toml"; do
+    run "$ROOT/orch-settings" "$arg"
+    [ "$status" -eq 2 ] || { echo "$arg -> $status"; false; }
+    printf '%s' "$output" | grep -q '^ERROR: ' || { echo "$arg -> $output"; false; }
+  done
+}
+
+@test "orch-settings reads an explicit existing file" {
+  printf '[pr]\nauthor = "explicit"\n' >"$TMP/other.toml"
+  run "$ROOT/orch-settings" "$TMP/other.toml"
+  [ "$status" -eq 0 ]
+  has_line ORCH_PR_AUTHOR=explicit
+}
+
+@test "orch-settings refuses a value that would split into two lines" {
+  printf '[pr]\nauthor = "a\\nORCH_ARCHITECT_MODEL=evil"\n' >"$ORCH_CONFIG"
+  run "$ROOT/orch-settings"
+  [ "$status" -eq 2 ]
+  printf '%s' "$output" | grep -q 'ORCH_PR_AUTHOR: the value contains a control character'
+  [ "$(printf '%s\n' "$output" | grep -c '^ORCH_ARCHITECT_MODEL=')" -eq 0 ]
 }
