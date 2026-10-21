@@ -2,13 +2,14 @@
 import importlib.util
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import discovery
 
 ROOT = Path(__file__).resolve().parents[2]

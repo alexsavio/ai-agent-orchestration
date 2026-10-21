@@ -15,9 +15,10 @@ import os
 import subprocess
 import sys
 import time
-import watcher_runtime as runtime
 from datetime import datetime, timezone
 from pathlib import Path
+
+import watcher_runtime as runtime
 
 BOT_TITLES = ("Automatic Update of README", "Changes by create-pull-request")
 BOT_LOGINS = {"copilot-pull-request-reviewer", "copilot", "github-actions"}

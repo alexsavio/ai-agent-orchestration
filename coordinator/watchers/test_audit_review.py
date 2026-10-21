@@ -2,7 +2,6 @@ import copy
 import fcntl
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import time
@@ -11,12 +10,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase, open_work
+
 import alert_policy
 import audit
 import watchers as w
-from watcher_platform import live_slots
-from test_audit import PR, LABEL
+from test_audit import LABEL, PR
 from test_watchers import reader
+from watcher_platform import live_slots
 
 
 class IndependentReviewTests(IsolatedTestCase):

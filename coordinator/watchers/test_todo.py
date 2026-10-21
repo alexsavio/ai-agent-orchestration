@@ -6,13 +6,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
-import watchers as w
+
 import feed_actions
+import watchers as w
 
 spec = importlib.util.spec_from_file_location("user_todo", w.ROOT.parent / "user-todo.py")
 todo = importlib.util.module_from_spec(spec)
@@ -629,7 +630,7 @@ class TodoTest(IsolatedTestCase):
     def test_empty_config_paths_fall_back_to_coordinator_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            status = self.sample(root, "## Waits on the user\n- Act -> Coordinator\n")
+            self.sample(root, "## Waits on the user\n- Act -> Coordinator\n")
             with patch.dict(os.environ, {"ORCH_USER_TODO_STATUS_DIR": "", "ORCH_USER_TODO_OUTPUT": "",
                                         "ORCH_USER_TODO_STATE": ""}, clear=False), \
                     patch.object(w, "todo_module") as module:

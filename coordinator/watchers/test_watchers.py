@@ -8,11 +8,13 @@ import subprocess
 import tempfile
 import time
 import unittest
-from unittest.mock import call, patch
 from pathlib import Path
+from unittest.mock import call, patch
 
 from test_support import IsolatedTestCase
+
 import watchers as w
+
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")
 reader = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reader)

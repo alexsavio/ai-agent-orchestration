@@ -6,11 +6,13 @@ import tempfile
 import threading
 import unittest
 import warnings
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import watchers as w
+
 spec = importlib.util.spec_from_file_location("inbox", w.ROOT / "notify-inbox.py")
 inbox = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(inbox)

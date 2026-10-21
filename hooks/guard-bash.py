@@ -5,16 +5,16 @@ Not a shell interpreter: dynamic variables, aliases and arbitrary shell wrappers
 are intentionally outside coverage. Git probes are read-only and time-bounded.
 """
 import datetime
-import json
 import fnmatch
 import functools
+import json
 import os
-from pathlib import Path
 import re
 import shlex
 import stat
 import subprocess
 import sys
+from pathlib import Path
 
 PUSH_REASON = "Never push to main/master; open a PR (see .ai/git-workflow.md)."
 ATTR_REASON = "No AI attribution in commits, PR titles or PR bodies (global + .ai/git-workflow.md); remove the trailer and retry."
@@ -597,9 +597,15 @@ def guard_big_repo_reads(args, cwd, opts, raw, pipeline=()):
     if args[0] == 'cat-file' and any(a == '--batch-all-objects' or a.startswith('--batch-all-objects=') for a in args[1:]):
         return config_error or BIG_REPO_BATCH_REASON
     if args[0] == 'cat-file' and any(a == mode or a.startswith(mode+'=') for a in args[1:] for mode in ('--batch', '--batch-check')):
-        recursive_tree = lambda words: 'ls-tree' in words and any(arg.startswith('-') and not arg.startswith('--') and 'r' in arg[1:] for arg in words[words.index('ls-tree')+1:])
-        all_history = lambda words: 'rev-list' in words and any(arg == '--objects' or arg.startswith('--objects=') for arg in words)
-        tracked_files = lambda words: 'ls-files' in words
+        def recursive_tree(words):
+            return 'ls-tree' in words and any(arg.startswith('-') and not arg.startswith('--') and 'r' in arg[1:] for arg in words[words.index('ls-tree')+1:])
+
+        def all_history(words):
+            return 'rev-list' in words and any(arg == '--objects' or arg.startswith('--objects=') for arg in words)
+
+        def tracked_files(words):
+            return 'ls-files' in words
+
         process_substitution = re.search(r'<\s*<\s*\(\s*git\s+(?:rev-list\s+[^)]*--objects|ls-files|ls-tree\s+[^)]*(?:-[A-Za-z]*r|--recursive))', raw)
         if process_substitution or any(recursive_tree(words) or all_history(words) or tracked_files(words) for words in pipeline[:-1]):
             return config_error or BIG_REPO_BATCH_REASON

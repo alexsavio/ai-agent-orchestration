@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Chrome native messaging host for PR tabs: one request, at most one gh call, one reply, then exit."""
-from contextlib import contextmanager
-from pathlib import Path
-import importlib.util
 import hashlib
-import tempfile
+import importlib.util
 import json
 import os
 import re
-import time
 import struct
 import subprocess
 import sys
+import tempfile
+import time
+from contextlib import contextmanager
+from pathlib import Path
 
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_REPLY_BYTES = 1024 * 1024

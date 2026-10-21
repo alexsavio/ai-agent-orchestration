@@ -7,6 +7,7 @@ from collections import defaultdict
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import alert_policy as policy
 import watchers as w
 

@@ -4,10 +4,10 @@ import argparse
 import fcntl
 import json
 import time
-import watcher_runtime as runtime
 from pathlib import Path
-from watchers import MODES, WATCH_TIMING, atomic
 
+import watcher_runtime as runtime
+from watchers import MODES, WATCH_TIMING, atomic
 
 TERMINAL_KINDS = ("MERGED", "CLOSED")
 

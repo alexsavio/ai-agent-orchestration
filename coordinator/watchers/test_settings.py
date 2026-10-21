@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase, open_work
+
 import audit
 import watchers as w
 

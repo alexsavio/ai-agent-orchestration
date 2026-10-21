@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import legacy_rules
 import orch_settings
 import watchers as w
@@ -242,7 +243,8 @@ class RulesTests(IsolatedTestCase):
         self.assertIsNone(parsed.classify('a', 'x' * legacy_rules.LINE_SEARCH_LIMIT + 'needle'))
 
     def test_globs(self):
-        match = lambda glob, path: bool(legacy_rules.compile_glob(glob).fullmatch(path))
+        def match(glob, path):
+            return bool(legacy_rules.compile_glob(glob).fullmatch(path))
         self.assertTrue(match('app/**', 'app/a/b.rb'))
         self.assertTrue(match('app/**/x.rb', 'app/x.rb'))
         self.assertTrue(match('app/**/x.rb', 'app/a/b/x.rb'))

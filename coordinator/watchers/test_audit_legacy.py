@@ -13,9 +13,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase, open_work
+
 import audit
 import watchers as w
-
 
 RULES = (w.ROOT / 'fixtures/legacy-rules.toml').read_text()
 PR = json.loads((w.ROOT / 'fixtures/audit-pr.json').read_text())
@@ -430,7 +430,8 @@ class LegacyTests(IsolatedTestCase):
 
     def test_a_head_without_legacy_hits_clears_the_legacy_line(self):
         line = 'LEGACY o/r#1 Fix [2 lines: JSERB 0, JQUERY 2, LEGACY 0, TEST 0]'
-        raw = lambda legacy: dict(sources={'github': []}, unreadable={}, legacy=legacy)
+        def raw(legacy):
+            return dict(sources={'github': []}, unreadable={}, legacy=legacy)
         before, _ = audit.reduce(None, raw({'o/r#1': dict(head='a', line=line)}))
         _, events = audit.reduce(before, raw({'o/r#1': dict(head='b', line='')}))
         self.assertEqual(events, ['CLEARED ' + line])

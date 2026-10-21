@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase, open_work
+
 import watchers as w
 
 PR = json.loads((w.ROOT / "fixtures" / "audit-pr.json").read_text())

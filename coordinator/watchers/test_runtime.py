@@ -1,14 +1,15 @@
 """Regression proofs for bounded watcher execution, without host tools."""
-import subprocess
-import tempfile
-from pathlib import Path
-import sys
-import time
 import importlib.util
 import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import watchers as w
 
 
@@ -97,7 +98,8 @@ class RuntimeTests(IsolatedTestCase):
     def test_command_timeout_publishes_failure_and_heartbeat(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(w.runtime, 'COMMAND_TIMEOUT', 0.05):
             base = Path(tmp)
-            collector = lambda before: w.command(sys.executable, '-c', 'import time; time.sleep(1)')
+            def collector(before):
+                return w.command(sys.executable, '-c', 'import time; time.sleep(1)')
             for _ in range(3):
                 line = w.cycle(base, 'context', collector)
             self.assertIn('TimeoutExpired', line)
@@ -141,6 +143,7 @@ class RuntimeTests(IsolatedTestCase):
 
     def test_feed_lock_has_deadline(self):
         import fcntl
+
         import feed_attach
         with tempfile.TemporaryDirectory() as tmp:
             feed = Path(tmp) / 'feed'
@@ -194,7 +197,7 @@ class RuntimeTests(IsolatedTestCase):
 
     def test_macos_stderr_size_probe_failure_does_not_block_watcher(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base, log, tools = Path(tmp), Path(tmp) / 'watcher.stderr', Path(tmp) / 'tools'
+            log, tools = Path(tmp) / 'watcher.stderr', Path(tmp) / 'tools'
             tools.mkdir()
             (tools / 'wc').write_text('#!/bin/sh\nexit 1\n')
             (tools / 'wc').chmod(0o755)
@@ -324,8 +327,8 @@ class RuntimeTests(IsolatedTestCase):
 
     def test_failed_command_stops_detached_pipe_descendant(self):
         import os
-        import signal
         import select
+        import signal
         reader, writer = os.pipe()
         spawned = []
         original = w.runtime.subprocess.Popen
@@ -379,8 +382,8 @@ class RuntimeTests(IsolatedTestCase):
 
     def test_spawn_alarm_cleans_every_registered_process_group_member(self):
         import os
-        import signal
         import select
+        import signal
         for soft in (False, True):
             with self.subTest(soft=soft), tempfile.TemporaryDirectory() as tmp:
                 pidfile = Path(tmp) / 'spawned.pid'

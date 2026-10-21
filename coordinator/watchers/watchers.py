@@ -1,26 +1,33 @@
 #!/usr/bin/env python3
 """Event reducers. Never sends messages or mutates source state."""
-from question_lock import answers_lock, questions_directory
-import alert_policy
 import argparse
 import contextlib
-import audit
-import discovery
-from datetime import datetime, timezone
 import fcntl
 import importlib.util
 import json
-import uuid
 import os
 import re
 import signal
 import subprocess
 import sys
 import time
-import watcher_runtime as runtime
-from time import monotonic as _monotonic
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from watcher_platform import MissingMetric, herdr_bin, host_metrics, process_rows, balance_metrics
+from time import monotonic as _monotonic
+
+import alert_policy
+import audit
+import discovery
+import watcher_runtime as runtime
+from question_lock import answers_lock, questions_directory
+from watcher_platform import (
+    MissingMetric,
+    balance_metrics,
+    herdr_bin,
+    host_metrics,
+    process_rows,
+)
 
 ROOT = Path(__file__).resolve().parent
 MODES = ("context", "workers", "hog", "balance", "host", "prs", "audit", "pulls", "todo", "answers")

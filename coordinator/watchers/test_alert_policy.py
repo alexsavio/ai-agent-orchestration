@@ -2,8 +2,8 @@ import importlib.util
 import io
 import json
 import os
-import signal
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import alert_policy as policy
 import feed_attach
 import feed_follow
@@ -1171,7 +1172,8 @@ class DeliveryTest(IsolatedTestCase):
     def test_an_owner_found_later_gets_the_active_event_without_waking_the_coordinator(self):
         self.host_cycle()
         w.cycle(self.base, "pulls", lambda before: dict(prs={}, departed={}, unreadable=[]))
-        pr = lambda owner: {"o/r#7": dict(title="Fix", owner=owner, lines={"APPROVED": "APPROVED o/r#7 Fix"})}
+        def pr(owner):
+            return {"o/r#7": dict(title="Fix", owner=owner, lines={"APPROVED": "APPROVED o/r#7 Fix"})}
         w.cycle(self.base, "pulls", lambda before: dict(prs=pr(None), departed={}, unreadable=["owners"]))
         now = (self.base / "host.heartbeat").stat().st_mtime
         self.monitor(now)
@@ -1291,7 +1293,9 @@ class DeliveryTest(IsolatedTestCase):
 
     def test_a_worker_idle_line_waits_in_the_outbox_until_its_owner_binding_appears(self):
         now = self.idle_cycle("wGone")
-        present = lambda path: (path.lstat(), "token") and (path, "token")
+        def present(path):
+            return (path.lstat(), "token") and (path, "token")
+
         self.assertEqual(self.deliver(now, modes=("host", "workers"), check=present), [])
         outbox = json.loads((self.base / "deliver.cursor").read_text())["outbox"]
         line = f"workers: {LINE.replace('wArch', 'wGone')} (start)" + ". No reply needed."
@@ -1304,7 +1308,9 @@ class DeliveryTest(IsolatedTestCase):
 
     def test_a_worker_recycle_waits_in_the_outbox_until_its_owner_binding_appears(self):
         now = self.context_cycle("wGone", worker=310000)
-        present = lambda path: (path.lstat(), "token") and (path, "token")
+        def present(path):
+            return (path.lstat(), "token") and (path, "token")
+
         self.assertEqual(self.deliver(now, modes=("host", "context"), check=present), [])
         outbox = json.loads((self.base / "deliver.cursor").read_text())["outbox"]
         line = self.WORKER_LINE.format("wGone") + ". No reply needed."

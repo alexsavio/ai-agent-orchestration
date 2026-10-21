@@ -8,13 +8,14 @@ import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
-import legacy_rules
+
 import alert_policy
 import discovery
+import legacy_rules
 from watcher_platform import MissingMetric, herdr_bin, read_slots
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'lib'))
 import orch_settings
-
 
 SELECTION = '''number title state isDraft mergeable baseRefName headRefName headRefOid headRepository{nameWithOwner}
 repository{nameWithOwner defaultBranchRef{name}}

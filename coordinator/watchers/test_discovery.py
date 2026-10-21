@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import audit
 import discovery
 

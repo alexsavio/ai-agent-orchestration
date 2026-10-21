@@ -4,15 +4,14 @@ import os
 import subprocess
 import tempfile
 import time
-import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase, open_work
+
 import audit
 import watchers as w
 from test_watchers import reader
-
 
 PR = json.loads((w.ROOT / 'fixtures/audit-pr.json').read_text())
 LABEL = 'owner/product#7 Fix menu'

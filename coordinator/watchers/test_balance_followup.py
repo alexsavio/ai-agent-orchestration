@@ -1,12 +1,12 @@
 import json
 import os
 import tempfile
-import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import watchers as w
 from test_balance import stuck
 from watcher_platform import LinuxBalance, MacBalance, balance_metrics

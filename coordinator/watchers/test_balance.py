@@ -3,13 +3,19 @@ import io
 import os
 import subprocess
 import tempfile
-import unittest
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 from test_support import IsolatedTestCase
-from watcher_platform import LinuxBalance, MacBalance, MissingMetric, balance_metrics, worktree_totals
-from watchers import reduce, cycle, BALANCE_LIMITS, READ_FAILURES
+
+from watcher_platform import (
+    LinuxBalance,
+    MacBalance,
+    MissingMetric,
+    balance_metrics,
+    worktree_totals,
+)
+from watchers import BALANCE_LIMITS, READ_FAILURES, cycle, reduce
 
 
 def stuck(before, raw, passes=READ_FAILURES):

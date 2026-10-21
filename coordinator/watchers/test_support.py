@@ -8,7 +8,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 TOOLS = {'launchctl', 'systemctl', 'herdr'}
 if not os.environ.get('AO_TEST_SANDBOX'):
     raise RuntimeError('Run tests through tests/run.sh')

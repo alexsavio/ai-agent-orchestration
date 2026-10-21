@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import watchers as w
 from watcher_platform import LinuxProcesses, MacProcesses
 

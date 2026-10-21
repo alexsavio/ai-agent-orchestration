@@ -1,15 +1,16 @@
+import importlib.util
 import json
-import subprocess
-import sys
-import time
 import os
 import signal
+import subprocess
+import sys
 import tempfile
-import importlib.util
+import time
 from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import feed_actions
 import watchers as w
 

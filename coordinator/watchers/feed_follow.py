@@ -4,9 +4,9 @@ The feed is opened at its end before the heartbeat is touched, so no line betwee
 import os
 import sys
 import time
-import watcher_runtime as runtime
 from pathlib import Path
 
+import watcher_runtime as runtime
 from feed_actions import action_patterns, is_action, native
 from feed_attach import locked, write_record
 

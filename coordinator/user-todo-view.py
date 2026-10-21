@@ -8,7 +8,6 @@ import re
 import select
 import shutil
 import signal
-import subprocess
 import sys
 import tempfile
 import termios

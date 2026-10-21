@@ -14,11 +14,24 @@ import stat
 import sys
 import time
 from pathlib import Path
+
 import alert_policy
-import watchers as w
 import watcher_runtime as runtime
-from feed_actions import ACTIONS_PATH, action_patterns, is_action, native
-from feed_attach import MONITOR_FRESH_SECONDS, MONITOR_NAME, has_read, locked, read_record, will_read
+import watchers as w
+from feed_actions import (
+    ACTIONS_PATH,  # noqa: F401  (read as inbox.ACTIONS_PATH by the tests)
+    action_patterns,
+    is_action,
+    native,
+)
+from feed_attach import (
+    MONITOR_FRESH_SECONDS,  # noqa: F401  (read as inbox.MONITOR_FRESH_SECONDS by the tests)
+    MONITOR_NAME,
+    has_read,
+    locked,
+    read_record,
+    will_read,
+)
 
 POLICY_KEY = "delivery"
 PR_MODES = ("audit", "pulls")

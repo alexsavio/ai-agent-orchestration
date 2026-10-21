@@ -1,3 +1,4 @@
+import fcntl
 import importlib.util
 import io
 import json
@@ -14,11 +15,11 @@ import termios
 import threading
 import time
 import unittest
-import fcntl
 from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 import feed_actions
 import watchers as w
 

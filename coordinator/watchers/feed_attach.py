@@ -5,6 +5,7 @@ import contextlib
 import fcntl
 import os
 import time
+
 import watcher_runtime as runtime
 
 LOCK_NAME = "coordinator-feed.lock"

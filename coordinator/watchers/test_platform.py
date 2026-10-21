@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_support import IsolatedTestCase
+
 from watcher_platform import LinuxHost, MacHost, herdr_bin, optional
 
 
