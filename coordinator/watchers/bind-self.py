@@ -5,14 +5,22 @@ No token is printed. Never discovers or borrows another session's credentials.
 import argparse
 import json
 import os
+import re
 import stat
+import sys
 import tempfile
 from pathlib import Path
+
+BINDINGS = Path.home() / ".claude/coordinator/watchers/bindings"
+NAME = re.compile(r"(coordinator|architect-[A-Za-z0-9_-]+)\.json")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--output", required=True, type=Path)
 args = parser.parse_args()
-path = os.environ["CLAUDE_CODE_MESSAGING_SOCKET"]
+args.output = args.output.expanduser().resolve()
+if args.output.parent != BINDINGS.resolve() or not NAME.fullmatch(args.output.name):
+    sys.exit(f"bind-self: --output must be coordinator.json or architect-<id>.json in {BINDINGS}")
+path =os.environ["CLAUDE_CODE_MESSAGING_SOCKET"]
 token = os.environ["CLAUDE_CODE_MESSAGING_TOKEN"]
 pid = int(Path(path).stem)
 record = json.loads((Path.home() / ".claude/sessions" / f"{pid}.json").read_text())
