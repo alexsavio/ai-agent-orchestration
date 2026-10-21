@@ -24,7 +24,7 @@ The Coordinator runs on `$ORCH_COORDINATOR_MODEL` (default `claude-opus-5-5`, Op
 
 ## Remote Control
 
-The user follows and steers the Coordinator from the phone, so only the Coordinator runs with Remote Control on. Every start, resurrection and recycle of the Coordinator passes `--remote-control "<session name>"`. Verify after each start: the session's file `~/.claude/sessions/<pid>.json` has a non-null `bridgeSessionId`. A session without one is not done; if the flag did not take, ask the user to turn it on. Architects and workers do not need it. A session that already has it may keep it.
+The user follows and steers the Coordinator from the phone, so only the Coordinator needs Remote Control. Every start, resurrection and recycle of the Coordinator passes `--remote-control "<session name>"`. Verify after each start: the session's file `~/.claude/sessions/<pid>.json` has a non-null `bridgeSessionId`. A session without one is not done; if the flag did not take, ask the user to turn it on. Start architects and workers without `--remote-control`. A session that already has it may keep it.
 
 ## Context recycle
 
