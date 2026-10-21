@@ -84,7 +84,7 @@ flowchart LR
 
 - The architect picks the family and tier per task without asking the user, and re-tiers at every dispatch.
 - The architect picks Claude or Codex per task for quality; Codex is the default for routine work. Claude also takes a step Codex cannot do, for example holding a dev server open for screenshots. `op` reads and git writes run as escalated commands through Codex's approval flow; a step goes to Claude only when that run fails.
-- pi is a third family, available only when its two model settings are filled in. A local provider may run on any repo; DeepSeek runs only in a repo whose `.orchestration.local.toml` sets `pi.deepseek = true`. pi has no native channel, so follow-ups go through `herdr agent prompt`.
+- pi is a third family, available only when its two model settings are filled in. DeepSeek (named in the provider or the model id) runs only in a repo whose `.orchestration.local.toml` sets `pi.deepseek = true`. pi has no native channel, so follow-ups go through `herdr agent prompt`.
 - A provider that refuses work for quota is replaced by the other family for new work, and the architect says so once.
 - A live session never changes model. A tier change happens through a recycle onto the new model.
 - All four model settings must be filled in `~/.claude/orchestration.toml`; the skills stop while one is empty or a placeholder.

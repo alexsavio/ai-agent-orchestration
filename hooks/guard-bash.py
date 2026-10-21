@@ -24,7 +24,8 @@ BIG_REPO_REASON = (
     "No git grep in a configured big repo. Use rg scoped to the directories you need."
 )
 BIG_REPO_BATCH_REASON = "No whole-tree cat-file batch read in a configured big repo. Use rg scoped to the directories you need."
-PI_REASON = "pi may not start this way (DeepSeek is off unless the repo opted in); use ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart>."
+PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
+MODEL_COMMAND = re.compile(r'\s*/model\b', re.I)
 BAD_ATTR = re.compile(r"co-authored-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|co-authored-by:[^\n]*(?:anthropic\.com|openai\.com|chatgpt\.com)|generated-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|Generated (?:with|using) (?:\[?(?:Claude Code|Codex|ChatGPT|OpenAI|Copilot|Gemini)\]?)|🤖\s*Generated|claude\.ai/code/session_", re.I)
 
 
@@ -807,13 +808,73 @@ def raw_fallback(command):
     return None
 
 
+PI_WRAPPERS = ('env', 'command', 'exec', 'nohup', 'time', 'nice')
+HERDR_PAIRS = (('agent', 'start'), ('agent', 'prompt'), ('pane', 'run'), ('pane', 'send-text'))
+
+
+def herdr_subcommand(args):
+    """The (group, verb) pair of a herdr call and the arguments after it."""
+    for index in range(len(args)-1):
+        if (args[index], args[index+1]) in HERDR_PAIRS:
+            return (args[index], args[index+1]), args[index+2:]
+    return None, []
+
+
+def starts_pi(text):
+    """True when any command in typed shell text is a pi run."""
+    for piece in re.split(r'&&|\|\||[;&|\n(`]|\$\(', text):
+        words = piece.split()
+        while words and (re.fullmatch(r'\w+=\S*', words[0]) or words[0] in PI_WRAPPERS):
+            words.pop(0)
+        if words and os.path.basename(re.sub(r'[\'"\\]', '', words[0])) == 'pi':
+            return True
+    return False
+
+
+def pi_kind(args):
+    """The --kind values of a herdr agent start, lowercased."""
+    kinds = [args[i+1] for i, a in enumerate(args[:-1]) if a == '--kind']
+    return [kind.lower() for kind in kinds + [a[len('--kind='):] for a in args if a.startswith('--kind=')]]
+
+
 def guard_pi(executable, args):
-    """A herdr pi start, or a pi run naming DeepSeek, outside the start step (which runs herdr outside this hook)."""
+    """A pi start outside the start step (which runs herdr outside this hook), or DeepSeek named in a pi or herdr start."""
     if executable == 'herdr':
-        if args[:2] == ['agent', 'start'] and any(a in ('--kind=pi',) or (a == 'pi' and i and args[i-1] == '--kind') for i, a in enumerate(args)):
+        pair, rest = herdr_subcommand(args)
+        text = ' '.join(rest[1:])
+        if pair == ('agent', 'start'):
+            kinds = pi_kind(args)
+            if 'pi' in kinds or any(re.search(r'[$`]', kind) for kind in kinds) or any('deepseek' in a.lower() for a in args):
+                return PI_REASON
+        elif pair in (('pane', 'run'), ('pane', 'send-text')) and (starts_pi(text) or MODEL_COMMAND.match(text)):
             return PI_REASON
-    elif any('deepseek' in a.lower() for a in args):
+        elif pair == ('agent', 'prompt') and MODEL_COMMAND.match(text):
+            return PI_REASON
+    elif '--list-models' not in args and any('deepseek' in a.lower() for a in args):
         return PI_REASON
+    return None
+
+
+def guard_pi_nested(words, where, disabled, depth=0):
+    """guard_pi on the code a shell runs (-c programs, eval) and on $(...) bodies inside the words of a stage."""
+    if depth >= 3 or 'guard_pi' in disabled:
+        return None
+    texts = [body for word in words for body in word_substitutions(word)] + shell_programs(words)
+    for text in texts:
+        try:
+            for nested, current, _ in commands(text, where):
+                nested, wrapped = unwrap(nested)
+                candidates = [nested] + ([nested[i:] for i, word in enumerate(nested) if i and os.path.basename(word) in ('herdr', 'pi')] if wrapped else [])
+                for candidate in candidates:
+                    if candidate and os.path.basename(candidate[0]) in ('herdr', 'pi'):
+                        reason = guard_pi(os.path.basename(candidate[0]), candidate[1:])
+                        if reason:
+                            return reason
+                reason = guard_pi_nested(nested, current, disabled, depth+1)
+                if reason:
+                    return reason
+        except ValueError:
+            continue
     return None
 
 
@@ -880,6 +941,9 @@ def evaluate(command, cwd, disabled=()):
             reason = evaluate_words(candidate, where, normalized_command, disabled, pipeline)
             if reason:
                 return reason
+        reason = guard_pi_nested(words, where, disabled)
+        if reason:
+            return reason
     except ValueError:
         return raw_fallback(normalized_command)
     return None

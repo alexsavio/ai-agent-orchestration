@@ -298,13 +298,14 @@ def warn(message):
 
 
 def local_values(root):
-    """Settings of a clone's personal file; warns when git tracks it."""
+    """Settings of a clone's personal file; warns when git tracks it, and then drops the personal-only settings."""
     local = Path(root) / LOCAL_FILE
     if not local.is_file():
         return {}
     if local_tracked(root):
         warn(f'{local} is tracked by git; it is personal. Run: git -C {shlex.quote(str(root))} rm --cached {LOCAL_FILE} '
              f'and add {LOCAL_FILE} to .gitignore')
+        return committed_layer(read_file(local, 'repo'), os.fspath(local))
     return read_file(local, 'repo')
 
 

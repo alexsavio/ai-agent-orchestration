@@ -224,6 +224,17 @@ class RepoFileTest(SettingsTest):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(s.load_repo(root, {})['ORCH_PI_DEEPSEEK'], '1')
 
+    def test_pi_deepseek_in_a_tracked_local_file_does_not_opt_in(self):
+        root = self.repo()
+        (root / s.LOCAL_FILE).write_text('[pi]\ndeepseek = true\n[guard]\nbig_repo = true\n')
+        git(root, 'add', '-f', s.LOCAL_FILE)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            values = s.load_repo(root, {})
+        self.assertEqual((values['ORCH_PI_DEEPSEEK'], values['ORCH_BIG_REPO']), ('0', '1'))
+        self.assertIn('is tracked by git', err.getvalue())
+        self.assertIn('not read from a committed file', err.getvalue())
+
     def test_a_linked_worktree_reads_pi_deepseek_from_its_main_checkout(self):
         main = self.repo('main')
         git(main, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init')

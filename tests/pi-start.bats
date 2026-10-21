@@ -81,7 +81,7 @@ teardown() {
 }
 
 @test "extra args cannot change the provider or name DeepSeek" {
-  for arg in --provider --model=x --models deepseek/x; do
+  for arg in --provider --model=x --models deepseek/x DEEPSEEK/X; do
     run "$SCRIPT" w1 pane1 worker "$arg"
     [ "$status" -eq 2 ]
   done
@@ -100,4 +100,54 @@ teardown() {
   [ "$status" -eq 1 ]
   run "$SCRIPT" w1 pane1 big
   [ "$status" -eq 2 ]
+}
+
+@test "a tracked .orchestration.local.toml does not opt in" {
+  printf '[pi]\ndeepseek = true\n' >"$TMP/repo/.orchestration.local.toml"
+  git -C "$TMP/repo" add -f .orchestration.local.toml
+  run "$SCRIPT" w1 pane1 smart
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DeepSeek is off"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "an exported GIT_DIR cannot point the opt-in at another repo" {
+  git init -q "$TMP/opted"
+  printf '[pi]\ndeepseek = true\n' >"$TMP/opted/.orchestration.local.toml"
+  GIT_DIR="$TMP/opted/.git" run "$SCRIPT" w1 pane1 smart
+  [ "$status" -eq 1 ]
+  [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "DeepSeek named in the model id of another provider needs the opt-in" {
+  printf '[models]\npi_worker = "openrouter/DeepSeek/deepseek-v4-pro"\n' >"$ORCH_CONFIG"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DeepSeek is off"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+  printf '[pi]\ndeepseek = true\n' >"$TMP/repo/.orchestration.local.toml"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+}
+
+@test "an empty provider is refused" {
+  printf '[models]\npi_worker = "/deepseek-v4-pro"\n' >"$ORCH_CONFIG"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"provider/model-id"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "the refusal tells the session not to edit the file" {
+  run "$SCRIPT" w1 pane1 smart
+  [[ "$output" == *"Only the user can opt a repo in"* ]] || false
+  [[ "$output" == *"Ask the user; do not edit the file."* ]] || false
+}
+
+@test "extra args cannot load extensions, keys or old sessions" {
+  for arg in -e --extension --extension=x --api-key --session --fork --resume --continue -r -c; do
+    run "$SCRIPT" w1 pane1 worker "$arg"
+    [ "$status" -eq 2 ]
+  done
+  [ ! -e "$HERDR_CALLS" ]
 }
