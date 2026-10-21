@@ -231,6 +231,24 @@ def as_env(values):
     return {setting.env: env_value(setting, value) for setting, value in values.items()}
 
 
+def resolved_global(path, environ):
+    """Every global ORCH_* setting as the scripts see it: default < the file < an exported variable."""
+    file = load_global(path)
+    return {s.env: environ.get(s.env, file.get(s.env, env_value(s, s.default))) for s in scoped('global')}
+
+
+def config_path(environ):
+    """The global file a script reads: ORCH_CONFIG (must be a regular file), else ~/.claude/orchestration.toml."""
+    chosen = environ.get('ORCH_CONFIG')
+    if chosen and not Path(chosen).is_file():
+        raise ConfigError(f'ORCH_CONFIG is not a regular file: {chosen}')
+    return chosen or str(Path(GLOBAL_FILE).expanduser())
+
+
+def print_lines(values):
+    return ''.join(f'{name}={value}\n' for name, value in values.items())
+
+
 def load_global(path):
     """ORCH_* values the global file sets; a missing file sets none."""
     if not Path(path).exists():
@@ -941,6 +959,8 @@ def main(argv):
         command = argv[1] if len(argv) > 1 else ''
         if command == 'global' and len(argv) == 3:
             sys.stdout.write(shell_lines(load_global(argv[2])))
+        elif command == 'print' and len(argv) <= 3:
+            sys.stdout.write(print_lines(resolved_global(argv[2] if len(argv) == 3 else config_path(os.environ), os.environ)))
         elif command == 'repo' and len(argv) == 3:
             sys.stdout.write(shell_lines(load_repo(argv[2], {})))
         elif command == 'migrate' and len(argv) == 5:
@@ -971,7 +991,7 @@ def main(argv):
         elif command == 'names' and len(argv) == 2:
             print(' '.join(env_names()))
         else:
-            print('usage: orch_settings.py global <file> | repo <dir> | migrate <env> <toml> <snippet-dir> '
+            print('usage: orch_settings.py global <file> | print [<file>] | repo <dir> | migrate <env> <toml> <snippet-dir> '
                   '| upgrade [--watched <global-file>] <repo-file>... [--clones <dir>...] | set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
             return 2
     except ConfigError as error:
