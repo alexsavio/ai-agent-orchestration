@@ -13,6 +13,7 @@ import uuid
 import os
 import re
 import subprocess
+import sys
 import time
 import watcher_runtime as runtime
 from pathlib import Path
@@ -101,31 +102,58 @@ def identity(agent):
     return (agent.get("agent_session") or {}).get("value") or agent["pane_id"]
 
 
+def recycle_amount(value):
+    """The context used, as `<n>k` or `<n>%`, at or over the recycle threshold; None under it or without a reading."""
+    if value.get("tokens") is not None:
+        tokens = int(value["tokens"])
+        return f"{tokens // 1000}k" if tokens >= int(os.environ.get("ORCH_RECYCLE_TOKENS", 300000)) else None
+    if value.get("remaining") is None:
+        return None
+    used = 100 - float(value["remaining"])
+    return f"{used:.0f}%" if used >= float(os.environ.get("ORCH_RECYCLE_PCT", 55)) else None
+
+
+def workspace_owners(raw):
+    """The `owner` tag of each workspace by id; none when the workspace list was not read."""
+    rows = ((raw.get("workspaces") or {}).get("result") or {}).get("workspaces") or []
+    return {row.get("workspace_id"): (row.get("tokens") or {}).get("owner") for row in rows}
+
+
+def worker_recycle(agent, value, owners):
+    """`RECYCLE-WORKER <pane> owner=<workspace> [<name>] <amount>` for a worker over the threshold whose workspace has
+    an owner tag. Only the agent name labels it: a terminal title changes while the worker runs."""
+    owner = owners.get(agent.get("workspace_id"))
+    amount = recycle_amount(value) if owner else None
+    if not amount:
+        return None
+    return " ".join(part for part in ("RECYCLE-WORKER", agent["pane_id"], f"owner={owner}", agent.get("name"), amount)
+                    if part)
+
+
 def conditions(mode, raw):
     if mode in PRESSURE_SETTINGS:
         return thresholds(mode, {key: value for key, value in raw.items() if value is not None})
     if mode == "context":
         out = {}
+        owners = workspace_owners(raw)
         for agent in agents(raw["herdr"]):
+            if agent.get("agent") != "claude":
+                continue
             label = agent.get("name") or agent.get("terminal_title_stripped") or ""
             role = (agent.get("tokens") or {}).get("role")
-            if agent.get("agent") != "claude" or not (
-                label.startswith("Architect::") or role in ("architect", "coordinator")
-                or "Architect::" in (agent.get("terminal_title_stripped") or "")
-            ):
-                continue
             sid = (agent.get("agent_session") or {}).get("value")
             value = raw["usage"].get(sid, {})
+            if not (label.startswith("Architect::") or role in ("architect", "coordinator")
+                    or "Architect::" in (agent.get("terminal_title_stripped") or "")):
+                line = worker_recycle(agent, value, owners)
+                if line:
+                    out[sid] = line
+                continue
             if not sid or not value or (value.get("tokens") is None and value.get("remaining") is None):
                 out[f"nosensor:{sid or agent['pane_id']}"] = f"NOSENSOR {agent['pane_id']} {label}"
                 continue
-            if value.get("tokens") is not None:
-                hit = int(value["tokens"]) >= int(os.environ.get("ORCH_RECYCLE_TOKENS", 300000))
-            else:
-                hit = 100 - float(value["remaining"]) >= float(os.environ.get("ORCH_RECYCLE_PCT", 55))
-            if hit:
-                amount = (f"{int(value['tokens']) // 1000}k" if value.get("tokens") is not None
-                          else f"{100 - float(value['remaining']):.0f}%")
+            amount = recycle_amount(value)
+            if amount:
                 out[sid] = f"RECYCLE {agent['pane_id']} {label} {amount}"
         return out
     if mode == "hog":
@@ -265,9 +293,12 @@ def subject_cleared(line):
     return nosensor_cleared(line) if line.startswith("NOSENSOR ") else recycle_cleared(line)
 
 
+RECYCLE_LINES = ("RECYCLE ", "RECYCLE-WORKER ")
+
+
 def reduce_context(before, after, raw):
     previous = before or {}
-    moved = {key for key in after if key in previous and previous[key].startswith(("RECYCLE ", "NOSENSOR "))
+    moved = {key for key in after if key in previous and previous[key].startswith(RECYCLE_LINES + ("NOSENSOR ",))
              and subject_cleared(previous[key]) != subject_cleared(after[key])}
     events = [subject_cleared(previous[key]) for key in sorted(moved)]
     events += [after[key] for key in sorted(after)
@@ -277,7 +308,7 @@ def reduce_context(before, after, raw):
     events += [nosensor_cleared(value) for key, value in sorted(previous.items())
                if key.startswith("nosensor:") and key not in after]
     events += [recycle_cleared(value) for key, value in sorted(previous.items())
-               if key not in remembered and key not in after and value.startswith("RECYCLE ")]
+               if key not in remembered and key not in after and value.startswith(RECYCLE_LINES)]
     remembered.update(after)
     return remembered, events
 
@@ -859,6 +890,20 @@ def cycle_pass(base, mode, collector, failures, budget):
         return line
 
 
+def workspace_list():
+    """`herdr workspace list`, for the owner tags of worker workspaces; None, with a stderr note, when it cannot be
+    read, so that architect alerts still go out."""
+    try:
+        listing = json.loads(command(herdr_bin(), "workspace", "list"))
+        if not isinstance(listing["result"]["workspaces"], list):
+            raise ValueError("workspaces not a list")
+        return listing
+    except discovery.READ_ERRORS as error:
+        print(f"context: herdr workspace list unreadable ({type(error).__name__}); worker recycle alerts wait",
+              file=sys.stderr, flush=True)
+        return None
+
+
 def session_usage(sid):
     path = Path.home() / ".claude/context-usage" / sid
     try:
@@ -911,7 +956,7 @@ def collect(mode, before, scope="", base=None):
             value = session_usage(sid)
             if value:
                 usage[sid] = value
-        return {"herdr": raw, "usage": usage}
+        return {"herdr": raw, "usage": usage, "workspaces": workspace_list()}
     if mode == "hog":
         return process_rows(command)
     if mode == "host":

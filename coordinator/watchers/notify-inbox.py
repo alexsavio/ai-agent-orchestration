@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Feed writer for watcher alerts. Dry-run by default; never injects pane input.
-`--deliver file` appends policy lines to the Coordinator feed; native messages carry only PR events to
-their owning architect and action lines while no feed Monitor is attached. Tokens come from mode-0600 binding files.
+`--deliver file` appends policy lines to the Coordinator feed; native messages carry only PR events and worker recycles
+to their owning architect and action lines while no feed Monitor is attached. Tokens come from mode-0600 binding files.
 """
 import argparse
 import fcntl
@@ -30,7 +30,7 @@ OUTBOX_KEEP_SECONDS = 3600
 MONITOR_ACK_SECONDS = 20
 FEED_NAME = "coordinator-feed.log"
 FEED_BYTES = 1024 * 1024
-OWNER = re.compile(r"^pulls: \S+ \S+#\d+ owner=([A-Za-z0-9_-]+) ")
+OWNER = re.compile(r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER \S+) owner=([A-Za-z0-9_-]+) ")
 
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")
 reader = importlib.util.module_from_spec(spec)
