@@ -13,11 +13,11 @@ The watchers write alerts to files. One notifier turns them into a feed at `~/.c
 | workers | Blocked, errored or vanished agents; finished workers waiting on their architect; sends `WORKER IDLE` (worker idle or done for `workers.idle_s`, 2 h by default, with no open PR) to the owning architect |
 | user-todo | What waits on you (see [The to-do pane](todo.md)) |
 
-### 🛎️ With services
+## 🔔 With services
 
 Set `[watchers] service = true` (with `[herdr] bin` and `socket`) and run the installer again. It registers the watchers with launchd (macOS) or `systemd --user` (Linux), so they run now and at login. The audit and pulls watchers register only when `pr.author` is set in the config file, not just exported. Setting `service` back to `false` removes them. Off by default.
 
-### 🖐️ Without services
+## ✋ Without services
 
 Run the loops yourself in the background. Run the notifier too: it fills the Coordinator's feed. The commands are in [Run the watchers without services](../coordinator/watchers/README.md#run-the-watchers-without-services). Each producer takes `--state-dir`, and `--loop --interval <seconds>` keeps it running. A watcher without `--loop` scans once and exits, which is the quick way to test one:
 
@@ -25,7 +25,7 @@ Run the loops yourself in the background. Run the notifier too: it fills the Coo
 ORCH_HOST_FILES_MAX=1 ~/.claude/coordinator/watchers/coord-host-watch.sh --state-dir /tmp/host-check
 ```
 
-### 🌡️ Host pressure
+## 🔥 Host pressure
 
 When the host is under pressure, the Coordinator follows the memory guard:
 

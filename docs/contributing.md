@@ -14,6 +14,6 @@ You need `bats`, `python3` and `node`. Linux also needs `bubblewrap`. Individual
 
 Changes go through a pull request against `main`.
 
-- **CI** runs ShellCheck (`scripts/ci/shellcheck.sh`), the entrypoint checks with a fake Herdr and a fake GitHub, and `tests/run.sh`. The steps are in `.github/actions/validate/action.yml`. Workflow scripts live in `scripts/ci/`.
+- **CI** runs ShellCheck (`scripts/ci/shellcheck.sh`), the entrypoint checks with a fake Herdr and a fake GitHub, and `tests/run.sh`. On Linux it also runs the process and unit checks (the systemctl tripwire, hog and balance against real processes, the watcher-unit check). The steps are in `.github/actions/validate/action.yml`. Workflow scripts live in `scripts/ci/`.
 - **Platforms:** Validate runs on Ubuntu for every PR. It runs on macOS for pushes to `main` and for PRs that change more than `.md`, `LICENSE` and `docs/` files; a skipped macOS job counts as passed for branch protection. Each job times out after 25 minutes.
 - **Radar pin:** the Herdr Radar fork is pinned to one commit in `env/herdr/radar.pin`. Move the pin in a PR.

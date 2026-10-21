@@ -88,7 +88,7 @@ flowchart LR
 - A live session never changes model. A tier change happens through a recycle onto the new model.
 - All four model settings must be filled in `~/.claude/orchestration.toml`; the skills stop while one is empty or a placeholder.
 
-## ♻️ Context recycle
+## 🔁 Context recycle
 
 ```mermaid
 sequenceDiagram
@@ -155,7 +155,7 @@ flowchart LR
 
 Details, keys, delivery guarantees and thresholds: [`coordinator/watchers/README.md`](../coordinator/watchers/README.md). Settings: [Settings](settings.md).
 
-## 🏋️ Heavy slots
+## 🐘 Heavy slots
 
 Many sessions share one machine, and running out of open file handles has crashed it. Details and commands: [`docs/heavy-slot.md`](heavy-slot.md).
 
@@ -172,7 +172,7 @@ Many sessions share one machine, and running out of open file handles has crashe
 
 The template every worker brief carries is [`worker-reports/machine-rules.md`](../worker-reports/machine-rules.md).
 
-## 🕰️ Legacy check
+## 🧱 Legacy check
 
 Legacy code is the patterns a repo is phasing out, which agents must not extend. A project that uses the legacy-check workflow gets the audit's `LEGACY` lines and the map and scan tools in every repo whose settings turn `legacy.scan` on. Both follow that repo's own `[[legacy.rules]]` ([settings](settings.md#-legacy-rules)).
 

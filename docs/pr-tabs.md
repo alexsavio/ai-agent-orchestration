@@ -30,7 +30,7 @@ GitHub access goes through your local `gh` login, via a native messaging host. N
 
 After an update, run the install command, then click the reload icon on the extension card at `chrome://extensions`.
 
-## ⚙️ Settings and ownership
+## 🔩 Settings and ownership
 
 `pr_tabs.org` selects the organization, `pr_tabs.default_repo` is the repo for bare numbers, and `pr_tabs.open_all` is the GitHub search behind the button. Their environment overrides are `ORCH_PR_TABS_ORG`, `ORCH_PR_TABS_DEFAULT_REPO` and `ORCH_PR_TABS_OPEN_ALL`. Reload the extension after changing settings.
 
