@@ -20,7 +20,10 @@ args = parser.parse_args()
 args.output = args.output.expanduser().resolve()
 if args.output.parent != BINDINGS.resolve() or not NAME.fullmatch(args.output.name):
     sys.exit(f"bind-self: --output must be coordinator.json or architect-<id>.json in {BINDINGS}")
-path =os.environ["CLAUDE_CODE_MESSAGING_SOCKET"]
+workspace = os.environ.get("HERDR_WORKSPACE_ID")
+if workspace and args.output.name.startswith("architect-") and args.output.name != f"architect-{workspace}.json":
+    sys.exit(f"bind-self: architect binding name must be architect-{workspace}.json (your HERDR_WORKSPACE_ID)")
+path = os.environ["CLAUDE_CODE_MESSAGING_SOCKET"]
 token = os.environ["CLAUDE_CODE_MESSAGING_TOKEN"]
 pid = int(Path(path).stem)
 record = json.loads((Path.home() / ".claude/sessions" / f"{pid}.json").read_text())

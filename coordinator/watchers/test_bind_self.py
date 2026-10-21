@@ -82,6 +82,16 @@ class BindSelfTests(IsolatedTestCase):
             with self.subTest(name=name):
                 self.assert_refused(self.run_bind(self.bindings / name))
 
+    def test_architect_name_must_use_the_callers_workspace_id(self):
+        os.environ['HERDR_WORKSPACE_ID'] = 'w2M'
+        self.addCleanup(os.environ.pop, 'HERDR_WORKSPACE_ID')
+        result = self.run_bind(self.bindings / 'architect-w9X.json')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('architect-w2M.json', result.stderr)
+        self.assertEqual(list(self.bindings.iterdir()), [])
+        for name in ('architect-w2M.json', 'coordinator.json'):
+            self.assertEqual(self.run_bind(self.bindings / name).returncode, 0, name)
+
     def test_nested_directory_is_refused(self):
         (self.bindings / 'sub').mkdir()
         result = self.run_bind(self.bindings / 'sub' / 'coordinator.json')
