@@ -8,5 +8,6 @@
 - Broad process kills: `killall` with a dev-server name (`node`, `ruby`, `puma`, `vite`, `rails`, `bundle`, `sidekiq`, `esbuild`, `foreman`, `overmind`, `bin/dev`, `dev-instance`) or with `-m`.
 - In a repo that has linked worktrees: `git fetch` or `git pull` with `--depth`, `--deepen`, `--shallow-*` or `--unshallow`, and any `git stash` except `list` and `show`. Both change history or state the worktrees share.
 - In repos whose `.orchestration.toml` or `.orchestration.local.toml` sets `guard.big_repo = true`: every `git grep`, even with a path, and bulk `git cat-file --batch`, `--batch-check` or `--batch-all-objects` reads. The installed session instructions say to use directory-scoped `rg` and `git show <ref>:<path>` for another ref.
+- `herdr agent start … --kind pi` in any form, and any `pi` command that names DeepSeek. Direct pi starts go around the DeepSeek opt-in, so the guard denies every herdr pi start (the skill always uses `~/.claude/coordinator/pi-start.sh`, which runs herdr outside the Bash tool) and a direct `pi` run that names DeepSeek. A direct `pi` run on a local provider is allowed.
 
 If the guard itself breaks, it lets the command through and logs the error to `~/.claude/hooks/guard-bash.log`. The installer checks after linking that the guard denies a forbidden command.

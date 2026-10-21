@@ -546,6 +546,28 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
         ('number before spaced redirect is a target', 'kill -TERM 12345 >/dev/null'),
     ]:
         case(name, command)
+    for name, command in [
+        ('herdr pi start on DeepSeek', 'herdr agent start w --kind pi --pane w1:p2 -- --provider deepseek --model x'),
+        ('herdr pi start with equals kind', 'herdr agent start w --kind=pi --pane w1:p2 -- --model deepseek/x'),
+        ('herdr pi start on a local provider', 'herdr agent start w --kind pi --pane w1:p2 -- --provider lmstudio --model qwen/q'),
+        ('herdr pi start without a provider', 'herdr agent start w --kind pi --pane w1:p2'),
+        ('env wrapped herdr pi start', 'env FOO=1 herdr agent start w --kind pi --pane w1:p2 -- --provider deepseek'),
+        ('pi with provider flag', 'pi --provider deepseek --model x'),
+        ('pi with qualified model', 'pi -p --model DeepSeek/x "hi"'),
+        ('absolute pi path on DeepSeek', '/opt/bin/pi --provider deepseek'),
+    ]:
+        case(name, command, True)
+    for name, command in [
+        ('pi start step', '~/.claude/coordinator/pi-start.sh w w1:p2 worker'),
+        ('herdr claude start', 'herdr agent start w --kind claude --pane w1:p2'),
+        ('herdr codex start', 'herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --model m'),
+        ('herdr agent list', 'herdr agent list'),
+        ('herdr prompt to a pi worker', 'herdr agent prompt aao-pi "use deepseek notes" --wait'),
+        ('pi on a local provider', 'pi --provider lmstudio --model qwen/qwen3.6-35b-a3b'),
+        ('pi listing models', 'pi --list-models'),
+        ('grep for deepseek', 'grep -r deepseek docs/'),
+    ]:
+        case(name, command)
     footer = '*(Generated using Claude Code)*'
     for name, command in [
         ('multi-line comment footer', f'gh pr comment 36 --body "Addressed in fb655d7.\n\n{footer}" && gh pr edit 36 --add-label ready'),
@@ -595,7 +617,7 @@ with tempfile.TemporaryDirectory(prefix='guard-bash-tests-') as directory:
     if failed:
         sys.exit(1)
     assert 'removeprefix' not in HOOK.read_text() and 'removesuffix' not in HOOK.read_text()
-    for disabled, witness in [('guard_push', 'push main'), ('guard_attribution', 'Codex trailer'), ('guard_memory', 'shared deepen fetch'), ('guard_broad_kill', 'substitution pgrep kill'), ('guard_big_repo_reads', 'webapp batch all objects')]:
+    for disabled, witness in [('guard_push', 'push main'), ('guard_attribution', 'Codex trailer'), ('guard_memory', 'shared deepen fetch'), ('guard_broad_kill', 'substitution pgrep kill'), ('guard_big_repo_reads', 'webapp batch all objects'), ('guard_pi', 'herdr pi start on DeepSeek')]:
         caught = [name for name, command, deny, cwd in cases if bool(guard.evaluate(command, cwd, disabled=(disabled,))) != deny]
         assert witness in caught, (disabled, caught)
         print(f'Mutation: disable {disabled} -> {len(caught)} test failures; witness: {witness}')

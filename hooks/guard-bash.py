@@ -24,6 +24,7 @@ BIG_REPO_REASON = (
     "No git grep in a configured big repo. Use rg scoped to the directories you need."
 )
 BIG_REPO_BATCH_REASON = "No whole-tree cat-file batch read in a configured big repo. Use rg scoped to the directories you need."
+PI_REASON = "pi may not start this way (DeepSeek is off unless the repo opted in); use ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart>."
 BAD_ATTR = re.compile(r"co-authored-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|co-authored-by:[^\n]*(?:anthropic\.com|openai\.com|chatgpt\.com)|generated-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|Generated (?:with|using) (?:\[?(?:Claude Code|Codex|ChatGPT|OpenAI|Copilot|Gemini)\]?)|🤖\s*Generated|claude\.ai/code/session_", re.I)
 
 
@@ -806,7 +807,17 @@ def raw_fallback(command):
     return None
 
 
-GUARDED_EXECUTABLES = {'git', 'gh', 'pkill', 'pgrep', 'killall', 'ps', 'grep', 'awk', 'xargs'}
+def guard_pi(executable, args):
+    """A herdr pi start, or a pi run naming DeepSeek, outside the start step (which runs herdr outside this hook)."""
+    if executable == 'herdr':
+        if args[:2] == ['agent', 'start'] and any(a in ('--kind=pi',) or (a == 'pi' and i and args[i-1] == '--kind') for i, a in enumerate(args)):
+            return PI_REASON
+    elif any('deepseek' in a.lower() for a in args):
+        return PI_REASON
+    return None
+
+
+GUARDED_EXECUTABLES = {'herdr', 'pi', 'git', 'gh', 'pkill', 'pgrep', 'killall', 'ps', 'grep', 'awk', 'xargs'}
 
 
 def evaluate_words(words, where, command, disabled, pipeline):
@@ -833,6 +844,8 @@ def evaluate_words(words, where, command, disabled, pipeline):
     elif executable == 'gh':
         args = unwrap_gh(args)
         guards = (guard_attribution,)
+    elif executable in ('herdr', 'pi'):
+        return None if 'guard_pi' in disabled else guard_pi(executable, args)
     elif executable in ('pkill', 'pgrep', 'killall', 'ps', 'grep', 'awk', 'xargs'):
         args = [executable, *args]
         guards = (guard_memory,)
