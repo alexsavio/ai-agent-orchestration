@@ -130,15 +130,12 @@ class AnswersTest(IsolatedTestCase):
                 def reduce(before, raw):
                     if failure == 'error':
                         raise ValueError('bad reduction')
+                    signal.setitimer(signal.ITIMER_REAL, .05)
                     time.sleep(10)
                     return original(before, raw)
-                def collect(before):
-                    raw = w.collect_answers(before)
-                    signal.setitimer(signal.ITIMER_REAL, .05)
-                    return raw
                 with patch.dict(os.environ, ORCH_USER_QUESTIONS_DIR=str(questions)):
                     with patch.object(w, 'reduce_answers', side_effect=reduce):
-                        w.cycle(base, 'answers', collect, budget=5)
+                        w.cycle(base, 'answers', w.collect_answers, budget=5)
                     self.assertEqual(len(list(questions.glob('*.processing'))), 1)
                     self.assertEqual(list(questions.glob('*.seen')), [])
                     self.assertIn('ANSWER ship: yes', w.cycle(base, 'answers', w.collect_answers))
