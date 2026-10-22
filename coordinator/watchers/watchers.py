@@ -450,7 +450,7 @@ def pull_owners(command, prs, failed=None, work=None):
     work is the open work already read (discovery.open_work), or the Unavailable it raised.
     Each root is identified by its `origin` remote and its `upstream` remote, the base repo of a fork; only roots with
     a watched repository have their worktrees listed. A PR takes the owner of the checkout of its head branch when the
-    head repository's owner is the owner of the root's origin or upstream, so a same-named branch of another owner has none.
+    head repository's owner is the owner of the root's origin, so a same-named branch of another fork has none.
     A root that fails is skipped and listed in `failed` by the `owner/name` of its origin and upstream, or as `*/<name>`
     when a remote could not be read."""
     work = discovery.open_work(command) if work is None else work
@@ -485,8 +485,7 @@ def pull_owners(command, prs, failed=None, work=None):
                 path = line[9:]
             elif line.startswith("branch refs/heads/") and path in by_path:
                 for base in bases:
-                    for head in {name.split("/")[0] for name in bases}:
-                        branches[(base, head, line[18:])] = path
+                    branches[(base, origin.split("/")[0], line[18:])] = path
     owners = {}
     for pr in prs:
         repo = pr["repository"]["nameWithOwner"]

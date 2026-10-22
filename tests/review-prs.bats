@@ -5,6 +5,11 @@ load test_helper
 
 SKILL_DIR=skills/review-prs
 
+setup() {
+  export PYTHONDONTWRITEBYTECODE=1
+  setup_fixture
+}
+
 # stub_review_tools: a herdr that logs calls and saves the prompt, and a gh that knows one reviewer.
 stub_review_tools() {
   cat >"$BIN/herdr-review" <<'EOF'
@@ -422,6 +427,18 @@ GIT
   # shellcheck disable=SC2016 # Python source.
   run bash -c 'cd "$1" && python3 -c "import sys; sys.path.insert(0, sys.argv[1]); import prs; print(prs.resolve_cwd(\"acme/app\"))" "$2"' _ "$TMP" "$ROOT/$SKILL_DIR/scripts"
   [ "$output" = "$direct" ]
+}
+
+@test "a fork clone is found for the upstream repo when the open work holds only it" {
+  stub_review_tools
+  fork=$(mkdir -p "$TMP/fork" && cd "$TMP/fork" && pwd -P)
+  git init -q "$fork" && git -C "$fork" remote add origin https://github.com/me/app.git
+  git -C "$fork" remote add upstream https://github.com/acme/app.git
+  mkdir -p "$HOME/.claude/coordinator"
+  printf '{"clones": ["%s"]}' "$fork" >"$HOME/.claude/coordinator/open-work.json"
+  # shellcheck disable=SC2016 # Python source.
+  run bash -c 'cd "$1" && python3 -c "import sys; sys.path.insert(0, sys.argv[1]); import prs; print(prs.resolve_cwd(\"acme/app\"))" "$2"' _ "$TMP" "$ROOT/$SKILL_DIR/scripts"
+  [ "$output" = "$fork" ]
 }
 
 @test "a reused pane starts Codex in the worktree" {

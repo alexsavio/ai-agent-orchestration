@@ -386,7 +386,7 @@ def matching_remote(path, repo):
 
 
 def origin_matches(path, repo):
-    """True when the clone's GitHub origin or upstream is repo."""
+    """True when the clone's GitHub origin or upstream is repo; raises CalledProcessError when a remote cannot be read (see matching_remote)."""
     return matching_remote(path, repo) is not None
 
 

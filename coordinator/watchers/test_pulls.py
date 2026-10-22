@@ -135,17 +135,65 @@ class PullsTest(IsolatedTestCase):
         self.assertEqual(failed, ["me/product", "owner/product"])
         self.assertEqual(raw["prs"]["owner/product#7"]["owner"], "wOld")
 
-    def test_a_fork_clone_branch_pushed_to_the_upstream_repo_takes_the_owner(self):
+    def test_a_fork_clone_branch_pushed_to_the_upstream_repo_has_no_owner(self):
         remotes, upstreams = self.fork_clone()
         with remotes, upstreams:
             owners = w.pull_owners(self.command([]), [pr(7, head="owner/product"), pr(8, head="third/product")])
-        self.assertEqual(owners, {"owner/product#7": "wArch"})
+        self.assertEqual(owners, {})
+
+    def two_roots(self):
+        """/repo/a-direct is a direct clone of owner/product; /repo/product is the fork me/product of owner/product."""
+        workspaces = {"result": {"workspaces": [
+            {"workspace_id": "wD", "tokens": {"owner": "wDirect"},
+             "worktree": {"checkout_path": "/wt/direct/feature", "repo_root": "/repo/a-direct"}},
+            *WORKSPACES["result"]["workspaces"][:1]]}}
+        run = self.command([])
+
+        def wrapped(*argv):
+            if argv[1:3] == ("workspace", "list"):
+                return json.dumps(workspaces)
+            if argv[0] == "git" and argv[2] == "/repo/a-direct" and argv[3:5] == ("remote", "get-url"):
+                if argv[5] == "upstream":
+                    raise subprocess.CalledProcessError(2, argv, stderr="error: No such remote 'upstream'")
+                return "git@github.com:owner/product.git\n"
+            if argv[0] == "git" and argv[2] == "/repo/a-direct" and argv[3] == "worktree":
+                return WORKTREES.replace("/repo/product", "/repo/a-direct").replace("/wt/product", "/wt/direct")
+            return run(*argv)
+        return wrapped
+
+    def test_a_base_repo_branch_pushed_from_the_direct_clone_keeps_the_direct_owner(self):
+        remotes, upstreams = self.fork_clone()
+        with remotes, upstreams:
+            owners = w.pull_owners(self.two_roots(), [pr(7, head="owner/product")])
+        self.assertEqual(owners, {"owner/product#7": "wDirect"})
+
+    def test_a_pr_on_the_fork_from_a_base_repo_branch_has_no_owner(self):
+        remotes, upstreams = self.fork_clone()
+        sync = pr(7, head="owner/product")
+        sync["repository"] = {"nameWithOwner": "me/product", "defaultBranchRef": {"name": "main"}}
+        with remotes, upstreams:
+            self.assertEqual(w.pull_owners(self.command([]), [sync]), {})
+
+    def test_an_unreadable_origin_is_named_by_the_folder_name(self):
+        rows = {"result": {"workspaces": [
+            {"workspace_id": "wW", "tokens": {"owner": "wArch"}, "worktree": {"checkout_path": "/wt/feature", "repo_root": "/repo/zimt-custom"}}]}}
+        run = self.command([])
+
+        def renamed(*argv):
+            if argv[1:3] == ("workspace", "list"):
+                return json.dumps(rows)
+            if argv[0] == "git" and argv[2] == "/repo/zimt-custom" and argv[3:] == ("remote", "get-url", "origin"):
+                raise OSError("slow disk")
+            return run(*argv)
+        failed = []
+        self.assertEqual(w.pull_owners(renamed, [pr(7, head="me/product")], failed), {})
+        self.assertEqual(failed, ["*/zimt-custom"])
 
     def test_owners_and_repos_are_compared_without_case(self):
         remotes, upstreams = self.fork_clone("git@github.com:Owner/Product.git\n")
         with remotes, upstreams:
-            owners = w.pull_owners(self.command([]), [pr(7, head="ME/Product"), pr(8, head="Owner/PRODUCT")])
-        self.assertEqual(owners, {"owner/product#7": "wArch", "owner/product#8": "wArch"})
+            owners = w.pull_owners(self.command([]), [pr(7, head="ME/Product")])
+        self.assertEqual(owners, {"owner/product#7": "wArch"})
 
     def test_an_unreadable_upstream_is_named_by_the_origin_repo_name_not_the_folder_name(self):
         rows = {"result": {"workspaces": [
