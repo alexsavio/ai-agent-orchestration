@@ -21,6 +21,7 @@ import feed_attach
 import feed_follow
 import watchers as w
 from test_watchers import worker_context
+from test_worker_idle import AFTER, LINE, PANE, idle_raw
 
 spec = importlib.util.spec_from_file_location("inbox_policy", w.ROOT / "notify-inbox.py")
 inbox = importlib.util.module_from_spec(spec)
@@ -220,6 +221,13 @@ class PolicyTest(IsolatedTestCase):
             _, events = w.reduce("context", before, raw)
         self.run_at(60, {"mode": "context", "events": events})
         self.assertTrue(self.state["keys"][key]["active"], events)
+
+    def test_worker_idle_starts_once_and_clears_when_the_worker_works_again(self):
+        line = "WORKER IDLE wW:p1 owner=wA"
+        self.assertEqual(self.run_at(0, {"mode": "workers", "events": [line]}), [f"workers: {line} (start)"])
+        self.assertEqual(self.run_at(60, {"mode": "workers", "events": [line]}), [])
+        self.assertEqual(self.run_at(120, {"mode": "workers", "events": [line + " cleared"]}), [f"workers: {line} (clear)"])
+        self.assertEqual(self.run_at(180, {"mode": "workers", "events": [line]}), [f"workers: {line} (start)"])
 
     def test_pull_events_start_clear_and_merge(self):
         approved = {"mode": "pulls", "events": ["APPROVED o/r#7 owner=wA Fix it"]}
@@ -1251,6 +1259,48 @@ class DeliveryTest(IsolatedTestCase):
                      "context: NOSENSOR wJ:p8 owner=wMS Architect::x (start)",
                      "context: RECYCLE-WORKER wW:p1 fix-42 owner=wMS 310k (start)"):
             self.assertIsNone(inbox.OWNER.match(line), line)
+
+    def test_only_a_worker_idle_line_names_an_owner_in_a_workers_line(self):
+        self.assertEqual(inbox.OWNER.match("workers: WORKER IDLE wW:p1 owner=wMS (start)").group(1), "wMS")
+        for line in ("workers: WORKER wW:p1 blocked (start)", "workers: WORKER wW:p1 owner=wMS blocked (start)"):
+            self.assertIsNone(inbox.OWNER.match(line), line)
+
+    def idle_cycle(self, owner):
+        """The idle worker's line, after a quiet first read; returns the time to deliver at."""
+        env = patch.dict(os.environ, {"ORCH_WAIT_S": "1e12", "ORCH_WAIT_REPEAT_S": "1e12"})
+        env.start()
+        self.addCleanup(env.stop)
+        self.host_cycle()
+        w.cycle(self.base, "workers", lambda before: idle_raw(0, owner=owner))
+        w.cycle(self.base, "workers", lambda before: idle_raw(AFTER, owner=owner, prs={PANE: False}))
+        now = (self.base / "host.heartbeat").stat().st_mtime
+        self.monitor(now)
+        os.utime(self.base / "workers.heartbeat", (now, now))
+        return now
+
+    def test_a_worker_idle_line_goes_to_its_owner_and_into_the_feed(self):
+        sent = self.deliver(self.idle_cycle("wMS"), modes=("host", "workers"))
+        line = f"workers: {LINE.replace('wArch', 'wMS')} (start)"
+        self.assertEqual(sent, [("architect-wMS.json", line + ". No reply needed.")])
+        self.assertIn(line, self.feed_lines())
+
+    def test_the_workers_snapshot_keeps_a_fired_idle_line_and_drops_the_others(self):
+        idle = {"a:p1": {"owner": "wA", "since": 0, "state": "fired"}, "a:p2": {"owner": "wA", "since": 0, "state": "open_pr"},
+                "a:p3": {"owner": "wA", "since": 0}}
+        self.assertEqual(inbox.snapshot_lines("workers", {"idle": idle}), ["WORKER IDLE a:p1 owner=wA"])
+
+    def test_a_worker_idle_line_waits_in_the_outbox_until_its_owner_binding_appears(self):
+        now = self.idle_cycle("wGone")
+        present = lambda path: (path.lstat(), "token") and (path, "token")
+        self.assertEqual(self.deliver(now, modes=("host", "workers"), check=present), [])
+        outbox = json.loads((self.base / "deliver.cursor").read_text())["outbox"]
+        line = f"workers: {LINE.replace('wArch', 'wGone')} (start)" + ". No reply needed."
+        self.assertEqual([(Path(entry["binding"]).name, entry["text"]) for entry in outbox], [("architect-wGone.json", line)])
+        self.assertIn(f"workers: {LINE.replace('wArch', 'wGone')} (start)", self.feed_lines())
+        (self.base / "bindings" / "architect-wGone.json").write_text("{}")
+        sent = self.deliver(now + inbox.OUTBOX_RETRY_SECONDS + 1, modes=("host", "workers"), check=present)
+        self.assertEqual(sent, [("architect-wGone.json", line)])
+        self.assertNotIn("outbox", json.loads((self.base / "deliver.cursor").read_text()))
 
     def test_a_worker_recycle_waits_in_the_outbox_until_its_owner_binding_appears(self):
         now = self.context_cycle("wGone", worker=310000)

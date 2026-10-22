@@ -174,6 +174,10 @@ def worker_facts(line):
         # Session, owner, stage and background caveat are protocol fields, even beyond the display limit.
         item["text"] = line
         return [item]
+    idle = re.match(r"WORKER IDLE (\S+) owner=\S+( cleared)?$", line)
+    if idle:
+        key = f"workers:idle:{idle.group(1)}"
+        return [clear(key, exact=True)] if idle.group(2) else [fact(key, line, clearable=True)]
     match = re.match(r"WORKER (\S+) (RECOVERED )?(.+)$", line)
     if not match:
         return None

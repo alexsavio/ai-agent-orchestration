@@ -3,6 +3,7 @@
 from question_lock import answers_lock, questions_directory
 import alert_policy
 import argparse
+import contextlib
 import audit
 import discovery
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ import subprocess
 import sys
 import time
 import watcher_runtime as runtime
+from time import monotonic as _monotonic
 from pathlib import Path
 from watcher_platform import MissingMetric, herdr_bin, host_metrics, process_rows, balance_metrics
 
@@ -165,11 +167,9 @@ def conditions(mode, raw):
             if agent.get("agent") != "claude":
                 continue
             label = agent.get("name") or agent.get("terminal_title_stripped") or ""
-            role = (agent.get("tokens") or {}).get("role")
             sid = (agent.get("agent_session") or {}).get("value")
             value = raw["usage"].get(sid, {})
-            if not (label.startswith("Architect::") or role in ("architect", "coordinator")
-                    or "Architect::" in (agent.get("terminal_title_stripped") or "")):
+            if not architect_like(agent):
                 line = worker_recycle(agent, value, owners)
                 if line:
                     out[sid] = line
@@ -385,6 +385,61 @@ ACTIVE_WORKER_STATUSES = ("working", "waiting", "blocked", "error")
 IDLE_STATUSES = ("idle", "done")
 
 
+def idle_seconds():
+    return int(os.environ.get("ORCH_WORKER_IDLE_S", "7200"))
+
+
+def idle_line(pane, owner, cleared=False):
+    return f"WORKER IDLE {pane} owner={owner}" + (" cleared" if cleared else "")
+
+
+def idle_due(previous, rows, owners, now):
+    """The workers in `rows` that have been idle or done for more than ORCH_WORKER_IDLE_S in this idle period, have no
+    line yet, and are due an open-PR check: the first one, or the next one, ORCH_WORKER_IDLE_S after the last."""
+    due = []
+    for row in rows:
+        entry = (previous or {}).get(row["pane_id"])
+        owner = owners.get(row.get("workspace_id"))
+        if (entry and owner and entry["owner"] == owner and entry.get("state") != "fired"
+                and row.get("agent_status") in IDLE_STATUSES and now - entry["since"] > idle_seconds()
+                and entry.get("retry", 0) <= now):
+            due.append(row)
+    return due
+
+
+def reduce_idle(previous, raw, present):
+    """The idle periods of owned workers, and a `WORKER IDLE` line the first time a period passes the threshold with
+    no open PR. A period ends when the worker works again, leaves or changes owner; the line then clears."""
+    now = raw.get("observed_at")
+    if now is None or raw.get("workspaces") is None:
+        return previous, []
+    owners = workspace_owners(raw)
+    checks, found, fired = raw.get("pr_open") or {}, {}, []
+    for row in present.values():
+        pane, owner = row["pane_id"], owners.get(row.get("workspace_id"))
+        if not owner or architect_like(row) or row.get("agent_status") not in IDLE_STATUSES:
+            continue
+        old = previous.get(pane)
+        session = (row.get("agent_session") or {}).get("value")
+        same = old and old["owner"] == owner and not (session and old.get("session") and session != old["session"])
+        entry = dict(old) if same else {"owner": owner, "since": now}
+        if session:
+            entry["session"] = session
+        if (entry.get("state") != "fired" and now - entry["since"] > idle_seconds() and pane in checks
+                and entry.get("retry", 0) <= now):
+            if checks[pane] is None or checks[pane] is True:
+                if checks[pane]:
+                    entry["state"] = "open_pr"
+                entry["retry"] = now + idle_seconds()
+            else:
+                entry["state"] = "fired"
+                fired.append(idle_line(pane, owner))
+        found[pane] = entry
+    cleared = [idle_line(pane, entry["owner"], cleared=True) for pane, entry in sorted(previous.items())
+               if entry.get("state") == "fired" and found.get(pane, {}).get("state") != "fired"]
+    return found, cleared + fired
+
+
 def worker_snapshot(raw, previous, bad):
     by_pane = {row["pane_id"]: key for key, row in previous.items()}
     rows = agents(raw)
@@ -530,6 +585,7 @@ def reduce_workers(before, raw):
             bad[key] = dict(pane=row["pane_id"], state="closed" if row["pane_id"] in closed else "dead/disappeared")
     unreadable.sort()
     events = readfail_changes("WORKER", previous.get("unreadable", []), unreadable)
+    idle, idle_events = reduce_idle(previous.get("idle", {}), raw, present)
     for key in sorted(set(old_bad) | set(bad)):
         old, new = old_bad.get(key, {}), bad.get(key, {})
         pane = new.get("pane") or (present[key]["pane_id"] if key in present else None)
@@ -545,7 +601,8 @@ def reduce_workers(before, raw):
     events += waiting_events
     return dict(bad={key: value for key, value in bad.items() if key in present},
                 present=present, unreadable=unreadable, seen=seen, waiting=waiting,
-                waiting_read_failures=raw.get("waiting_read_failures", previous.get("waiting_read_failures", []))), events
+                waiting_read_failures=raw.get("waiting_read_failures", previous.get("waiting_read_failures", [])),
+                idle=idle), events + idle_events
 
 
 def pull_owners(command, prs, failed=None, work=None):
@@ -1131,6 +1188,115 @@ def collect_waiting_jobs(raw, before):
     raw.update(waiting_busy=busy, waiting_read_failures=sorted(failed))
 
 
+OPEN_PR_CHECKS_MAX = 3
+IDLE_CHECK_SECONDS = 30
+GH_TIMEOUT = 10
+CALLS_PER_CHECK = 6  # branch, operation markers, two remote URLs, one gh list per remote
+REMOTES = ("origin", "upstream")
+STOPPED_OPERATIONS = ("rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG")
+NO_CHECKOUT = re.compile(r"not a git repository|No such file or directory", re.IGNORECASE)
+
+
+@contextlib.contextmanager
+def short_commands():
+    """Every git and gh call inside gets GH_TIMEOUT seconds, not the 45 s default, so the pass stays in its budget."""
+    saved = runtime.COMMAND_TIMEOUT
+    runtime.COMMAND_TIMEOUT = GH_TIMEOUT
+    try:
+        yield
+    finally:
+        runtime.COMMAND_TIMEOUT = saved
+
+
+def stopped_operation(cwd):
+    """Whether the checkout is stopped in a rebase, merge, cherry-pick, revert or bisect. HEAD can be attached (merge,
+    cherry-pick, revert) or detached (rebase, bisect), and the branch is not gone either way."""
+    paths = command("git", "-C", cwd, "rev-parse", *(arg for name in STOPPED_OPERATIONS for arg in ("--git-path", name)))
+    return any((Path(cwd) / line).exists() for line in paths.splitlines())
+
+
+def github_remotes(cwd):
+    """owner/name of the checkout's GitHub `origin` and `upstream`, each once, `origin` first; empty without a
+    GitHub remote."""
+    found = []
+    for name in REMOTES:
+        try:
+            url = command("git", "-C", cwd, "remote", "get-url", name).strip()
+        except subprocess.CalledProcessError as error:
+            if discovery.NO_REMOTE.search(str(error.stderr or "")):
+                continue
+            raise
+        match = GITHUB_REMOTE.search(url)
+        if match and match[1].lower() not in [repo.lower() for repo in found]:
+            found.append(match[1])
+    return found
+
+
+def open_pr(row):
+    """Whether the worker's branch has an open PR on any GitHub remote of its checkout (a PR from a fork is on
+    `upstream`) whose head is in the repository of the checkout's `origin`. A plain detached HEAD, a checkout that is
+    not a git repository and a checkout without a GitHub remote cannot have one: False. None when a git or gh call
+    fails, when the checkout is stopped in a rebase, merge, cherry-pick, revert or bisect (also with an attached
+    HEAD), or when a PR's head owner cannot be read. The pass deadline is not a failed call: it passes up."""
+    cwd = row.get("cwd")
+    if not cwd:
+        return None
+    try:
+        with short_commands():
+            try:
+                branch = command("git", "-C", cwd, "symbolic-ref", "--quiet", "--short", "HEAD").strip()
+            except subprocess.CalledProcessError as error:
+                if error.returncode != 1:
+                    if NO_CHECKOUT.search(str(error.stderr or "")):
+                        return False
+                    raise
+                branch = ""
+            if stopped_operation(cwd):
+                return None
+            if not branch:
+                return False
+            repos = github_remotes(cwd)
+            head_owner = repos[0].split("/")[0].lower() if repos else ""
+            unknown = False
+            for repo in repos:
+                try:
+                    for pr in json.loads(command("gh", "pr", "list", "--repo", repo, "--head", branch, "--state", "open",
+                                                 "--json", "number,headRepositoryOwner")):
+                        owner = ((pr.get("headRepositoryOwner") or {}).get("login") or "").lower()
+                        if owner == head_owner:
+                            return True
+                        unknown = unknown or not owner
+                except TimeoutError:
+                    raise
+                except (*discovery.READ_ERRORS, subprocess.CalledProcessError):
+                    unknown = True
+            return None if unknown else False
+    except TimeoutError:
+        raise
+    except (*discovery.READ_ERRORS, subprocess.CalledProcessError):
+        return None
+
+
+def collect_idle(raw, before, started):
+    """For the workers that pass the idle line in this pass, their open-PR checks: at most OPEN_PR_CHECKS_MAX, and none
+    started IDLE_CHECK_SECONDS after the pass began (`started`, a monotonic time taken before the first Herdr call);
+    the rest wait for a later pass. Needs the workspace list `collect` read: without it nothing runs."""
+    if raw.get("workspaces") is None:
+        return
+    rows = [row for row in agents(raw) if not architect_like(row)
+            and (row.get("agent_status") in IDLE_STATUSES or row.get("agent_status") not in WORKER_STATUSES)]
+    if not rows:
+        return
+    due = idle_due((before or {}).get("idle", {}), rows, workspace_owners(raw), raw["observed_at"])
+    checks = {}
+    for row in due[:OPEN_PR_CHECKS_MAX]:
+        if _monotonic() - started >= IDLE_CHECK_SECONDS:
+            break
+        checks[row["pane_id"]] = open_pr(row)
+    if checks:
+        raw["pr_open"] = checks
+
+
 def collect(mode, before, scope="", base=None):
     if mode == "audit":
         return audit.collect(command, before=before)
@@ -1143,6 +1309,7 @@ def collect(mode, before, scope="", base=None):
     if mode in ("context", "workers"):
         if os.environ.get("HERDR_ENV") != "1":
             raise RuntimeError("not inside Herdr")
+        started = _monotonic()
         raw = json.loads(command(herdr_bin(), "agent", "list"))
         agents(raw)
         if mode == "workers":
@@ -1154,6 +1321,7 @@ def collect(mode, before, scope="", base=None):
             collect_waiting_jobs(raw, before)
             if base is not None:
                 raw["closed"] = closed_panes(base, {row["pane_id"] for row in agents(raw)}, before)
+            collect_idle(raw, before, started)
             return raw
         usage = {}
         for agent in agents(raw):
