@@ -1252,10 +1252,18 @@ class DeliveryTest(IsolatedTestCase):
                      "context: RECYCLE-WORKER wW:p1 fix-42 owner=wMS 310k (start)"):
             self.assertIsNone(inbox.OWNER.match(line), line)
 
-    def test_a_worker_recycle_without_an_owner_binding_stays_feed_only(self):
-        self.assertEqual(self.deliver(self.context_cycle("wGone", worker=310000), modes=("host", "context")), [])
-        self.assertNotIn("outbox", json.loads((self.base / "deliver.cursor").read_text()))
+    def test_a_worker_recycle_waits_in_the_outbox_until_its_owner_binding_appears(self):
+        now = self.context_cycle("wGone", worker=310000)
+        present = lambda path: (path.lstat(), "token") and (path, "token")
+        self.assertEqual(self.deliver(now, modes=("host", "context"), check=present), [])
+        outbox = json.loads((self.base / "deliver.cursor").read_text())["outbox"]
+        line = self.WORKER_LINE.format("wGone") + ". No reply needed."
+        self.assertEqual([(Path(entry["binding"]).name, entry["text"]) for entry in outbox], [("architect-wGone.json", line)])
         self.assertIn(self.WORKER_LINE.format("wGone"), self.feed_lines())
+        (self.base / "bindings" / "architect-wGone.json").write_text("{}")
+        sent = self.deliver(now + inbox.OUTBOX_RETRY_SECONDS + 1, modes=("host", "context"), check=present)
+        self.assertEqual(sent, [("architect-wGone.json", line)])
+        self.assertNotIn("outbox", json.loads((self.base / "deliver.cursor").read_text()))
 
     def test_a_worker_recycle_for_a_dead_owner_binding_waits_in_the_outbox(self):
         process = subprocess.Popen([sys.executable, "-c", ""])

@@ -171,12 +171,13 @@ def commit(args, cursor):
 
 
 def native_messages(args, stamped, fallback, patterns):
-    """One native message per architect with a binding file, and one for the Coordinator, as (binding path, text)."""
+    """One native message per architect with a binding file (a worker recycle also for an architect not yet bound; it
+    waits in the outbox), and one for the Coordinator, as (binding path, text)."""
     by_owner = {}
     for line in stamped:
         owner = OWNER.match(line.split(" ", 1)[1])
         if owner and not line.endswith("(clear)") and args.bindings_dir \
-                and (args.bindings_dir / f"architect-{owner.group(1)}.json").exists():
+                and (" RECYCLE-WORKER " in line or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()):
             by_owner.setdefault(owner.group(1), []).append(native(line.split(" ", 1)[1]) + ". No reply needed.")
     out = [(str(args.bindings_dir / f"architect-{owner}.json"), "\n".join(texts)) for owner, texts in sorted(by_owner.items())]
     actions = [line for line in stamped if is_action(line, patterns)] if args.binding and fallback else []

@@ -35,8 +35,8 @@ wait, saved ones are kept, architect lines still go out, and stderr gets
 `context: herdr workspace list unreadable (<error>); worker recycle alerts wait`. An owner change clears the old line
 and starts one with the new owner; a departed session emits `RECYCLE-WORKER <pane> owner=<workspace> <name> cleared`.
 The notifier sends each `RECYCLE-WORKER` start natively to `bindings/architect-<owner>.json`, as it sends a PR event
-with an owner. Without that binding file the line stays in the feed only; a binding of a dead session fails each send,
-and the message waits in the outbox (one try per 60 seconds, dropped after an hour). It is not an action line, so the
+with an owner. Until that binding file exists, and while a binding of a dead session fails each send,
+the message waits in the outbox (one try per 60 seconds, dropped after an hour). It is not an action line, so the
 Coordinator's Monitor stays quiet. The architect then runs the
 [worker recycle](../../skills/architect/references/worker-recycle.md).
 
