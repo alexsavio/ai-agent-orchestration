@@ -234,10 +234,14 @@ def reduce_pressure(mode, before, raw, after):
     unreadable = [key for key in labels if raw.get(key) is None] + raw.get("unreadable", [])
     state_extra = {}
     reported = unreadable
+    read = raw  # what this scan read; a kept value prints as unavailable
     if settings["read_grace"]:
         # A source is reported only after READ_FAILURES unreadable passes in a row; until then
         # a metric keeps its last good value.
-        passes = {source: previous.get("unreadable_passes", {}).get(source, 0) + 1 for source in unreadable}
+        # A state saved before the grace has no counts; a source it already reported stays reported.
+        passes = {source: previous.get("unreadable_passes", {}).get(
+            source, READ_FAILURES - 1 if source in previous.get("unreadable", []) else 0) + 1
+            for source in unreadable}
         good = previous.get("last_good", {})
         raw = dict(raw, **{key: good[key] for key in labels
                            if raw.get(key) is None and passes[key] < READ_FAILURES and key in good})
@@ -249,7 +253,7 @@ def reduce_pressure(mode, before, raw, after):
     pending = previous.get("pending_recovery", False) or bool(flags) or bool(keys)
     events = readfail_changes(prefix, previous.get("unreadable", []), reported)
     if keys != flags and keys:
-        line = prefix + " " + " ".join(f"{label}({settings['detail'](key, raw.get(key))})"
+        line = prefix + " " + " ".join(f"{label}({settings['detail'](key, read.get(key))})"
                                         for key, label in labels.items() if key in keys)
         if settings["suffix"]:
             line += settings["suffix"](raw)

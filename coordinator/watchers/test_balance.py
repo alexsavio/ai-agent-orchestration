@@ -193,7 +193,7 @@ class BalanceTests(IsolatedTestCase):
             if args[0] == 'memory_pressure':
                 return 'free percentage: 50%'
             raise subprocess.CalledProcessError(1, args)
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()):
             raw = balance_metrics(command, BALANCE_LIMITS, Path(tmp), MacBalance())
         before, events = reduce('balance', None, raw)
         self.assertIn('LOAD5(21.00)', events[-1])
@@ -318,7 +318,7 @@ class BalanceReadGraceTests(IsolatedTestCase):
         for slots in (6, 7):
             before, events = reduce('balance', before, dict(self.bad(), slots=slots))
             self.assertEqual(len(events), 1)
-            self.assertIn(f'LOAD5(45.00) SLOTS({slots})', events[0])
+            self.assertIn(f'LOAD5(unavailable) SLOTS({slots})', events[0])
             self.assertIn('load5', before['flags'])
         before, events = reduce('balance', before, dict(self.bad(), slots=8))
         self.assertEqual(events[0], 'BALANCE READFAIL load5')
@@ -329,6 +329,20 @@ class BalanceReadGraceTests(IsolatedTestCase):
         before, events = reduce('balance', before, self.bad())
         self.assertEqual(events, [])
         self.assertEqual(reduce('balance', before, self.healthy())[1], ['BALANCE RECOVERED'])
+
+    def old_state(self):
+        return {"flags": {}, "pending_recovery": False, "unreadable": ["heavy", "processes"]}
+
+    def test_state_saved_before_the_grace_keeps_its_reported_sources(self):
+        raw = dict(self.healthy(), heavy=None, unreadable=['processes'])
+        before = self.old_state()
+        for _ in range(READ_FAILURES):
+            before, events = reduce('balance', before, raw)
+            self.assertEqual(events, [])
+            self.assertEqual(before['unreadable'], ['heavy', 'processes'])
+
+    def test_state_saved_before_the_grace_clears_on_a_good_scan(self):
+        self.assertEqual(reduce('balance', self.old_state(), self.healthy())[1], ['BALANCE READFAIL cleared'])
 
     def test_state_survives_between_cycles(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -387,6 +401,22 @@ class MacReadReasonTests(IsolatedTestCase):
             MacBalance().processes(command)
         self.assertEqual([line.split(': ')[1] for line in stderr.getvalue().splitlines()],
                          ['ps after 2.5s', 'lsof after 45.0s'])
+
+    def test_reason_is_cut_to_200_characters(self):
+        error = subprocess.CalledProcessError(1, ['ps'], stderr='x' * 500)
+        _, lines = self.processes('ps', error)
+        self.assertEqual(len(lines[0].split(': ', 2)[2]), 200)
+        _, lines = self.processes('ps', MissingMetric('y' * 500))
+        self.assertEqual(len(lines[0].split(': ', 2)[2]), 200)
+
+    def test_unlabelled_reads_write_nothing(self):
+        def command(*args):
+            raise subprocess.CalledProcessError(1, args, stderr='boom')
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(stderr):
+            self.assertEqual(MacBalance().metrics(command), dict(free=None, load5=None))
+            self.assertEqual(LinuxBalance(Path(tmp), ticks=100).metrics(command), dict(free=None, load5=None))
+        self.assertEqual(stderr.getvalue(), '')
 
     def test_a_good_read_writes_nothing(self):
         result, lines = self.processes('none', None)

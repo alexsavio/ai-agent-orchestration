@@ -169,11 +169,16 @@ def process_rows(command):
     return PROCESSES.collect(command)
 
 
+READ_REASON_CHARS = 200
+
+
 def read_failure_reason(error):
     if isinstance(error, subprocess.CalledProcessError):
         lines = str(error.stderr or "").strip().splitlines()
-        return f"exit {error.returncode}" + (f": {lines[0]}" if lines else "")
-    return f"{type(error).__name__}: {error}"
+        reason = f"exit {error.returncode}" + (f": {lines[0]}" if lines else "")
+    else:
+        reason = f"{type(error).__name__}: {error}"
+    return reason[:READ_REASON_CHARS]
 
 
 def balance_read(read, label=None):

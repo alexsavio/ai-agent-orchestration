@@ -187,10 +187,14 @@ It re-alerts per load5 step of 10 and on slot count changes; RECOVERED appears
 only after a pressure flag has been raised and all metrics and process mappings
 are readable and all flags clear. Pending recovery is kept across unreadable
 scans; a READFAIL that clears without prior pressure sends only READFAIL cleared.
-BALANCE READFAIL names unavailable metrics and PIDs; valid metrics still alert,
-and unreadable active flags remain remembered. A source is reported only after three unreadable scans in a row,
-keeping its last good value until then, and `READFAIL cleared` follows only a reported
-READFAIL; a failing macOS `ps` or `lsof` call writes its command, seconds and reason to stderr. A scan with no readable metric
+BALANCE READFAIL names unavailable metrics and PIDs, a PID only after it is
+unreadable for three scans in a row (PIDs that change each scan show as
+`heavy`); valid metrics still alert, and unreadable active flags remain
+remembered. A source is reported only after three unreadable scans in a row; its
+last good value keeps the flag, and an alert line prints it as `unavailable`.
+`READFAIL cleared` follows only a reported READFAIL. A failing macOS `ps` or
+`lsof` call writes its command, seconds and reason (200 characters at most) to
+stderr. A scan with no readable metric
 increments the repeated read-failure counter.
 
 The `top:` list names up to four current-user worktrees ranked by aggregate CPU, with CPU
