@@ -47,7 +47,11 @@ fi
 # The PR lives on $repo: the clone's origin, or its upstream when the clone is a fork. Its base is read from there.
 remote=$("$py" "$here/prs.py" remote --cwd "$cwd" --repo "$repo") || remote=""
 base=$(gh_bounded api "repos/$repo/pulls/$num" --jq .base.ref) || base=""
-[ -z "$remote" ] || [ -z "$base" ] || git -C "$cwd" fetch -q "$remote" "$base" 2>/dev/null
+if [ -n "$remote" ] && { [ -z "$base" ] || ! git -C "$cwd" fetch -q "$remote" "$base" 2>/dev/null; }; then
+  echo "BASE FAILED could not fetch the base branch of $url from $remote; prompt not sent"
+  release
+  exit 1
+fi
 
 # A worktree left at this path is stale: this dispatch holds the claim on its head.
 wt="${XDG_CACHE_HOME:-$HOME/.cache}/review-prs/worktrees/$agent"

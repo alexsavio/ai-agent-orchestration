@@ -32,7 +32,7 @@ EOF
 #!/usr/bin/env bash
 case "$*" in
   'api user --jq .login') echo reviewer ;;
-  'api repos/acme/app/pulls/7 --jq .base.ref') echo main ;;
+  'api repos/acme/app/pulls/7 --jq .base.ref') [ -z "${BASE_READ_FAILS:-}" ] || exit 1; echo main ;;
   *'/reviews'*)
     r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "$2" "$1"; }
     old=""
@@ -411,6 +411,30 @@ GIT
   grep -qF -- "-C $TMP/app fetch -q upstream main" "$TMP/fetch.calls"
   [ "$(grep -c 'pull/7/head' "$TMP/fetch.calls")" = 0 ]
   contains "$(cat "$TMP/review.prompt")" 'git show upstream/<base branch>:<path>'
+}
+
+@test "a failed fetch of the base branch releases the head before any pane, agent or worktree" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  # shellcheck disable=SC2016 # The stub's own text.
+  sed -i.bak 's/= upstream \]/= upstream ] \&\& [ "$6" != main ]/' "$BIN/git"
+  dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'RELEASED'
+  grep -qF -- "-C $TMP/app fetch -q upstream main" "$TMP/fetch.calls"
+  [ ! -e "$TMP/review-herdr.calls" ]
+}
+
+@test "an unreadable base branch of a fork PR releases the head before any pane, agent or worktree" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  BASE_READ_FAILS=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'RELEASED'
+  [ ! -e "$TMP/fetch.calls" ]
+  [ ! -e "$TMP/review-herdr.calls" ]
 }
 
 @test "a clone with no remote for the repo fetches nothing and releases the head" {

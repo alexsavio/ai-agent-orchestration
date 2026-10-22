@@ -132,16 +132,13 @@ class PullsTest(IsolatedTestCase):
         self.assertEqual(owners, {"owner/product#7": "wArch"})
         self.assertEqual(failed, ["*"])
 
-    def test_a_renamed_fork_with_an_unreadable_upstream_keeps_the_owner_through_a_merge(self):
+    def test_a_renamed_fork_with_an_unreadable_upstream_keeps_the_owner_of_an_open_base_pr(self):
         remotes = patch.dict(REMOTES, {"/repo/product": "git@github.com:me/renamed.git\n"})
-        run = self.unreadable_upstream(self.command([], {"repos/owner/product/pulls/7": {"merged": True, "state": "closed"}}))
+        run = self.unreadable_upstream(self.command([pr(7, head="me/renamed", decision="REVIEW_REQUIRED")]))
         before = {"prs": {"owner/product#7": {"title": "a", "owner": "wOld", "lines": {}}}, "unreadable": []}
         with remotes:
             raw = w.collect_pulls(run, before)
-        self.assertEqual(raw["prs"], {})
-        self.assertEqual(raw["departed"], {"owner/product#7": "MERGED"})
-        _, events = w.reduce_pulls(before, raw)
-        self.assertIn("MERGED owner/product#7 owner=wOld a", events)
+        self.assertEqual(raw["prs"]["owner/product#7"]["owner"], "wOld")
 
     def test_a_failed_worktree_list_on_a_fork_root_keeps_the_owner_of_its_upstream_prs(self):
         remotes, upstreams = self.fork_clone()
