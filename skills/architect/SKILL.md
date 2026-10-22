@@ -110,7 +110,7 @@ happening. Close only what you created.
 
 **Close what is no longer needed, automatically, without asking.** In the same step as the event that ends a pane's job: a merged or closed PR → close its workspace and remove its worktree (if clean); a pane replaced by another (model change, budget out) → close the old pane; a reviewer or one-off pane → close once its report is dispatched. Keep a pane while it owns an open PR's review cycle.
 
-**A finished worker closes right away, without asking, once its report is read, it has no open work and nothing is typed in its composer. Close by pane, never pkill.**
+**A finished worker closes right away, without asking, once its report is read, it has no open work and nothing is typed in its composer. Close it with `~/.claude/coordinator/watchers/close-worker.sh <pane> --task <text> --report <path>`, which writes one recovery line in your status file and closes the pane; never pkill.** On `WORKER IDLE <pane> owner=<you>`, check the worker: close it the same way when its task is done, or keep it and do nothing else. Architects stay open. Read [`worker-close.md`](references/worker-close.md) before you close a worker.
 
 An author pane is the opposite: it lives as long as its PR is open, because it owns the review cycle.
 
@@ -146,7 +146,7 @@ Use `gh` and `gh api` for GitHub actions and queries.
 
 **GitHub duty.** A worker that asks twice to perform an authorized GitHub action loses its GitHub duty; the architect does that GitHub action itself with `gh`.
 
-**Message discipline.** An FYI ends with "no reply needed"; do not reply to one. Answer only questions and orders. Rewrite `~/.claude/coordinator/status/<architect-name>.md` on every state change. Keep `## Waits on the user` current, one `- <what> -> <session name or GitHub URL>` per item. The Coordinator derives the immediate user list from these files; never hand-maintain it. Read `~/.claude/coordinator/notes.md` at the start of each real turn and on recycle; it carries broadcast rules while idle architects stay unmessaged.
+**Message discipline.** An FYI ends with "no reply needed"; do not reply to one. Answer only questions and orders. Rewrite `~/.claude/coordinator/status/<architect-name>.md` on every state change, and keep its `## Closed workers` section: `close-worker.sh` writes it, and its lines are the only place that holds a closed worker's resume id. Keep `## Waits on the user` current, one `- <what> -> <session name or GitHub URL>` per item. The Coordinator derives the immediate user list from these files; never hand-maintain it. Read `~/.claude/coordinator/notes.md` at the start of each real turn and on recycle; it carries broadcast rules while idle architects stay unmessaged.
 
 Do **not** ask whether to start work already implied by the task. Dispatch it when dependencies permit: create and manage worktrees and branches, edit, test, format, commit, push, create and update PRs, and fix CI caused by the work.
 

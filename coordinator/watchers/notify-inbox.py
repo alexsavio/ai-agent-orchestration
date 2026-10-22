@@ -31,7 +31,7 @@ MONITOR_ACK_SECONDS = 20
 FEED_NAME = "coordinator-feed.log"
 FEED_BYTES = 1024 * 1024
 WAIT_OWNER = re.compile(r"^workers: WORKER WAITING .+ pane=\S+ owner=([A-Za-z0-9_-]+) \d+m session=\S+")
-OWNER = re.compile(r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER \S+) owner=([A-Za-z0-9_-]+) ")
+OWNER = re.compile(r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER \S+|workers: WORKER IDLE \S+) owner=([A-Za-z0-9_-]+) ")
 
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")
 reader = importlib.util.module_from_spec(spec)
@@ -172,8 +172,8 @@ def commit(args, cursor):
 
 
 def native_messages(args, stamped, fallback, patterns):
-    """One native message per architect with a binding file (a worker recycle also for an architect not yet bound; it
-    waits in the outbox), and one for the Coordinator, as (binding path, text)."""
+    """One native message per architect with a binding file (a worker recycle or a worker idle line also for an
+    architect not yet bound; it waits in the outbox), and one for the Coordinator, as (binding path, text)."""
     by_owner = {}
     for line in stamped:
         body = line.split(" ", 1)[1].replace(alert_policy.WORKER_WAIT_NOTE, "")
@@ -182,7 +182,8 @@ def native_messages(args, stamped, fallback, patterns):
             continue
         owner = OWNER.match(body) or waiting
         if owner and not line.endswith("(clear)") and args.bindings_dir \
-                and (waiting or " RECYCLE-WORKER " in line or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()):
+                and (waiting or " RECYCLE-WORKER " in line or " WORKER IDLE " in line
+                     or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()):
             by_owner.setdefault(owner.group(1), []).append(native(line.split(" ", 1)[1]) + ". No reply needed.")
     out = [(str(args.bindings_dir / f"architect-{owner}.json"), "\n".join(texts)) for owner, texts in sorted(by_owner.items())]
     actions = [line for line in stamped if is_action(line, patterns)] if args.binding and fallback else []
@@ -372,6 +373,8 @@ def snapshot_lines(mode, before):
         lines += [w.waiting_line(key, entry, entry.get("sent", entry["since"]), suffix)
                   for key, entry in before.get("waiting", {}).items()
                   for suffix in ("", "REPEAT", "ESCALATE")[:entry["stage"]]]
+        lines += [w.idle_line(pane, entry["owner"]) for pane, entry in sorted(before.get("idle", {}).items())
+                  if entry.get("state") == "fired"]
         return lines + (["WORKER READFAIL " + " ".join(before["unreadable"])] if before.get("unreadable") else [])
     if mode in w.PRESSURE_SETTINGS:
         labels = w.PRESSURE_SETTINGS[mode]["labels"]
