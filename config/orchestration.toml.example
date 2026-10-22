@@ -52,6 +52,10 @@ pi_worker = ""
 # pi model for hard work as provider/model-id; empty means pi is not used on this machine
 pi_smart = ""
 
+[codex]
+# Codex is installed and usable; false means Claude workers only, and the two Codex model settings may stay placeholders
+enabled = true
+
 [recycle]
 # Tokens used at which RECYCLE fires
 tokens = 300000

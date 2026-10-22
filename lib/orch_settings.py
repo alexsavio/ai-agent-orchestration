@@ -64,6 +64,7 @@ SETTINGS = [
     _g('models.codex_smart', 'ORCH_CODEX_SMART_MODEL', 'str', '<codex-smart-model>', 'Codex model for hard work; replace the placeholder'),
     _g('models.pi_worker', 'ORCH_PI_WORKER_MODEL', 'str', '', 'pi model for routine work as provider/model-id; empty means pi is not used on this machine'),
     _g('models.pi_smart', 'ORCH_PI_SMART_MODEL', 'str', '', 'pi model for hard work as provider/model-id; empty means pi is not used on this machine'),
+    _g('codex.enabled', 'ORCH_CODEX_ENABLED', 'bool', True, 'Codex is installed and usable; false means Claude workers only, and the two Codex model settings may stay placeholders'),
     _g('recycle.tokens', 'ORCH_RECYCLE_TOKENS', 'int', 300000, 'Tokens used at which RECYCLE fires'),
     _g('recycle.pct', 'ORCH_RECYCLE_PCT', 'number', 55, 'Context percentage used when the token sensor is absent'),
     _g('recycle.park_idle', 'ORCH_PARK_IDLE', 'bool', False, 'Park architects that have no open PR, worker or watcher'),

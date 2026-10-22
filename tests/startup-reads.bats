@@ -53,6 +53,19 @@ teardown() {
   [ "$(printf '%s\n' "$output" | grep -c 'file-coord')" -eq 0 ]
 }
 
+@test "orch-settings prints Codex as on by default, off from the file, and an exported variable wins" {
+  run env -u ORCH_CONFIG -u ORCH_CODEX_ENABLED "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line ORCH_CODEX_ENABLED=1
+  printf '[codex]\nenabled = false\n' >"$ORCH_CONFIG"
+  run env -u ORCH_CODEX_ENABLED "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line ORCH_CODEX_ENABLED=0
+  run env ORCH_CODEX_ENABLED=1 "$ROOT/orch-settings"
+  [ "$status" -eq 0 ]
+  has_line ORCH_CODEX_ENABLED=1
+}
+
 @test "orch-settings prints one ORCH_NAME=value line per setting and no comments" {
   printf '# a comment\n[pr]\nauthor = "me"\n' >"$ORCH_CONFIG"
   run "$ROOT/orch-settings"

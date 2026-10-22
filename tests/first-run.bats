@@ -86,6 +86,19 @@ EOF
   [ "$(config_line ORCH_HERDR_SOCKET)" = 'ORCH_HERDR_SOCKET=""' ]
 }
 
+@test "with Codex off the installer neither asks for nor asks to fill the Codex models" {
+  fresh_install
+  config_set ORCH_CODEX_ENABLED 0
+  on_tty $'-\n-\n-'
+  [ "$status" -eq 0 ]
+  not_contains "$output" 'ORCH_CODEX_WORKER_MODEL ('
+  not_contains "$output" 'ORCH_CODEX_SMART_MODEL ('
+  contains "$output" 'ORCH_PR_AUTHOR (- leaves it empty)'
+  install_ok
+  contains "$output" 'fill in'
+  not_contains "$output" 'ORCH_CODEX'
+}
+
 @test "a dash empties a placeholder key" {
   fresh_install
   on_tty $'-\n-\n-\n-\n-'
@@ -231,7 +244,7 @@ EOF
   install_ok
   not_contains "$output" ']: '
   contains "$output" 'fill in'
-  contains "$output" 'ORCH_HERDR_BIN ORCH_HERDR_SOCKET'
+  contains "$output" 'ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET'
   [ "$(cat "$HOME/.claude/orchestration.toml")" = "$before" ]
 }
 

@@ -58,6 +58,16 @@ class GlobalFileTest(SettingsTest):
             'ORCH_RECYCLE_TOKENS': '1000', 'ORCH_PATH': f'{Path.home()}/bin:/usr/bin',
             'ORCH_PR_TABS_ORG': 'acme'})
 
+    def test_codex_is_on_by_default_and_a_file_or_variable_turns_it_off(self):
+        missing = self.base / 'missing.toml'
+        self.assertEqual(s.resolved_global(missing, {})['ORCH_CODEX_ENABLED'], '1')
+        off = self.write('off.toml', '[codex]\nenabled = false\n')
+        self.assertEqual(s.resolved_global(off, {})['ORCH_CODEX_ENABLED'], '0')
+        self.assertEqual(s.resolved_global(off, {'ORCH_CODEX_ENABLED': '1'})['ORCH_CODEX_ENABLED'], '1')
+        on = self.write('on.toml', '[codex]\nenabled = true\n')
+        self.assertEqual(s.resolved_global(on, {'ORCH_CODEX_ENABLED': '0'})['ORCH_CODEX_ENABLED'], '0')
+        self.assertIn('codex.enabled: must be true or false, got int', self.error('[codex]\nenabled = 0\n'))
+
     def test_a_missing_file_sets_nothing(self):
         self.assertEqual(s.load_global(self.base / 'missing.toml'), {})
 
