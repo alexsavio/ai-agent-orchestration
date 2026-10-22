@@ -102,6 +102,16 @@ dispatch() {
   [ ! -e "$HOME/.cache/review-prs/dispatched.json" ]
 }
 
+@test "with Codex off in the config file dispatch refuses before any claim, pane or agent" {
+  stub_review_tools
+  printf '[codex]\nenabled = false\n' >"$TMP/none.toml"
+  dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'codex.enabled = false'
+  [ ! -e "$TMP/review-herdr.calls" ]
+  [ ! -e "$HOME/.cache/review-prs/dispatched.json" ]
+}
+
 @test "with Codex off dispatch-queue plans nothing and never reads GitHub" {
   stub_review_tools
   printf '#!/bin/sh\ntouch "%s/gh.called"\nexit 1\n' "$TMP" >"$BIN/gh"

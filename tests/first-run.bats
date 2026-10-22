@@ -99,6 +99,17 @@ EOF
   not_contains "$output" 'ORCH_CODEX'
 }
 
+@test "a config without a codex table still asks for and lists the Codex models" {
+  fresh_install
+  printf '[models]\ncodex_worker = "<codex-worker-model>"\ncodex_smart = "<codex-smart-model>"\n' >"$HOME/.claude/orchestration.toml"
+  install_ok
+  contains "$output" 'ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL'
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  contains "$output" 'ORCH_CODEX_WORKER_MODEL ('
+  contains "$output" 'ORCH_CODEX_SMART_MODEL ('
+}
+
 @test "a dash empties a placeholder key" {
   fresh_install
   on_tty $'-\n-\n-\n-\n-'
