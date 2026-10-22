@@ -28,6 +28,14 @@ SH
   chmod +x "$TMP/bin/herdr"
 }
 
+# A PATH without the host's own herdr: the test dir (jq, python3 linked in) plus the system directories.
+only_system_path() {
+  ln -s "$(command -v jq)" "$TMP/bin/jq"
+  ln -s "$(command -v python3)" "$TMP/bin/python3"
+  PATH="$TMP/bin:/usr/bin:/bin"
+  ! command -v herdr >/dev/null
+}
+
 teardown() {
   rm -rf "$TMP"
 }
@@ -167,6 +175,26 @@ teardown() {
   [ "$status" -eq 0 ]
   [ ! -e "$HERDR_CALLS" ]
   [ -s "$TMP/real.calls" ]
+}
+
+@test "a configured herdr path works when no herdr is on PATH" {
+  mkdir -p "$TMP/real"
+  sed "s#HERDR_CALLS#HERDR_REAL_CALLS#" "$TMP/bin/herdr" >"$TMP/real/herdr"
+  chmod +x "$TMP/real/herdr"
+  rm "$TMP/bin/herdr"
+  only_system_path
+  printf '[herdr]\nbin = "%s"\n[models]\npi_worker = "lmstudio/q"\n' "$TMP/real/herdr" >"$ORCH_CONFIG"
+  HERDR_REAL_CALLS="$TMP/real.calls" run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/real.calls" ]
+}
+
+@test "a herdr that is neither configured nor on PATH is refused before anything runs" {
+  rm "$TMP/bin/herdr"
+  only_system_path
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"herdr"* ]] || false
 }
 
 @test "an unreadable git index does not let the personal file opt in" {

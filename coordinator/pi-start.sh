@@ -24,7 +24,7 @@ for arg in "$@"; do
       ;;
   esac
 done
-orch_need_cmd herdr jq
+orch_need_cmd jq
 
 orch_load_config
 setting=ORCH_PI_WORKER_MODEL
@@ -36,6 +36,7 @@ provider=${model%%/*}
 pi_model=${model#*/}
 
 herdr_bin=${ORCH_HERDR_BIN:-herdr}
+orch_need_cmd "$herdr_bin"
 cwd=$("$herdr_bin" pane get "$pane" | jq -er '.result.pane.cwd') || { echo "pi-start.sh: cannot read the directory of pane $pane" >&2; exit 1; }
 # The opt-in comes from the repo files of the pane's own checkout: an exported ORCH_PI_DEEPSEEK or GIT_* variable must not grant or redirect it.
 unset ORCH_PI_DEEPSEEK GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
