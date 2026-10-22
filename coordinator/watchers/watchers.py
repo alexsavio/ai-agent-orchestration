@@ -452,7 +452,8 @@ def pull_owners(command, prs, failed=None, work=None):
     a watched repository have their worktrees listed. A PR takes the owner of the checkout of its head branch when the
     head repository's owner is the owner of the root's origin, so a same-named branch of another fork has none.
     A root that fails is skipped and listed in `failed` by the `owner/name` of its origin and upstream, or as `*/<name>`
-    when a remote could not be read."""
+    when its origin could not be read. An unreadable upstream does not skip the root: its origin is still handled, and
+    `*` is listed, since the base repo it names is unknown."""
     work = discovery.open_work(command) if work is None else work
     if isinstance(work, discovery.Unavailable):
         raise work
@@ -468,7 +469,12 @@ def pull_owners(command, prs, failed=None, work=None):
                 continue
             origin = remote.group(1).lower()
             identities = ["*/" + origin.split("/")[1]]
-            bases = {origin, (discovery.github_repo(command, root, "upstream") or origin).lower()}
+            bases = {origin}
+            try:
+                bases.add((discovery.github_repo(command, root, "upstream") or origin).lower())
+            except discovery.Unavailable:
+                if failed is not None:
+                    failed.append("*")
             identities = sorted(bases)
             if not bases & watched:
                 continue
@@ -542,7 +548,7 @@ def collect_pulls(command, before, clock=time.monotonic):
         lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(pr, page_nodes, repo_settings)
                  if line.split(" ", 1)[0] in alert_policy.PULL_KINDS}
         repo = pr["repository"]["nameWithOwner"].lower()
-        kept = lookup_failed or repo in unresolved or "*/" + repo.split("/")[-1] in unresolved
+        kept = lookup_failed or repo in unresolved or "*/" + repo.split("/")[-1] in unresolved or "*" in unresolved
         owner = owners.get(key) or (known.get(key, {}).get("owner") if kept else None)
         current[key] = dict(title=pr["title"], owner=owner, lines=lines)
     return dict(prs=current, departed=departed, failed=failed,

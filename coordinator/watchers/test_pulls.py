@@ -115,9 +115,33 @@ class PullsTest(IsolatedTestCase):
         with remotes:
             self.assertEqual(w.pull_owners(failing, [pr(7, head="me/product")], failed), {})
             raw = w.collect_pulls(failing, before)
-        self.assertEqual(failed, ["*/product"])
+        self.assertEqual(failed, ["*"])
         self.assertEqual(raw["prs"]["owner/product#7"]["owner"], "wOld")
         self.assertEqual(raw["unreadable"], ["owners"])
+
+    def unreadable_upstream(self, run):
+        def failing(*argv):
+            if argv[0] == "git" and argv[3:] == ("remote", "get-url", "upstream"):
+                raise OSError("slow disk")
+            return run(*argv)
+        return failing
+
+    def test_an_unreadable_upstream_still_gives_the_origin_prs_their_owner(self):
+        failed = []
+        owners = w.pull_owners(self.unreadable_upstream(self.command([])), [pr(7)], failed)
+        self.assertEqual(owners, {"owner/product#7": "wArch"})
+        self.assertEqual(failed, ["*"])
+
+    def test_a_renamed_fork_with_an_unreadable_upstream_keeps_the_owner_through_a_merge(self):
+        remotes = patch.dict(REMOTES, {"/repo/product": "git@github.com:me/renamed.git\n"})
+        run = self.unreadable_upstream(self.command([], {"repos/owner/product/pulls/7": {"merged": True, "state": "closed"}}))
+        before = {"prs": {"owner/product#7": {"title": "a", "owner": "wOld", "lines": {}}}, "unreadable": []}
+        with remotes:
+            raw = w.collect_pulls(run, before)
+        self.assertEqual(raw["prs"], {})
+        self.assertEqual(raw["departed"], {"owner/product#7": "MERGED"})
+        _, events = w.reduce_pulls(before, raw)
+        self.assertIn("MERGED owner/product#7 owner=wOld a", events)
 
     def test_a_failed_worktree_list_on_a_fork_root_keeps_the_owner_of_its_upstream_prs(self):
         remotes, upstreams = self.fork_clone()
@@ -195,7 +219,7 @@ class PullsTest(IsolatedTestCase):
             owners = w.pull_owners(self.command([]), [pr(7, head="ME/Product")])
         self.assertEqual(owners, {"owner/product#7": "wArch"})
 
-    def test_an_unreadable_upstream_is_named_by_the_origin_repo_name_not_the_folder_name(self):
+    def test_an_unreadable_upstream_is_named_by_a_wildcard_not_the_folder_name(self):
         rows = {"result": {"workspaces": [
             {"workspace_id": "wW", "tokens": {"owner": "wArch"}, "worktree": {"checkout_path": "/wt/feature", "repo_root": "/repo/zimt-custom"}}]}}
         run = self.command([])
@@ -210,7 +234,7 @@ class PullsTest(IsolatedTestCase):
             return run(*argv)
         failed = []
         self.assertEqual(w.pull_owners(renamed, [pr(7, head="me/product")], failed), {})
-        self.assertEqual(failed, ["*/product"])
+        self.assertEqual(failed, ["*"])
 
     def test_a_root_whose_origin_and_upstream_are_not_watched_lists_no_worktrees(self):
         remotes, upstreams = self.fork_clone("git@github.com:other/product.git\n")

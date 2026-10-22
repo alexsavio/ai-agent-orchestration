@@ -32,6 +32,7 @@ EOF
 #!/usr/bin/env bash
 case "$*" in
   'api user --jq .login') echo reviewer ;;
+  'api repos/acme/app/pulls/7 --jq .base.ref') echo main ;;
   *'/reviews'*)
     r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "$2" "$1"; }
     old=""
@@ -394,6 +395,22 @@ GIT
   dispatch
   not_contains "$output" 'RELEASED'
   grep -qF -- "-C $TMP/app fetch -q upstream pull/7/head" "$TMP/fetch.calls"
+}
+
+@test "a fork review reads its instructions from the upstream base, whether or not the head is cached" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  dispatch
+  grep -qF -- "-C $TMP/app fetch -q upstream main" "$TMP/fetch.calls"
+  contains "$(cat "$TMP/review.prompt")" 'git show upstream/<base branch>:<path>'
+  not_contains "$(cat "$TMP/review.prompt")" 'origin/<base branch>'
+  rm -f "$TMP/fetch.calls" "$TMP/review.prompt" "$HOME/.cache/review-prs/dispatched.json"
+  sed -i.bak '/cat-file -e/d' "$BIN/git"
+  dispatch
+  grep -qF -- "-C $TMP/app fetch -q upstream main" "$TMP/fetch.calls"
+  [ "$(grep -c 'pull/7/head' "$TMP/fetch.calls")" = 0 ]
+  contains "$(cat "$TMP/review.prompt")" 'git show upstream/<base branch>:<path>'
 }
 
 @test "a clone with no remote for the repo fetches nothing and releases the head" {
