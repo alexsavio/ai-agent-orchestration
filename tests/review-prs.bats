@@ -57,7 +57,16 @@ EOF
   export SHA
 }
 
+# dispatch: a clone without remotes is the clone of acme/app, and its fetches succeed.
 dispatch() {
+  if ! git -C "$TMP/app" remote get-url origin >/dev/null 2>&1; then
+    git -C "$TMP/app" remote add origin https://github.com/acme/app.git
+    mkdir -p "$TMP/fetch-ok"
+    # shellcheck disable=SC2016 # The stub's own text.
+    printf '#!/usr/bin/env bash\ncase "$*" in *" fetch -q "*) exit 0 ;; esac\nPATH=${PATH#"%s":} exec git "$@"\n' "$TMP/fetch-ok" >"$TMP/fetch-ok/git"
+    chmod +x "$TMP/fetch-ok/git"
+    export PATH="$TMP/fetch-ok:$PATH"
+  fi
   run env ORCH_CONFIG="$TMP/none.toml" bash "$ROOT/$SKILL_DIR/scripts/dispatch.sh" \
     https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" review rev7 "$TMP/app" acme/app
 }
@@ -432,6 +441,20 @@ GIT
   fork_layout
   BASE_READ_FAILS=1 dispatch
   [ "$status" -ne 0 ]
+  contains "$output" 'RELEASED'
+  [ ! -e "$TMP/fetch.calls" ]
+  [ ! -e "$TMP/review-herdr.calls" ]
+}
+
+@test "a clone with no remote for the repo releases the head even when the head is cached" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  git -C "$TMP/app" remote set-url upstream https://github.com/other/app.git
+  sed -i.bak '/cat-file -e/d' "$BIN/git"
+  dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'BASE FAILED'
   contains "$output" 'RELEASED'
   [ ! -e "$TMP/fetch.calls" ]
   [ ! -e "$TMP/review-herdr.calls" ]
