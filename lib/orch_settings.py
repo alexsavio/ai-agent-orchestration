@@ -364,9 +364,9 @@ GITHUB_REMOTE = re.compile(r'^(?:[a-z][a-z0-9+.-]*://(?:[^@/\s]+@)?github\.com(?
 NO_ORIGIN = re.compile(r'No such remote|cannot change to .*: No such file or directory', re.I)
 
 
-def origin_matches(path, repo):
-    """True when the clone's GitHub origin is repo; raises CalledProcessError when the origin cannot be read."""
-    args = ['git', '-C', str(path), 'remote', 'get-url', 'origin']
+def remote_matches(path, repo, remote):
+    """True when the clone's GitHub remote is repo; raises CalledProcessError when the remote cannot be read."""
+    args = ['git', '-C', str(path), 'remote', 'get-url', remote]
     result = subprocess.run(args, capture_output=True, text=True, timeout=5, env=dict(os.environ, LC_ALL='C'))
     if result.returncode:
         if NO_ORIGIN.search(result.stderr):
@@ -376,11 +376,17 @@ def origin_matches(path, repo):
     return match is not None and match[1].lower() == repo.lower()
 
 
+def origin_matches(path, repo):
+    """True when the clone's GitHub origin or upstream (the base repo of a fork) is repo; raises CalledProcessError when a remote cannot be read."""
+    return remote_matches(path, repo, 'origin') or remote_matches(path, repo, 'upstream')
+
+
 def known_clone(repo, clones):
-    """The clone among clones whose origin is repo, else None."""
-    for path in clones:
-        if origin_matches(path, repo):
-            return path
+    """The clone among clones whose origin is repo, else the first whose upstream is, else None."""
+    for remote in ('origin', 'upstream'):
+        for path in clones:
+            if remote_matches(path, repo, remote):
+                return path
     return None
 
 
