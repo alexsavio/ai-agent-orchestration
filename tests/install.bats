@@ -395,7 +395,7 @@ EOF
   printf '%s\n' '{"permissions":{"allow":["Bash(ls *)"]}}' >"$HOME/.claude/settings.json"
   chmod 640 "$HOME/.claude/settings.json"
   install_ok
-  mode=$(stat -f '%Lp' "$HOME/.claude/settings.json" 2>/dev/null || stat -c '%a' "$HOME/.claude/settings.json")
+  mode=$(python3 -c 'import os, sys; print(format(os.stat(sys.argv[1]).st_mode & 0o777, "o"))' "$HOME/.claude/settings.json")
   [ "$mode" = 640 ]
   [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
 }
