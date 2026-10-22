@@ -2,7 +2,7 @@
 
 Read this file before you act on a `RECYCLE-WORKER` message. A worker never recycles itself; you run this procedure.
 
-**The signal.** The context watcher reads each Claude pane's `~/.claude/context-usage/<session-id>.tokens`. When a worker in a workspace tagged `owner=$HERDR_WORKSPACE_ID` reaches `$ORCH_RECYCLE_TOKENS` tokens (`$ORCH_RECYCLE_PCT` percent without that file), you get one native message per session: `context: RECYCLE-WORKER <pane> owner=<you> <name> <amount> (start). No reply needed.` It comes only while your binding `bindings/architect-$HERDR_WORKSPACE_ID.json` is live; without one the line stays in the Coordinator feed. Codex workers have no sensor and are not watched.
+**The signal.** The context watcher reads each Claude pane's `~/.claude/context-usage/<session-id>.tokens`. When a worker in a workspace tagged `owner=$HERDR_WORKSPACE_ID` reaches `$ORCH_RECYCLE_TOKENS` tokens (`$ORCH_RECYCLE_PCT` percent without that file), you get one native message per session: `context: RECYCLE-WORKER <pane> owner=<you> <name> <amount> (start). No reply needed.` It is sent through your binding `bindings/architect-$HERDR_WORKSPACE_ID.json`; before you have bound, or while the binding is dead, it waits in the outbox (retried every 60 seconds, dropped after an hour) and stays in the Coordinator feed. Codex workers have no sensor and are not watched.
 
 ## Procedure
 
