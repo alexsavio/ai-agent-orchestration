@@ -285,12 +285,13 @@ def repo_root(start):
 
 
 def local_tracked(root):
+    """True when git tracks the personal file, False when it does not (exit 1), None when git cannot tell."""
     try:
         result = subprocess.run(['git', '-C', str(root), 'ls-files', '--error-unmatch', '--', LOCAL_FILE],
                                 capture_output=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+        return None
+    return {0: True, 1: False}.get(result.returncode)
 
 
 def warn(message):
@@ -302,11 +303,15 @@ def local_values(root):
     local = Path(root) / LOCAL_FILE
     if not local.is_file():
         return {}
-    if local_tracked(root):
+    tracked = local_tracked(root)
+    if tracked is False:
+        return read_file(local, 'repo')
+    if tracked:
         warn(f'{local} is tracked by git; it is personal. Run: git -C {shlex.quote(str(root))} rm --cached {LOCAL_FILE} '
              f'and add {LOCAL_FILE} to .gitignore')
-        return committed_layer(read_file(local, 'repo'), os.fspath(local))
-    return read_file(local, 'repo')
+    else:
+        warn(f'{local}: git could not say whether it is tracked; it is treated as tracked')
+    return committed_layer(read_file(local, 'repo'), os.fspath(local))
 
 
 def main_checkout(root):

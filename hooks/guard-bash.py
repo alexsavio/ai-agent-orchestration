@@ -812,6 +812,11 @@ HERDR_PAIRS = (('agent', 'start'), ('agent', 'prompt'), ('pane', 'run'), ('pane'
 PI_INFO_FLAGS = {'--list-models', '--help', '-h', '--version', '-v'}
 
 
+def pi_info(args):
+    """True when pi exits at once on an informational flag: the flag is its first argument, so it is no prompt text or option value."""
+    return bool(args) and args[0] in PI_INFO_FLAGS
+
+
 def herdr_subcommand(args):
     """The (group, verb) pair of a herdr call and the arguments after it."""
     for index in range(len(args)-1):
@@ -844,7 +849,7 @@ def guard_pi(executable, args, where='.', disabled=()):
             return evaluate(text, where, disabled) or guard_pi_text(text, where, disabled, 0, strict=True)
         elif pair == ('agent', 'prompt') and MODEL_COMMAND.match(text):
             return PI_REASON
-    elif not PI_INFO_FLAGS.intersection(args):
+    elif not pi_info(args):
         names_model = any(a in ('--provider', '--model') or a.startswith(('--provider=', '--model=')) for a in args)
         if any('deepseek' in a.lower() for a in args) or not names_model:
             return PI_REASON
@@ -872,7 +877,7 @@ def guard_pi_text(text, where, disabled, depth, direct=True, strict=False):
         if direct:
             for candidate in pi_candidates(words, wrapped):
                 reason = guard_pi(os.path.basename(candidate[0]), candidate[1:], where, disabled)
-                if reason or (strict and os.path.basename(candidate[0]) == 'pi' and not PI_INFO_FLAGS.intersection(candidate[1:])):
+                if reason or (strict and os.path.basename(candidate[0]) == 'pi' and not pi_info(candidate[1:])):
                     return PI_REASON
         for nested in [body for word in segment for body in word_substitutions(word)] + shell_programs(words):
             reason = guard_pi_text(nested, where, disabled, depth+1, strict=strict)

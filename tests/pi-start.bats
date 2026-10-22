@@ -168,3 +168,12 @@ teardown() {
   [ ! -e "$HERDR_CALLS" ]
   [ -s "$TMP/real.calls" ]
 }
+
+@test "an unreadable git index does not let the personal file opt in" {
+  printf '[pi]\ndeepseek = true\n' >"$TMP/repo/.orchestration.local.toml"
+  printf 'not an index' >"$TMP/repo/.git/index"
+  run "$SCRIPT" w1 pane1 smart
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DeepSeek is off"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+}
