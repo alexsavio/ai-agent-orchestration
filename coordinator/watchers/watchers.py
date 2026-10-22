@@ -551,9 +551,12 @@ def reduce_workers(before, raw):
 def pull_owners(command, prs, failed=None, work=None):
     """Owner tag of the open workspace whose checkout has each PR's head branch, by <repo>#<n>.
     work is the open work already read (discovery.open_work), or the Unavailable it raised.
-    Each root is identified by its `origin` remote; only roots of watched repositories have their worktrees listed.
-    A root that fails is skipped and listed in `failed` by its `owner/name`, or as `*/<name>` when its remote could not
-    be read."""
+    Each root is identified by its `origin` remote and its `upstream` remote, the base repo of a fork; only roots with
+    a watched repository have their worktrees listed. A PR takes the owner of the checkout of its head branch when the
+    head repository's owner is the owner of the root's origin, so a same-named branch of another fork has none.
+    A root that fails is skipped and listed in `failed` by the `owner/name` of its origin and upstream, or as `*/<name>`
+    when its origin could not be read. An unreadable upstream does not skip the root: its origin is still handled, and
+    `*` is listed, since the base repo it names is unknown."""
     work = discovery.open_work(command) if work is None else work
     if isinstance(work, discovery.Unavailable):
         raise work
@@ -562,29 +565,41 @@ def pull_owners(command, prs, failed=None, work=None):
     watched = {pr["repository"]["nameWithOwner"].lower() for pr in prs}
     branches = {}
     for root in sorted({row["repo_root"] for row in rows if row.get("repo_root")}):
-        identity = "*/" + Path(root).name.lower()
+        identities = ["*/" + Path(root).name.lower()]
         try:
             remote = GITHUB_REMOTE.search(command("git", "-C", root, "remote", "get-url", "origin").strip())
-            if not remote or remote.group(1).lower() not in watched:
+            if not remote:
                 continue
-            identity = remote.group(1).lower()
+            origin = remote.group(1).lower()
+            identities = ["*/" + origin.split("/")[1]]
+            bases = {origin}
+            try:
+                bases.add((discovery.github_repo(command, root, "upstream") or origin).lower())
+            except discovery.Unavailable:
+                if failed is not None:
+                    failed.append("*")
+            identities = sorted(bases)
+            if not bases & watched:
+                continue
             listing = command("git", "-C", root, "worktree", "list", "--porcelain")
-        except audit.READ_ERRORS as error:
+        except (*audit.READ_ERRORS, discovery.Unavailable) as error:
             if isinstance(error, subprocess.CalledProcessError) and audit.orch_settings.NO_ORIGIN.search(str(error.stderr or "")):
                 continue
             if failed is not None:
-                failed.append(identity)
+                failed.extend(identities)
             continue
         path = None
         for line in listing.splitlines():
             if line.startswith("worktree "):
                 path = line[9:]
             elif line.startswith("branch refs/heads/") and path in by_path:
-                branches[(remote.group(1).lower(), line[18:])] = path
+                for base in bases:
+                    branches[(base, origin.split("/")[0], line[18:])] = path
     owners = {}
     for pr in prs:
         repo = pr["repository"]["nameWithOwner"]
-        owner = (by_path.get(branches.get((repo.lower(), pr.get("headRefName")))) or {}).get("owner")
+        head = ((pr.get("headRepository") or {}).get("nameWithOwner") or "/").split("/")[0].lower()
+        owner = (by_path.get(branches.get((repo.lower(), head, pr.get("headRefName")))) or {}).get("owner")
         if owner:
             owners[f"{repo}#{pr['number']}"] = owner
     return owners
@@ -636,7 +651,7 @@ def collect_pulls(command, before, clock=time.monotonic):
         lines = {line.split(" ", 1)[0]: line for line in audit.pr_lines(pr, page_nodes, repo_settings)
                  if line.split(" ", 1)[0] in alert_policy.PULL_KINDS}
         repo = pr["repository"]["nameWithOwner"].lower()
-        kept = lookup_failed or repo in unresolved or "*/" + repo.split("/")[-1] in unresolved
+        kept = lookup_failed or repo in unresolved or "*/" + repo.split("/")[-1] in unresolved or "*" in unresolved
         owner = owners.get(key) or (known.get(key, {}).get("owner") if kept else None)
         current[key] = dict(title=pr["title"], owner=owner, lines=lines)
     return dict(prs=current, departed=departed, failed=failed,
