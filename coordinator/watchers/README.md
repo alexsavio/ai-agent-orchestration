@@ -311,7 +311,7 @@ or Codex background-terminal indicators. A busy pane preserves its timer and sta
 without sending. A failed pane read allows the alert and logs once until a
 successful read. Pane reads take at most five seconds each and ten seconds total,
 reserving five seconds of the pass for reduction; budget-skipped panes count as
-not busy. See [waiting settings and snapshot limits](../../docs/watchers.md#workers-waiting).
+not busy. See [waiting settings and snapshot limits](../../docs/watchers.md#-workers-waiting).
 
 ## Audit alerts
 

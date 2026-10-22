@@ -68,7 +68,7 @@ Answer previews retain the watcher deadline without consuming submissions.
 Directory-read failures retain replay IDs. Failed pane setup closes the new pane
 through the intentional-close helper, leaving the question file available to retry.
 
-## Workers waiting
+## 👷 Workers waiting
 
 A session in an owner-tagged workspace that stays `done` or `idle` for more than
 `workers.wait_s` seconds (default 600) emits

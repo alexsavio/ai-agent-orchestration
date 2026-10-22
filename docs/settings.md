@@ -98,7 +98,7 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `focus.architect` | `ORCH_FOCUS_ARCHITECT` | empty | Architect name never listed as lacking a focus worker |
 | `pi.deepseek` | `ORCH_PI_DEEPSEEK` | `false` | pi workers may run on the DeepSeek API in this repo; off unless set to true in the personal .orchestration.local.toml (a committed .orchestration.toml cannot turn it on); the pi start step refuses DeepSeek otherwise |
 
-### pi workers
+### 🥧 pi workers
 
 `models.pi_worker` and `models.pi_smart` are `provider/model-id`, for example `lmstudio/qwen/qwen3.6-35b-a3b`; pi's `--model` accepts that form (`provider/id`, the model id may itself contain slashes). Check ids with `pi --list-models <provider>`. Both default to empty, and empty means pi is not used on this machine; `install.sh` does not ask for them and the architect does not stop on them.
 
