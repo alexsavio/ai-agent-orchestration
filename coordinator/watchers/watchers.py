@@ -303,19 +303,30 @@ def workspace_failures(previous, raw):
     return int(previous.get(WORKSPACE_FAILS, 0)) + 1 if raw.get("workspaces") is None else 0
 
 
+def worker_untagged(key, line, raw):
+    """True when a successful workspace read shows the owner tag gone from the workspace of the worker session `key`."""
+    if not line.startswith("RECYCLE-WORKER ") or raw.get("workspaces") is None:
+        return False
+    owners = workspace_owners(raw)
+    return any(not owners.get(row.get("workspace_id")) for row in agents(raw["herdr"])
+               if (row.get("agent_session") or {}).get("value") == key)
+
+
 def reduce_context(before, after, raw):
     previous = before or {}
     moved = {key for key in after if key in previous and previous[key].startswith(RECYCLE_LINES + ("NOSENSOR ",))
              and subject_cleared(previous[key]) != subject_cleared(after[key])}
-    events = [subject_cleared(previous[key]) for key in sorted(moved)]
-    events += [after[key] for key in sorted(after)
-               if key not in previous or key in moved or context_step(after[key]) > context_step(previous[key])]
     present = {(a.get("agent_session") or {}).get("value") for a in agents(raw["herdr"])}
-    remembered = {key: value for key, value in previous.items() if not key.startswith("nosensor:") and key in present}
+    remembered = {key: value for key, value in previous.items() if not key.startswith("nosensor:") and key in present
+                  and not (key not in after and worker_untagged(key, value, raw))}
+    # A departed session clears before any start: a successor in the same pane shares the policy key.
+    events = [subject_cleared(previous[key]) for key in sorted(moved)]
     events += [nosensor_cleared(value) for key, value in sorted(previous.items())
                if key.startswith("nosensor:") and key not in after]
     events += [recycle_cleared(value) for key, value in sorted(previous.items())
                if key not in remembered and key not in after and value.startswith(RECYCLE_LINES)]
+    events += [after[key] for key in sorted(after)
+               if key not in previous or key in moved or context_step(after[key]) > context_step(previous[key])]
     remembered.update(after)
     fails = workspace_failures(previous, raw)
     if fails:

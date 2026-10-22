@@ -345,8 +345,8 @@ class WatcherTests(IsolatedTestCase):
             worker = w.agents(raw["herdr"])[1]
             worker.update(pane_id="workspace-task:p2", agent_session={"value": "session-worker-002"})
             raw["usage"]["session-worker-002"] = {"tokens": 300000}
-            self.assertEqual(self.events(raw), [worker_line("300k", pane="workspace-task:p2"),
-                                                worker_line("cleared")])
+            self.assertEqual(self.events(raw), [worker_line("cleared"),
+                                                worker_line("300k", pane="workspace-task:p2")])
             raw["herdr"]["result"]["agents"].remove(worker)
             self.assertEqual(self.events(raw), [worker_line("cleared", pane="workspace-task:p2")])
 
@@ -369,6 +369,15 @@ class WatcherTests(IsolatedTestCase):
             raw["workspaces"]["result"]["workspaces"][1]["tokens"]["owner"] = "wOther"
             _, events = w.reduce("context", before, raw)
         self.assertEqual(events, [worker_line("cleared"), worker_line("310k", owner="wOther")])
+
+    def test_context_worker_untagged_by_a_successful_read_clears_and_alerts_again_when_retagged(self):
+        raw = worker_context(310000)
+        with patch.dict(os.environ, {"ORCH_RECYCLE_TOKENS": "300000"}):
+            before, _ = w.reduce("context", None, raw)
+            untagged = worker_context(310000, owner=None)
+            middle, events = w.reduce("context", before, untagged)
+            self.assertEqual(events, [worker_line("cleared")])
+            self.assertEqual(w.reduce("context", middle, raw)[1], [worker_line("310k")])
 
     def test_context_worker_alert_survives_unreadable_owner_tags(self):
         raw = worker_context(310000)
