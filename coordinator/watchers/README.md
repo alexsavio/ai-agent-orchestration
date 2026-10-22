@@ -188,7 +188,9 @@ only after a pressure flag has been raised and all metrics and process mappings
 are readable and all flags clear. Pending recovery is kept across unreadable
 scans; a READFAIL that clears without prior pressure sends only READFAIL cleared.
 BALANCE READFAIL names unavailable metrics and PIDs; valid metrics still alert,
-and unreadable active flags remain remembered. A scan with no readable metric
+and unreadable active flags remain remembered. A source is reported only after three unreadable scans in a row,
+keeping its last good value until then, and `READFAIL cleared` follows only a reported
+READFAIL; a failing macOS `ps` or `lsof` call writes its command, seconds and reason to stderr. A scan with no readable metric
 increments the repeated read-failure counter.
 
 The `top:` list names up to four current-user worktrees ranked by aggregate CPU, with CPU

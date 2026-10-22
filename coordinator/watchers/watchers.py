@@ -199,9 +199,10 @@ def balance_top(raw):
 
 PRESSURE_SETTINGS = {
     "host": dict(labels=HOST_FLAGS, steps={"swap": 1000, "files": 10000}, counts=(),
-                 detail=host_detail, suffix=None, defer_recovery=False, state_fields=()),
+                 detail=host_detail, suffix=None, defer_recovery=False, state_fields=(), read_grace=False),
     "balance": dict(labels=BALANCE_FLAGS, steps={"load5": 10}, counts=("slots",),
-                    detail=balance_detail, suffix=balance_top, defer_recovery=True, state_fields=("cpu_sample",)),
+                    detail=balance_detail, suffix=balance_top, defer_recovery=True, state_fields=("cpu_sample",),
+                    read_grace=True),
 }
 
 
@@ -230,10 +231,23 @@ def reduce_pressure(mode, before, raw, after):
     settings = PRESSURE_SETTINGS[mode]
     labels = settings["labels"]
     prefix = mode.upper()
-    keys = pressure_keys(mode, flags, raw, after, settings)
     unreadable = [key for key in labels if raw.get(key) is None] + raw.get("unreadable", [])
+    state_extra = {}
+    reported = unreadable
+    if settings["read_grace"]:
+        # A source is reported only after READ_FAILURES unreadable passes in a row; until then
+        # a metric keeps its last good value.
+        passes = {source: previous.get("unreadable_passes", {}).get(source, 0) + 1 for source in unreadable}
+        good = previous.get("last_good", {})
+        raw = dict(raw, **{key: good[key] for key in labels
+                           if raw.get(key) is None and passes[key] < READ_FAILURES and key in good})
+        reported = [source for source in unreadable if passes[source] >= READ_FAILURES]
+        state_extra = dict(unreadable_passes=passes,
+                           last_good={key: raw[key] for key in labels if raw.get(key) is not None})
+        after = conditions(mode, raw)
+    keys = pressure_keys(mode, flags, raw, after, settings)
     pending = previous.get("pending_recovery", False) or bool(flags) or bool(keys)
-    events = readfail_changes(prefix, previous.get("unreadable", []), unreadable)
+    events = readfail_changes(prefix, previous.get("unreadable", []), reported)
     if keys != flags and keys:
         line = prefix + " " + " ".join(f"{label}({settings['detail'](key, raw.get(key))})"
                                         for key, label in labels.items() if key in keys)
@@ -243,7 +257,7 @@ def reduce_pressure(mode, before, raw, after):
     if not keys and pending and (not settings["defer_recovery"] or not unreadable):
         events.append(prefix + " RECOVERED")
         pending = False
-    state = dict(flags=keys, unreadable=unreadable, pending_recovery=pending)
+    state = dict(flags=keys, unreadable=reported, pending_recovery=pending, **state_extra)
     state.update({key: raw.get(key) for key in settings["state_fields"]})
     return state, events
 
