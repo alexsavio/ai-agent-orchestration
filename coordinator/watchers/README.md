@@ -61,9 +61,12 @@ wait
 Operational steps:
 
 1. From the Coordinator's own Bash environment on a fresh install, run
-   `python3 bind-self.py --output ~/.claude/coordinator/watchers/bindings/coordinator.json`.
-   Each architect runs it with `--output ~/.claude/coordinator/watchers/bindings/architect-$HERDR_WORKSPACE_ID.json`.
+   `python3 ~/.claude/coordinator/watchers/bind-self.py --output ~/.claude/coordinator/watchers/bindings/coordinator.json`.
+   Each architect runs it with `--output ~/.claude/coordinator/watchers/bindings/architect-<id>.json`, its own workspace id written out (read it once with `echo $HERDR_WORKSPACE_ID`, for example `architect-w2M.json`; Claude Code blocks a command that holds `$HERDR_WORKSPACE_ID`).
    Run it again after every recycle; the notifier reads a binding at each send.
+   Use this exact full-path form, as one Bash call on its own: never chain it with `&&`, `;` or a pipe, because auto mode denies a chained call.
+   `install.sh` adds the matching allow rule to `~/.claude/settings.json`, so the session runs it itself and does not ask the user. If auto mode still blocks it, tell the user once.
+   `bind-self.py` writes only `coordinator.json` or `architect-<id>.json` in `~/.claude/coordinator/watchers/bindings` (the resolved path must be there); any other `--output` exits with an error and writes nothing.
 2. Laptop sleep suspends watcher execution; heartbeats can be stale after wake.
    A stale heartbeat alone does not identify a blocked syscall. Inspect stderr
    for `watcher deadline exceeded` before attributing a gap to a hang.
