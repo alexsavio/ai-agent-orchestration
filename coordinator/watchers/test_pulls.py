@@ -119,6 +119,51 @@ class PullsTest(IsolatedTestCase):
         self.assertEqual(raw["prs"]["owner/product#7"]["owner"], "wOld")
         self.assertEqual(raw["unreadable"], ["owners"])
 
+    def test_a_failed_worktree_list_on_a_fork_root_keeps_the_owner_of_its_upstream_prs(self):
+        remotes, upstreams = self.fork_clone()
+        run = self.command([pr(7, head="me/product", decision="REVIEW_REQUIRED")])
+
+        def failing(*argv):
+            if argv[0] == "git" and argv[3] == "worktree":
+                raise OSError("slow disk")
+            return run(*argv)
+        before = {"prs": {"owner/product#7": {"title": "a", "owner": "wOld", "lines": {}}}, "unreadable": []}
+        failed = []
+        with remotes, upstreams:
+            w.pull_owners(failing, [pr(7, head="me/product")], failed)
+            raw = w.collect_pulls(failing, before)
+        self.assertEqual(failed, ["me/product", "owner/product"])
+        self.assertEqual(raw["prs"]["owner/product#7"]["owner"], "wOld")
+
+    def test_a_fork_clone_branch_pushed_to_the_upstream_repo_takes_the_owner(self):
+        remotes, upstreams = self.fork_clone()
+        with remotes, upstreams:
+            owners = w.pull_owners(self.command([]), [pr(7, head="owner/product"), pr(8, head="third/product")])
+        self.assertEqual(owners, {"owner/product#7": "wArch"})
+
+    def test_owners_and_repos_are_compared_without_case(self):
+        remotes, upstreams = self.fork_clone("git@github.com:Owner/Product.git\n")
+        with remotes, upstreams:
+            owners = w.pull_owners(self.command([]), [pr(7, head="ME/Product"), pr(8, head="Owner/PRODUCT")])
+        self.assertEqual(owners, {"owner/product#7": "wArch", "owner/product#8": "wArch"})
+
+    def test_an_unreadable_upstream_is_named_by_the_origin_repo_name_not_the_folder_name(self):
+        rows = {"result": {"workspaces": [
+            {"workspace_id": "wW", "tokens": {"owner": "wArch"}, "worktree": {"checkout_path": "/wt/feature", "repo_root": "/repo/zimt-custom"}}]}}
+        run = self.command([])
+
+        def renamed(*argv):
+            if argv[1:3] == ("workspace", "list"):
+                return json.dumps(rows)
+            if argv[0] == "git" and argv[2] == "/repo/zimt-custom":
+                if argv[3:] == ("remote", "get-url", "upstream"):
+                    raise OSError("slow disk")
+                return "git@github.com:me/product.git\n"
+            return run(*argv)
+        failed = []
+        self.assertEqual(w.pull_owners(renamed, [pr(7, head="me/product")], failed), {})
+        self.assertEqual(failed, ["*/product"])
+
     def test_a_root_whose_origin_and_upstream_are_not_watched_lists_no_worktrees(self):
         remotes, upstreams = self.fork_clone("git@github.com:other/product.git\n")
         with remotes, upstreams:

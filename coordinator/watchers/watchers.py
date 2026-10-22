@@ -450,9 +450,9 @@ def pull_owners(command, prs, failed=None, work=None):
     work is the open work already read (discovery.open_work), or the Unavailable it raised.
     Each root is identified by its `origin` remote and its `upstream` remote, the base repo of a fork; only roots with
     a watched repository have their worktrees listed. A PR takes the owner of the checkout of its head branch when the
-    head repository's owner is the owner of the root's origin, so a same-named branch of another fork has none.
-    A root that fails is skipped and listed in `failed` by its `owner/name`, or as `*/<name>` when its remote could not
-    be read."""
+    head repository's owner is the owner of the root's origin or upstream, so a same-named branch of another owner has none.
+    A root that fails is skipped and listed in `failed` by the `owner/name` of its origin and upstream, or as `*/<name>`
+    when a remote could not be read."""
     work = discovery.open_work(command) if work is None else work
     if isinstance(work, discovery.Unavailable):
         raise work
@@ -461,23 +461,23 @@ def pull_owners(command, prs, failed=None, work=None):
     watched = {pr["repository"]["nameWithOwner"].lower() for pr in prs}
     branches = {}
     for root in sorted({row["repo_root"] for row in rows if row.get("repo_root")}):
-        identity = "*/" + Path(root).name.lower()
+        identities = ["*/" + Path(root).name.lower()]
         try:
             remote = GITHUB_REMOTE.search(command("git", "-C", root, "remote", "get-url", "origin").strip())
             if not remote:
                 continue
             origin = remote.group(1).lower()
-            identity = "*/" + origin.split("/")[1]
+            identities = ["*/" + origin.split("/")[1]]
             bases = {origin, (discovery.github_repo(command, root, "upstream") or origin).lower()}
+            identities = sorted(bases)
             if not bases & watched:
                 continue
-            identity = origin
             listing = command("git", "-C", root, "worktree", "list", "--porcelain")
         except (*audit.READ_ERRORS, discovery.Unavailable) as error:
             if isinstance(error, subprocess.CalledProcessError) and audit.orch_settings.NO_ORIGIN.search(str(error.stderr or "")):
                 continue
             if failed is not None:
-                failed.append(identity)
+                failed.extend(identities)
             continue
         path = None
         for line in listing.splitlines():
@@ -485,7 +485,8 @@ def pull_owners(command, prs, failed=None, work=None):
                 path = line[9:]
             elif line.startswith("branch refs/heads/") and path in by_path:
                 for base in bases:
-                    branches[(base, origin.split("/")[0], line[18:])] = path
+                    for head in {name.split("/")[0] for name in bases}:
+                        branches[(base, head, line[18:])] = path
     owners = {}
     for pr in prs:
         repo = pr["repository"]["nameWithOwner"]

@@ -376,9 +376,18 @@ def remote_matches(path, repo, remote):
     return match is not None and match[1].lower() == repo.lower()
 
 
+def matching_remote(path, repo):
+    """'origin' or 'upstream' (the base repo of a fork), whichever is the clone's GitHub remote for repo, else None;
+    raises CalledProcessError when a remote cannot be read."""
+    for remote in ('origin', 'upstream'):
+        if remote_matches(path, repo, remote):
+            return remote
+    return None
+
+
 def origin_matches(path, repo):
-    """True when the clone's GitHub origin or upstream (the base repo of a fork) is repo; raises CalledProcessError when a remote cannot be read."""
-    return remote_matches(path, repo, 'origin') or remote_matches(path, repo, 'upstream')
+    """True when the clone's GitHub origin or upstream is repo."""
+    return matching_remote(path, repo) is not None
 
 
 def known_clone(repo, clones):

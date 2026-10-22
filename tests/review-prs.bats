@@ -365,6 +365,65 @@ print(" ".join(s + "=" + h["state"] for s, h in sorted(prs.heads(e).items())))
   [ "$output" = "$(cd "$TMP/app" && pwd -P)" ]
 }
 
+# fork_layout: $TMP/app is a fork (origin me/app) of acme/app (upstream); a git wrapper says the commit is not local
+# and fetches only from the remote named upstream.
+fork_layout() {
+  git -C "$TMP/app" remote add origin https://github.com/me/app.git
+  git -C "$TMP/app" remote add upstream https://github.com/acme/app.git
+  real_git=${REAL_GIT:-$(PATH=${PATH#"$BIN":} command -v git)}
+  cat >"$BIN/git" <<GIT
+#!/usr/bin/env bash
+case "\$*" in
+  *' cat-file -e '*) exit 1 ;;
+  *' fetch -q '*) printf '%s\n' "\$*" >>"$TMP/fetch.calls"; [ "\$5" = upstream ]; exit ;;
+esac
+exec "$real_git" "\$@"
+GIT
+  chmod +x "$BIN/git"
+}
+
+@test "a fork clone fetches the PR from its upstream remote" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  dispatch
+  not_contains "$output" 'RELEASED'
+  grep -qF -- "-C $TMP/app fetch -q upstream pull/7/head" "$TMP/fetch.calls"
+}
+
+@test "a clone with no remote for the repo fetches nothing and releases the head" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_layout
+  git -C "$TMP/app" remote set-url upstream https://github.com/other/app.git
+  dispatch
+  contains "$output" 'RELEASED'
+  [ ! -e "$TMP/fetch.calls" ]
+}
+
+@test "the remote of a clone that holds the repo is named by its GitHub URL" {
+  stub_review_tools
+  git -C "$TMP/app" remote add origin https://github.com/acme/app.git
+  git -C "$TMP/app" remote add upstream https://github.com/other/app.git
+  [ "$(python3 "$ROOT/$SKILL_DIR/scripts/prs.py" remote --cwd "$TMP/app" --repo acme/app)" = origin ]
+  [ "$(python3 "$ROOT/$SKILL_DIR/scripts/prs.py" remote --cwd "$TMP/app" --repo other/app)" = upstream ]
+  run python3 "$ROOT/$SKILL_DIR/scripts/prs.py" remote --cwd "$TMP/app" --repo acme/none
+  [ "$status" -ne 0 ]
+}
+
+@test "a clone whose origin is the repo wins over a fork clone of it" {
+  stub_review_tools
+  fork=$(mkdir -p "$TMP/fork" && cd "$TMP/fork" && pwd -P) direct=$(mkdir -p "$TMP/direct" && cd "$TMP/direct" && pwd -P)
+  git init -q "$fork" && git -C "$fork" remote add origin https://github.com/me/app.git
+  git -C "$fork" remote add upstream https://github.com/acme/app.git
+  git init -q "$direct" && git -C "$direct" remote add origin https://github.com/acme/app.git
+  mkdir -p "$HOME/.claude/coordinator"
+  printf '{"clones": ["%s", "%s"]}' "$fork" "$direct" >"$HOME/.claude/coordinator/open-work.json"
+  # shellcheck disable=SC2016 # Python source.
+  run bash -c 'cd "$1" && python3 -c "import sys; sys.path.insert(0, sys.argv[1]); import prs; print(prs.resolve_cwd(\"acme/app\"))" "$2"' _ "$TMP" "$ROOT/$SKILL_DIR/scripts"
+  [ "$output" = "$direct" ]
+}
+
 @test "a reused pane starts Codex in the worktree" {
   stub_review_tools
   : >"$TMP/none.toml"

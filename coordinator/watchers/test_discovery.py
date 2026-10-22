@@ -94,6 +94,12 @@ class DiscoveryTest(IsolatedTestCase):
         self.assertEqual(found['repos'], ['acme/tools', 'ACME/Web'])
         self.assertEqual(stderr.getvalue(), '')
 
+    def test_the_upstream_of_a_clone_without_a_github_origin_is_not_read(self):
+        ups = {'/r/lab': 'git@github.com:combinaut/lab.git'}
+        with patch.dict(UPSTREAMS, ups):
+            self.assertEqual(discovery.repos(self.command)['repos'], ['acme/tools', 'ACME/Web'])
+        self.assertNotIn(('git', '-C', '/r/lab', 'remote', 'get-url', 'upstream'), self.calls)
+
     def test_a_non_github_upstream_is_no_repo(self):
         with patch.dict(UPSTREAMS, {'/r/web': 'git@gitlab.com:combinaut/web.git'}):
             self.assertEqual(discovery.repos(self.command)['repos'], ['acme/tools', 'ACME/Web'])

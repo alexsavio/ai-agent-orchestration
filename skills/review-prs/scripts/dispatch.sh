@@ -47,7 +47,9 @@ fi
 # A worktree left at this path is stale: this dispatch holds the claim on its head.
 wt="${XDG_CACHE_HOME:-$HOME/.cache}/review-prs/worktrees/$agent"
 if [ ! -d "$wt" ]; then
-  if ! { git -C "$cwd" cat-file -e "$sha^{commit}" 2>/dev/null || git -C "$cwd" fetch -q origin "pull/$num/head"; } ||
+  # The PR lives on $repo: the clone's origin, or its upstream when the clone is a fork.
+  if ! { git -C "$cwd" cat-file -e "$sha^{commit}" 2>/dev/null ||
+    { remote=$("$py" "$here/prs.py" remote --cwd "$cwd" --repo "$repo") && git -C "$cwd" fetch -q "$remote" "pull/$num/head"; }; } ||
     ! mkdir -p "$(dirname "$wt")" || ! git -C "$cwd" worktree prune ||
     ! git -C "$cwd" worktree add -q --detach "$wt" "$sha"; then
     release

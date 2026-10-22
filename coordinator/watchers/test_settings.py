@@ -262,6 +262,15 @@ class RemoteReadTest(SettingsTest):
         self.assertTrue(s.origin_matches(fork, 'ACME/webapp'))
         self.assertIsNone(s.known_clone('acme/webapp', [str(elsewhere)]))
 
+    def test_the_matching_remote_names_origin_before_upstream(self):
+        clone = self.repo('clone', 'git@github.com:acme/webapp.git')
+        git(clone, 'remote', 'add', 'upstream', 'git@github.com:acme/webapp.git')
+        self.assertEqual(s.matching_remote(clone, 'acme/webapp'), 'origin')
+        fork = self.repo('fork', 'git@github.com:me/webapp.git')
+        git(fork, 'remote', 'add', 'upstream', 'git@github.com:acme/webapp.git')
+        self.assertEqual(s.matching_remote(fork, 'ACME/webapp'), 'upstream')
+        self.assertIsNone(s.matching_remote(fork, 'acme/other'))
+
     def test_a_clone_whose_origin_is_the_repo_wins_over_a_fork_clone(self):
         fork = self.repo('fork', 'git@github.com:me/webapp.git')
         git(fork, 'remote', 'add', 'upstream', 'https://github.com/acme/webapp.git')

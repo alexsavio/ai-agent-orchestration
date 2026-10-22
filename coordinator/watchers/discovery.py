@@ -107,14 +107,15 @@ def upstream_repo(command, clone, failed):
 
 
 def discover(command, work, failed):
-    """The repos of the open work, each once with its first spelling, origin before upstream; failed lists unreadable upstreams."""
+    """The repos of the open work, each once with its first spelling, origin before upstream (read only for a GitHub origin);
+    failed lists unreadable upstreams."""
     clones, names = [], {}
     for clone in sorted({row['repo_root'] for row in work['workspaces'] if row.get('repo_root')}):
         repo = github_repo(command, clone)
         if repo is False:
             continue
         clones.append(clone)
-        for name in (repo, upstream_repo(command, clone, failed)):
+        for name in (repo, upstream_repo(command, clone, failed) if repo else None):
             if name:
                 names.setdefault(name.lower(), name)
     return dict(clones=clones, repos=sorted(names.values(), key=str.lower))
