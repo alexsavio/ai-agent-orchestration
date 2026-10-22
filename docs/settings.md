@@ -8,6 +8,10 @@ Settings come from three places. Each setting has one scope and lives in only on
 
 A repo key in the global file, a global key in a repo file, an unknown key, a value of the wrong type, a list entry that is empty or contains its separator (whitespace, `,`, `|` or `:`) and invalid TOML are errors that name the file and the key. A script that lacks a setting or a command prints `ERROR: …` and exits with status 2. Reading TOML needs Python 3.11 or newer: the loader takes `ORCH_PYTHON3` from the environment, then `python3` on `PATH`, then the Homebrew paths.
 
+## Print the resolved settings
+
+`orch-settings` prints every resolved global setting as one `ORCH_NAME=value` line: the built-in default, then the global file (`ORCH_CONFIG` or `~/.claude/orchestration.toml`), then an exported variable. With no argument, a missing default file prints the defaults; a missing `ORCH_CONFIG` file, an explicit file that does not exist, an argument that starts with `-` and a value with a control character are errors (exit 2). Sessions run it at startup instead of reading the commented TOML. `orch-agents` is its companion for Herdr: one line per agent (name, pane, kind, status, workspace, owner, role, cwd), for a session that would otherwise read the `herdr agent list` JSON; it exits 2 with herdr's own message when herdr fails or answers in an unexpected shape. The installer links both into `~/.local/bin`.
+
 ## Repo files
 
 Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestration.local.toml`, an exported variable. A later file replaces a key of an earlier one; a list is replaced, not merged.

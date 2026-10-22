@@ -232,6 +232,37 @@ def as_env(values):
     return {setting.env: env_value(setting, value) for setting, value in values.items()}
 
 
+def resolved_global(path, environ):
+    """Every global ORCH_* setting as the scripts see it: default < the file < an exported variable."""
+    file = load_global(path)
+    return {s.env: environ.get(s.env, file.get(s.env, env_value(s, s.default))) for s in scoped('global')}
+
+
+def config_path(environ):
+    """The global file a script reads: ORCH_CONFIG (must be a regular file), else ~/.claude/orchestration.toml."""
+    chosen = environ.get('ORCH_CONFIG')
+    if chosen and not Path(chosen).is_file():
+        raise ConfigError(f'ORCH_CONFIG is not a regular file: {chosen}')
+    return chosen or str(Path(GLOBAL_FILE).expanduser())
+
+
+def print_lines(values):
+    """One NAME=value line per setting; a control character in a value would split or hide a line."""
+    for name, value in values.items():
+        if re.search(r'[\x00-\x08\x0a-\x1f\x7f]', value):
+            raise ConfigError(f'{name}: the value contains a control character; one setting must stay on one line')
+    return ''.join(f'{name}={value}\n' for name, value in values.items())
+
+
+def print_path(args, environ):
+    """The global file to print: an explicit existing file, else config_path."""
+    if not args:
+        return config_path(environ)
+    if len(args) > 1 or args[0].startswith('-') or not Path(args[0]).is_file():
+        raise ConfigError(f'print: expected no argument or one existing settings file, got {" ".join(args)}')
+    return args[0]
+
+
 def load_global(path):
     """ORCH_* values the global file sets; a missing file sets none."""
     if not Path(path).exists():
@@ -942,6 +973,8 @@ def main(argv):
         command = argv[1] if len(argv) > 1 else ''
         if command == 'global' and len(argv) == 3:
             sys.stdout.write(shell_lines(load_global(argv[2])))
+        elif command == 'print':
+            sys.stdout.write(print_lines(resolved_global(print_path(argv[2:], os.environ), os.environ)))
         elif command == 'repo' and len(argv) == 3:
             sys.stdout.write(shell_lines(load_repo(argv[2], {})))
         elif command == 'migrate' and len(argv) == 5:
@@ -972,7 +1005,7 @@ def main(argv):
         elif command == 'names' and len(argv) == 2:
             print(' '.join(env_names()))
         else:
-            print('usage: orch_settings.py global <file> | repo <dir> | migrate <env> <toml> <snippet-dir> '
+            print('usage: orch_settings.py global <file> | print [<file>] | repo <dir> | migrate <env> <toml> <snippet-dir> '
                   '| upgrade [--watched <global-file>] <repo-file>... [--clones <dir>...] | set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | example global|repo | table global|repo | names', file=sys.stderr)
             return 2
     except ConfigError as error:
