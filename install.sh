@@ -663,7 +663,7 @@ merge_settings() {
 
 # Lets sessions run bind-self.py themselves in auto mode. Appends the missing rules to permissions.allow and keeps every entry you have.
 allow_bind_self() {
-  local settings="$CLAUDE_DIR/settings.json" script="coordinator/watchers/bind-self.py" bindings="coordinator/watchers/bindings" rules missing tmp backup
+  local settings="$CLAUDE_DIR/settings.json" script="coordinator/watchers/bind-self.py" bindings="coordinator/watchers/bindings" rules missing tmp backup target mode
   [ "$settings_saved" != -1 ] || return 0
   rules=$(jq -nc --arg tilde "Bash(python3 ~/.claude/$script --output ~/.claude/$bindings/*)" --arg abs "Bash(python3 $CLAUDE_DIR/$script --output $CLAUDE_DIR/$bindings/*)" '[$tilde, $abs]')
   if ! jq -e 'type == "object" and ((.permissions? // {}) | type == "object") and ((.permissions.allow? // []) | type == "array")' "$settings" >/dev/null 2>&1; then
@@ -681,10 +681,13 @@ allow_bind_self() {
     say "backed up" "$settings -> $backup"
     n_backup=$((n_backup + 1))
   fi
-  tmp=$(mktemp)
-  jq --argjson add "$missing" '.permissions.allow = ((.permissions.allow // []) + $add)' "$settings" >"$tmp"
-  cat "$tmp" >"$settings"
-  rm -f "$tmp"
+  target=$(resolve_link_path "$settings") || die "$settings is a link loop; settings.json is unchanged"
+  mode=$(claude_md_mode "$target") || die "cannot read the mode of $target; settings.json is unchanged"
+  tmp=$(mktemp "$target.tmp.XXXXXX") || die "cannot write beside $target; settings.json is unchanged"
+  if ! jq --argjson add "$missing" '.permissions.allow = ((.permissions.allow // []) + $add)' "$settings" >"$tmp" || ! jq -e type "$tmp" >/dev/null 2>&1 || ! chmod "$mode" "$tmp" || ! mv "$tmp" "$target"; then
+    rm -f "$tmp"
+    die "could not write the bind-self.py allow rules; $settings is unchanged (backup: ${backup:-none})"
+  fi
   say "added" "$settings: bind-self.py allow rules ($(jq -r 'join(", ")' <<<"$missing"))"
 }
 

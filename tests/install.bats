@@ -363,6 +363,53 @@ bind_rules() {
   [ "$(jq -c . "$HOME/.claude/settings.json")" = '{"hooks":{"PreToolUse":{}}}' ]
 }
 
+@test "a failed write of the bind-self allow rules leaves settings.json byte for byte intact" {
+  fresh_install
+  jq '.permissions = {allow: ["Bash(ls *)"], deny: ["Bash(rm *)"]}' "$HOME/.claude/settings.json" >"$TMP/settings.before"
+  cp "$TMP/settings.before" "$HOME/.claude/settings.json"
+  # The replacement step fails after a partial write: cat (a copy over the live file) and mv (an atomic replace).
+  real_cat=$(command -v cat)
+  real_mv=$(command -v mv)
+  cat >"$BIN/cat" <<EOF
+#!/bin/bash
+case "\$1" in
+  */tmp.*) printf '{"permiss'; exit 1 ;;
+esac
+exec "$real_cat" "\$@"
+EOF
+  cat >"$BIN/mv" <<EOF
+#!/bin/bash
+case "\$1" in
+  */settings.json.tmp.*) exit 1 ;;
+esac
+exec "$real_mv" "\$@"
+EOF
+  chmod +x "$BIN/cat" "$BIN/mv"
+  install_fails
+  cmp "$HOME/.claude/settings.json" "$TMP/settings.before"
+  [ -z "$(find "$HOME/.claude" -maxdepth 1 -name 'settings.json.tmp.*')" ]
+}
+
+@test "bind-self allow rules keep the settings.json mode" {
+  fresh_install
+  printf '%s\n' '{"permissions":{"allow":["Bash(ls *)"]}}' >"$HOME/.claude/settings.json"
+  chmod 640 "$HOME/.claude/settings.json"
+  install_ok
+  mode=$(stat -f '%Lp' "$HOME/.claude/settings.json" 2>/dev/null || stat -c '%a' "$HOME/.claude/settings.json")
+  [ "$mode" = 640 ]
+  [ "$(jq '.permissions.allow | length' "$HOME/.claude/settings.json")" -eq 3 ]
+}
+
+@test "bind-self allow rules are written through a symlinked settings.json" {
+  fresh_install
+  printf '%s\n' '{"permissions":{"allow":["Bash(ls *)"]}}' >"$TMP/real-settings.json"
+  rm "$HOME/.claude/settings.json"
+  ln -s "$TMP/real-settings.json" "$HOME/.claude/settings.json"
+  install_ok
+  [ -L "$HOME/.claude/settings.json" ]
+  [ "$(jq '.permissions.allow | length' "$TMP/real-settings.json")" -eq 3 ]
+}
+
 @test "settings with a non-list permissions.allow are left alone" {
   fresh_install
   printf '%s\n' '{"permissions":{"allow":"nope"}}' >"$HOME/.claude/settings.json"

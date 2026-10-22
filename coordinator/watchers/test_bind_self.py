@@ -68,6 +68,20 @@ class BindSelfTests(IsolatedTestCase):
         self.assert_refused(result)
         self.assertEqual(self.outside.read_text(), 'private key')
 
+    def test_existing_binding_with_an_unsafe_mode_is_refused_and_unchanged(self):
+        binding = self.bindings / 'coordinator.json'
+        binding.write_text('keep me')
+        for mode in (0o644, 0o640, 0o666, 0o700):
+            with self.subTest(mode=oct(mode)):
+                binding.chmod(mode)
+                result = self.run_bind(binding)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('mode-0600', result.stderr)
+                self.assertEqual(binding.read_text(), 'keep me')
+                self.assertEqual(binding.stat().st_mode & 0o777, mode)
+        binding.chmod(0o600)
+        self.assertEqual(self.run_bind(binding).returncode, 0)
+
     def test_symlink_in_the_directory_to_a_file_outside_is_refused(self):
         self.outside.write_text('private key')
         self.outside.chmod(0o600)
