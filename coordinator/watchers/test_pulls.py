@@ -12,9 +12,9 @@ import watchers as w
 PR = json.loads((w.ROOT / "fixtures" / "audit-pr.json").read_text())
 
 
-def pr(number, decision="APPROVED", branch="feature"):
+def pr(number, decision="APPROVED", branch="feature", head="owner/product"):
     row = json.loads(json.dumps(PR))
-    row.update(number=number, headRefName=branch, reviewDecision=decision)
+    row.update(number=number, headRefName=branch, headRepository={"nameWithOwner": head}, reviewDecision=decision)
     row["latestOpinionatedReviews"] = {"nodes": [{"state": "APPROVED", "commit": {"oid": row["headRefOid"]}}]}
     return row
 
@@ -25,6 +25,7 @@ WORKSPACES = {"result": {"workspaces": [
     {"workspace_id": "wArch", "tokens": {}, "worktree": {"checkout_path": "/repo/product", "repo_root": "/repo/product"}}]}}
 PANES = []
 REMOTES = {"/repo/product": "git@github.com:owner/product.git\n", "/repo/other": "git@github.com:owner/other.git\n"}
+UPSTREAMS = {}
 WORKTREES = "worktree /repo/product\nbranch refs/heads/main\n\nworktree /wt/product/feature\nbranch refs/heads/feature\n"
 
 
@@ -51,6 +52,10 @@ class PullsTest(IsolatedTestCase):
                 return "/wt/product/pane\n"
             if argv[0] == "git" and argv[-1] == "--git-common-dir":
                 return "/repo/product/.git\n"
+            if argv[0] == "git" and argv[3:] == ("remote", "get-url", "upstream"):
+                if argv[2] in UPSTREAMS:
+                    return UPSTREAMS[argv[2]]
+                raise subprocess.CalledProcessError(2, argv, stderr="error: No such remote 'upstream'")
             if argv[0] == "git" and argv[3:5] == ("remote", "get-url"):
                 return REMOTES[argv[2]]
             if argv[0] == "git":
@@ -63,6 +68,62 @@ class PullsTest(IsolatedTestCase):
     def test_owner_follows_branch_worktree_and_workspace_tag(self):
         owners = w.pull_owners(self.command([]), [pr(7), pr(8, branch="nobody")])
         self.assertEqual(owners, {PR["repository"]["nameWithOwner"] + "#7": "wArch"})
+
+    def fork_clone(self, upstream="git@github.com:owner/product.git\n"):
+        """The architect's clone is the fork me/product of owner/product; PRs are opened on owner/product."""
+        remotes = {**REMOTES, "/repo/product": "git@github.com:me/product.git\n"}
+        return patch.dict(REMOTES, remotes), patch.dict(UPSTREAMS, {"/repo/product": upstream} if upstream else {})
+
+    def test_a_pr_on_the_upstream_repo_takes_the_owner_of_the_fork_branch(self):
+        remotes, upstreams = self.fork_clone()
+        with remotes, upstreams:
+            owners = w.pull_owners(self.command([]), [pr(7, head="me/product"), pr(8, branch="nobody", head="me/product")])
+        self.assertEqual(owners, {"owner/product#7": "wArch"})
+
+    def test_a_pr_from_another_fork_with_the_same_branch_name_has_no_owner(self):
+        remotes, upstreams = self.fork_clone()
+        deleted_fork = {**pr(9), "headRepository": None}
+        with remotes, upstreams:
+            owners = w.pull_owners(self.command([]), [pr(7, head="someone/product"), pr(8, head=None), deleted_fork])
+        self.assertEqual(owners, {})
+
+    def test_a_pr_on_the_origin_repo_from_another_fork_has_no_owner(self):
+        self.assertEqual(w.pull_owners(self.command([]), [pr(7, head="someone/product")]), {})
+
+    def test_a_pr_on_the_fork_itself_keeps_the_owner(self):
+        remotes, upstreams = self.fork_clone()
+        other = pr(7, head="me/product")
+        other["repository"] = {"nameWithOwner": "me/product", "defaultBranchRef": {"name": "main"}}
+        with remotes, upstreams:
+            self.assertEqual(w.pull_owners(self.command([]), [other]), {"me/product#7": "wArch"})
+
+    def test_a_clone_without_an_upstream_remote_is_no_owner_failure(self):
+        failed = []
+        self.assertEqual(w.pull_owners(self.command([]), [pr(7)], failed), {"owner/product#7": "wArch"})
+        self.assertEqual(failed, [])
+
+    def test_an_unreadable_upstream_is_a_failed_root_and_keeps_the_known_owner(self):
+        remotes, _ = self.fork_clone()
+        run = self.command([pr(7, head="me/product", decision="REVIEW_REQUIRED")])
+
+        def failing(*argv):
+            if argv[0] == "git" and argv[3:] == ("remote", "get-url", "upstream"):
+                raise OSError("slow disk")
+            return run(*argv)
+        before = {"prs": {"owner/product#7": {"title": "a", "owner": "wOld", "lines": {}}}, "unreadable": []}
+        failed = []
+        with remotes:
+            self.assertEqual(w.pull_owners(failing, [pr(7, head="me/product")], failed), {})
+            raw = w.collect_pulls(failing, before)
+        self.assertEqual(failed, ["*/product"])
+        self.assertEqual(raw["prs"]["owner/product#7"]["owner"], "wOld")
+        self.assertEqual(raw["unreadable"], ["owners"])
+
+    def test_a_root_whose_origin_and_upstream_are_not_watched_lists_no_worktrees(self):
+        remotes, upstreams = self.fork_clone("git@github.com:other/product.git\n")
+        with remotes, upstreams:
+            self.assertEqual(w.pull_owners(self.command([]), [pr(7, head="me/product")]), {})
+        self.assertFalse([argv for argv in self.calls if argv[:1] == ("git",) and argv[3] == "worktree"])
 
     def test_baseline_then_state_changes_with_owner(self):
         repo = PR["repository"]["nameWithOwner"]

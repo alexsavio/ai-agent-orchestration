@@ -144,6 +144,6 @@ The removed `legacy.extra_pattern` and `legacy.exempt_paths` keys are errors. `i
 
 ## Repos and architects from the open work
 
-The audit and pulls watchers watch the open PRs of `pr.author` in the GitHub repos of the open workspaces (the `origin` of each workspace's repo root), and check those clones for PACKS and WORKTREES. The env adapter reports the workspaces (`env/<name>/open_work.py`, see [env/README.md](../env/README.md)). When it cannot, the watchers use the last set saved in `~/.claude/coordinator/open-work.json` and say so in their log.
+The audit and pulls watchers watch the open PRs of `pr.author` in the GitHub repos of the open workspaces (the `origin` and the `upstream` of each workspace's repo root; `upstream` is the base repo of a fork), and check those clones for PACKS and WORKTREES. The env adapter reports the workspaces (`env/<name>/open_work.py`, see [env/README.md](../env/README.md)). When it cannot, the watchers use the last set saved in `~/.claude/coordinator/open-work.json` and say so in their log.
 
 `pr.repos`, `audit.git_watch_repos` and `focus.skip_architects` are not settings. `install.sh` drops them from an existing file and prints one `dropped` line; one it cannot remove in place (an inline table) gets a `warning` line to edit it by hand. Until then the readers skip them with a warning. To leave an architect out of the focus report, see the pause line in [watchers.md](watchers.md#focus-report).
