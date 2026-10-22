@@ -92,34 +92,71 @@ dispatch() {
   [ ! -e "$TMP/review-herdr.calls" ]
 }
 
-@test "with Codex off dispatch refuses before any claim, pane or agent" {
+@test "with both Codex models empty dispatch refuses before any claim, pane or agent" {
   stub_review_tools
   : >"$TMP/none.toml"
-  ORCH_CODEX_ENABLED=0 dispatch
+  ORCH_CODEX_WORKER_MODEL='' ORCH_CODEX_SMART_MODEL='' dispatch
   [ "$status" -ne 0 ]
-  contains "$output" 'codex.enabled = false'
+  contains "$output" 'both Codex models are empty'
   [ ! -e "$TMP/review-herdr.calls" ]
   [ ! -e "$HOME/.cache/review-prs/dispatched.json" ]
 }
 
-@test "with Codex off in the config file dispatch refuses before any claim, pane or agent" {
+@test "with both Codex models empty in the config file dispatch refuses before any claim, pane or agent" {
   stub_review_tools
-  printf '[codex]\nenabled = false\n' >"$TMP/none.toml"
+  unset ORCH_CODEX_WORKER_MODEL
+  printf '[models]\ncodex_worker = ""\ncodex_smart = ""\n' >"$TMP/none.toml"
   dispatch
   [ "$status" -ne 0 ]
-  contains "$output" 'codex.enabled = false'
+  contains "$output" 'both Codex models are empty'
   [ ! -e "$TMP/review-herdr.calls" ]
   [ ! -e "$HOME/.cache/review-prs/dispatched.json" ]
 }
 
-@test "with Codex off dispatch-queue plans nothing and never reads GitHub" {
+@test "with only the smart Codex model empty dispatch still reviews on the worker model" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  ORCH_CODEX_SMART_MODEL='' dispatch
+  [ "$status" -eq 0 ]
+  grep -q -- 'agent start rev7 --kind codex' "$TMP/review-herdr.calls"
+}
+
+@test "with the Codex models unset dispatch asks to fill them in rather than reporting Codex off" {
+  stub_review_tools
+  unset ORCH_CODEX_WORKER_MODEL
+  : >"$TMP/none.toml"
+  dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'set models.codex_worker'
+  [ ! -e "$TMP/review-herdr.calls" ]
+}
+
+@test "with only the smart Codex model empty dispatch-queue is not off" {
   stub_review_tools
   printf '#!/bin/sh\ntouch "%s/gh.called"\nexit 1\n' "$TMP" >"$BIN/gh"
-  printf '[codex]\nenabled = false\n' >"$TMP/off.toml"
-  run env ORCH_CONFIG="$TMP/off.toml" ORCH_CODEX_WORKER_MODEL='<codex-worker-model>' python3 "$ROOT/$SKILL_DIR/scripts/prs.py" dispatch-queue --all
+  : >"$TMP/none.toml"
+  ORCH_CODEX_SMART_MODEL='' run env ORCH_CONFIG="$TMP/none.toml" python3 "$ROOT/$SKILL_DIR/scripts/prs.py" dispatch-queue --all
+  [ "$status" -ne 0 ]
+  [ -e "$TMP/gh.called" ]
+}
+
+@test "with both Codex models empty dispatch-queue plans nothing and never reads GitHub" {
+  stub_review_tools
+  printf '#!/bin/sh\ntouch "%s/gh.called"\nexit 1\n' "$TMP" >"$BIN/gh"
+  printf '[models]\ncodex_worker = ""\ncodex_smart = ""\n' >"$TMP/off.toml"
+  run env -u ORCH_CODEX_WORKER_MODEL ORCH_CONFIG="$TMP/off.toml" python3 "$ROOT/$SKILL_DIR/scripts/prs.py" dispatch-queue --all
   [ "$status" -eq 0 ]
-  [ "$(printf '%s' "$output" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["queue"], "codex.enabled = false" in d["note"])')" = "[] True" ]
+  [ "$(printf '%s' "$output" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["queue"], "both Codex models are empty" in d["note"])')" = "[] True" ]
   [ ! -e "$TMP/gh.called" ]
+}
+
+@test "with the Codex models unset dispatch-queue is not off" {
+  stub_review_tools
+  printf '#!/bin/sh\ntouch "%s/gh.called"\nexit 1\n' "$TMP" >"$BIN/gh"
+  : >"$TMP/none.toml"
+  run env -u ORCH_CODEX_WORKER_MODEL ORCH_CONFIG="$TMP/none.toml" python3 "$ROOT/$SKILL_DIR/scripts/prs.py" dispatch-queue --all
+  [ "$status" -ne 0 ]
+  [ -e "$TMP/gh.called" ]
 }
 
 @test "with Codex on dispatch-queue still reads GitHub and needs the worker model" {

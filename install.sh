@@ -476,19 +476,14 @@ write_config_key() {
 # settings_cli <args>: runs the settings module with the installer's Python 3.11 or newer.
 settings_cli() { "$INSTALL_PYTHON" -I "$ORCH_REPO/lib/orch_settings.py" "$@"; }
 
-# skip_codex_key <ORCH_KEY>: a Codex model key that codex.enabled = false leaves alone.
-skip_codex_key() {
-  case "$1" in ORCH_CODEX_WORKER_MODEL | ORCH_CODEX_SMART_MODEL) [ "$(config_value ORCH_CODEX_ENABLED)" = 0 ] ;; *) return 1 ;; esac
-}
-
 # First run on a terminal: asks for each empty or placeholder key; "-" leaves it empty.
 ask_config_keys() {
   local key value
   interactive || return 0
   for key in ORCH_PR_AUTHOR ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET; do
-    ! skip_codex_key "$key" || continue
     value=$(config_value "$key")
     [ -n "$value" ] || value=$(unset "$key" && config_value "$key")
+    case "$key:$value" in ORCH_CODEX_*:) continue ;; esac
     case "$value" in
       "" | "<"*">") ;;
       *)
@@ -594,8 +589,8 @@ personal_config() {
   done
   [ -z "$missing_project_keys" ] || say "configure" "Project features are off until you configure missing keys in $CONFIG:$missing_project_keys"
   for k in ORCH_PR_AUTHOR ORCH_CODEX_WORKER_MODEL ORCH_CODEX_SMART_MODEL ORCH_HERDR_BIN ORCH_HERDR_SOCKET; do
-    ! skip_codex_key "$k" || continue
     v=$(config_value "$k")
+    case "$k:$v" in ORCH_CODEX_*:) continue ;; esac
     case "$v" in "" | "<"*">") fill="$fill $k" ;; esac
   done
   for k in $(settings_cli keys "$example"); do

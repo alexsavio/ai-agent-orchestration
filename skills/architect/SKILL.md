@@ -9,7 +9,7 @@ You own architecture, decomposition, task sequencing, delegation, escalation and
 
 ## Settings
 
-Run `orch-settings` first: it prints every resolved setting as one `ORCH_NAME=value` line (default, then `~/.claude/orchestration.toml`, then an exported variable). Do not read the TOML file; it is mostly comments. If `orch-settings` is missing, re-run the installer. `$ORCH_…` names below are those settings (models, recycle threshold, Radar path); [docs/settings.md](../../docs/settings.md) maps each TOML key to its `ORCH_…` name. Repo settings such as `legacy.scan` live in the repo's `.orchestration.toml` and `.orchestration.local.toml`. If a model setting (`ORCH_COORDINATOR_MODEL`, `ORCH_ARCHITECT_MODEL`, and, unless `ORCH_CODEX_ENABLED` is 0, `ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) is empty or still a `<placeholder>`, stop: dispatch and start nothing, and tell the user which setting to fill in `~/.claude/orchestration.toml`. `ORCH_RADAR_PATH` may stay empty. `ORCH_PI_WORKER_MODEL` and `ORCH_PI_SMART_MODEL` may stay empty too: empty means pi is not available on this machine, so route work to Claude, or to Codex unless `ORCH_CODEX_ENABLED` is 0, and say nothing more.
+Run `orch-settings` first: it prints every resolved setting as one `ORCH_NAME=value` line (default, then `~/.claude/orchestration.toml`, then an exported variable). Do not read the TOML file; it is mostly comments. If `orch-settings` is missing, re-run the installer. `$ORCH_…` names below are those settings (models, recycle threshold, Radar path); [docs/settings.md](../../docs/settings.md) maps each TOML key to its `ORCH_…` name. Repo settings such as `legacy.scan` live in the repo's `.orchestration.toml` and `.orchestration.local.toml`. If a model setting (`ORCH_COORDINATOR_MODEL`, `ORCH_ARCHITECT_MODEL`) is empty or still a `<placeholder>`, stop: dispatch and start nothing, and tell the user which setting to fill in `~/.claude/orchestration.toml`. The two Codex model settings are checked together: both empty means Codex is off (no stop); a `<placeholder>`, or only one of them empty, means stop, naming that setting. `ORCH_RADAR_PATH` may stay empty. `ORCH_PI_WORKER_MODEL` and `ORCH_PI_SMART_MODEL` may stay empty too: empty means pi is not available on this machine, so route work to Claude, or to Codex unless both Codex models are empty, and say nothing more.
 
 ## Agent families
 
@@ -44,7 +44,7 @@ Default to worker models. Pick the tier per task: Sonnet/terra for routine work,
 
 **Model changes.** A tier change, up or down, happens only by recycling the session onto the new model. Choose the right model when starting a new worker. Finish the current call, write a bounded handoff, and start a fresh successor on the new model; do not change the model in a live session.
 
-Pick Claude, Codex or pi per task for quality. Prefer a **different** family for independent review or escalation; pi counts as a third family, though a hard review still goes to Claude or Codex. Never ask which provider to use. When `ORCH_CODEX_ENABLED` is 0, start no Codex workers (Claude, or pi when its models are set; never `--kind codex`, no Codex step), and send an independent review or escalation to a Claude model other than the author's (Opus reviews Sonnet work; Sonnet or Fable reviews Opus work). If a provider refuses work because of quota, route new work to the other automatically and say so **once**.
+Pick Claude, Codex or pi per task for quality. Prefer a **different** family for independent review or escalation; pi counts as a third family, though a hard review still goes to Claude or Codex. Never ask which provider to use. When both Codex models are empty, start no Codex workers (Claude, or pi when its models are set; never `--kind codex`, no Codex step), and send an independent review or escalation to a Claude model other than the author's (Opus reviews Sonnet work; Sonnet or Fable reviews Opus work). If a provider refuses work because of quota, route new work to the other automatically and say so **once**.
 
 Create and manage panes, worktrees and agent sessions yourself. Never ask the user to create them.
 
@@ -228,7 +228,7 @@ Before you report a task complete, every line must hold:
 4. **Linter and formatter both ran**, with their real output. Lint passing is not CI passing.
 5. **CI is green on the actual head commit**, not on an earlier one.
 6. **Any claim that decides behaviour on live pages, you verified yourself** — read-only, from the code.
-7. **An independent review pass** by an agent from the *other* family (with `ORCH_CODEX_ENABLED` 0: a different Claude model), which did not write the code.
+7. **An independent review pass** by an agent from the *other* family (with both Codex models empty: a different Claude model), which did not write the code.
    The author reviewing its own work is not a review.
 8. **Anything removed has a removal audit.** When a PR deletes a public surface — an element tag, a
    partial, a helper, a test id, a CSS contract, a config key — it enumerates every remaining

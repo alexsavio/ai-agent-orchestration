@@ -17,7 +17,7 @@ py=$(orch_python) || exit 2
 herdr() {
   command "${HERDR_BIN_PATH:-${ORCH_HERDR_BIN:-herdr}}" "$@"
 }
-[ "${ORCH_CODEX_ENABLED:-1}" != 0 ] || orch_die "Codex is off (codex.enabled = false): no review dispatched"
+[ -n "${ORCH_CODEX_WORKER_MODEL-x}${ORCH_CODEX_SMART_MODEL-x}" ] || orch_die "Codex is off (both Codex models are empty): no review dispatched"
 model=${ORCH_CODEX_WORKER_MODEL:-}
 case "$model" in "" | "<"*">") orch_die "set models.codex_worker (ORCH_CODEX_WORKER_MODEL) in $(orch_config_path)" ;; esac
 

@@ -86,9 +86,9 @@ EOF
   [ "$(config_line ORCH_HERDR_SOCKET)" = 'ORCH_HERDR_SOCKET=""' ]
 }
 
-@test "with Codex off the installer neither asks for nor asks to fill the Codex models" {
+@test "with both Codex models empty the installer neither asks for nor lists them" {
   fresh_install
-  config_set ORCH_CODEX_ENABLED 0
+  config_set ORCH_CODEX_WORKER_MODEL '' ORCH_CODEX_SMART_MODEL ''
   on_tty $'-\n-\n-'
   [ "$status" -eq 0 ]
   not_contains "$output" 'ORCH_CODEX_WORKER_MODEL ('
@@ -99,7 +99,7 @@ EOF
   not_contains "$output" 'ORCH_CODEX'
 }
 
-@test "a config without a codex table still asks for and lists the Codex models" {
+@test "a config with Codex model placeholders still asks for and lists them" {
   fresh_install
   printf '[models]\ncodex_worker = "<codex-worker-model>"\ncodex_smart = "<codex-smart-model>"\n' >"$HOME/.claude/orchestration.toml"
   install_ok

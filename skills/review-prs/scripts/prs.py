@@ -60,13 +60,13 @@ def setting(name):
         return os.environ[name]
     config = os.environ.get("ORCH_CONFIG") or str(Path.home() / ".claude" / "orchestration.toml")
     try:
-        return orch_settings.load_global(config).get(name, "")
+        return orch_settings.resolved_global(config, {})[name]
     except orch_settings.ConfigError as error:
         sys.exit(str(error))
 
 
-def codex_enabled():
-    return setting("ORCH_CODEX_ENABLED") != "0"
+def codex_off():
+    return not setting("ORCH_CODEX_WORKER_MODEL") and not setting("ORCH_CODEX_SMART_MODEL")
 
 
 def worker_model():
@@ -454,9 +454,9 @@ def cmd_watch(args, scope, _label):
 
 
 def cmd_dispatch_queue(args, scope, label):
-    if not codex_enabled():
+    if codex_off():
         print(json.dumps({"scope": label, "model": "", "queue": [], "skipped": 0,
-                          "note": "Codex is off (codex.enabled = false): no review dispatched"}, indent=2))
+                          "note": "Codex is off (both Codex models are empty): no review dispatched"}, indent=2))
         return
     nodes = fetch(scope)
     if any(p["mergeable"] == "UNKNOWN" for p in nodes):

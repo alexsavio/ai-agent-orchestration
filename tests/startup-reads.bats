@@ -53,17 +53,16 @@ teardown() {
   [ "$(printf '%s\n' "$output" | grep -c 'file-coord')" -eq 0 ]
 }
 
-@test "orch-settings prints Codex as on by default, off from the file, and an exported variable wins" {
-  run env -u ORCH_CONFIG -u ORCH_CODEX_ENABLED "$ROOT/orch-settings"
+@test "orch-settings prints the Codex model placeholders by default and empty models from the file" {
+  run env -u ORCH_CONFIG -u ORCH_CODEX_WORKER_MODEL -u ORCH_CODEX_SMART_MODEL "$ROOT/orch-settings"
   [ "$status" -eq 0 ]
-  has_line ORCH_CODEX_ENABLED=1
-  printf '[codex]\nenabled = false\n' >"$ORCH_CONFIG"
-  run env -u ORCH_CODEX_ENABLED "$ROOT/orch-settings"
+  has_line 'ORCH_CODEX_WORKER_MODEL=<codex-worker-model>'
+  [ "$(printf '%s\n' "$output" | grep -c '^ORCH_CODEX_ENABLED=')" -eq 0 ]
+  printf '[models]\ncodex_worker = ""\ncodex_smart = ""\n' >"$ORCH_CONFIG"
+  run env -u ORCH_CODEX_WORKER_MODEL -u ORCH_CODEX_SMART_MODEL "$ROOT/orch-settings"
   [ "$status" -eq 0 ]
-  has_line ORCH_CODEX_ENABLED=0
-  run env ORCH_CODEX_ENABLED=1 "$ROOT/orch-settings"
-  [ "$status" -eq 0 ]
-  has_line ORCH_CODEX_ENABLED=1
+  has_line 'ORCH_CODEX_WORKER_MODEL='
+  has_line 'ORCH_CODEX_SMART_MODEL='
 }
 
 @test "orch-settings prints one ORCH_NAME=value line per setting and no comments" {

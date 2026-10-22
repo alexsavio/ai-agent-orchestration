@@ -4,7 +4,7 @@ Settings come from three places. Each setting has one scope and lives in only on
 
 - **Global** settings (machine-wide: watchers, heavy slots, models, paths, Herdr) live in `~/.claude/orchestration.toml`. `ORCH_CONFIG=/path` selects another file; a selected path that is not a regular file is an error. The installer copies [`config/orchestration.toml.example`](../config/orchestration.toml.example) there on the first run.
 - **Repo** settings (big-repo guard, legacy scan, focus report, merge gate checks) live at the root of each repo: `.orchestration.toml` is committed and shared, `.orchestration.local.toml` is personal. [`config/repo.orchestration.toml.example`](../config/repo.orchestration.toml.example) lists them.
-- An **exported** `ORCH_*` variable wins over both files, for every setting. An exported bool setting is `0` or `1`.
+- An **exported** `ORCH_*` variable wins over both files, for every setting.
 
 A repo key in the global file, a global key in a repo file, an unknown key, a value of the wrong type, a list entry that is empty or contains its separator (whitespace, `,`, `|` or `:`) and invalid TOML are errors that name the file and the key. A script that lacks a setting or a command prints `ERROR: …` and exits with status 2. Reading TOML needs Python 3.11 or newer: the loader takes `ORCH_PYTHON3` from the environment, then `python3` on `PATH`, then the Homebrew paths.
 
@@ -42,11 +42,10 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `heavy_slots.kill_grace` | `ORCH_HEAVY_SLOTS_KILL_GRACE` | `10` | Seconds a stopped job gets before it is killed |
 | `models.coordinator` | `ORCH_COORDINATOR_MODEL` | `"claude-opus-5-5"` | Model of the Coordinator |
 | `models.architect` | `ORCH_ARCHITECT_MODEL` | `"claude-opus-5-5"` | Model of the architects |
-| `models.codex_worker` | `ORCH_CODEX_WORKER_MODEL` | `"<codex-worker-model>"` | Codex model for routine work; replace the placeholder |
-| `models.codex_smart` | `ORCH_CODEX_SMART_MODEL` | `"<codex-smart-model>"` | Codex model for hard work; replace the placeholder |
+| `models.codex_worker` | `ORCH_CODEX_WORKER_MODEL` | `"<codex-worker-model>"` | Codex model for routine work; replace the placeholder, or leave both Codex models empty to turn Codex off |
+| `models.codex_smart` | `ORCH_CODEX_SMART_MODEL` | `"<codex-smart-model>"` | Codex model for hard work; replace the placeholder, or leave both Codex models empty to turn Codex off |
 | `models.pi_worker` | `ORCH_PI_WORKER_MODEL` | empty | pi model for routine work as provider/model-id; empty means pi is not used on this machine |
 | `models.pi_smart` | `ORCH_PI_SMART_MODEL` | empty | pi model for hard work as provider/model-id; empty means pi is not used on this machine |
-| `codex.enabled` | `ORCH_CODEX_ENABLED` | `true` | Codex is installed and usable; false means Claude workers only, and the two Codex model settings may stay placeholders |
 | `recycle.tokens` | `ORCH_RECYCLE_TOKENS` | `300000` | Tokens used at which RECYCLE fires |
 | `recycle.pct` | `ORCH_RECYCLE_PCT` | `55` | Context percentage used when the token sensor is absent |
 | `recycle.park_idle` | `ORCH_PARK_IDLE` | `false` | Park architects that have no open PR, worker or watcher |
