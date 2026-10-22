@@ -251,7 +251,7 @@ on both platforms. This gives prompt blocker detection with modest agent-list po
 It shares `prod-context/`, the binding and the single inbox notifier with the other producers.
 Every listed agent is included, regardless of role tags. WORKER lines name the
 pane; agent list does not supply workspace labels. Blocked and error alert once
-per agent session and state; working, idle, done and waiting are silent.
+per agent session and state; working, idle, done and waiting do not raise blocker alerts.
 An active agent (working, waiting, blocked or error) that leaves the list raises
 dead/disappeared once, or `WORKER <pane> closed` when `<state-dir>/closed/<pane id>` exists.
 `close-pane.sh <pane id>` writes that marker, closes the pane, and removes the marker when the close fails; the watcher deletes a marker once neither its scan nor its saved state lists the pane. Its key is then dropped, so persisted worker state is
@@ -268,7 +268,7 @@ session key.
 `WORKER <pane> RECOVERED <state>` clears a live agent's previous blocked/error
 state when it changes. A blocked-to-error transition clears blocked and raises
 error. Disappearance emits no RECOVERED line. Working/idle changes produce no
-alerts. Dedupe survives service restarts.
+blocker alerts. Dedupe survives service restarts.
 
 Unknown or missing statuses skip only that agent. WORKER READFAIL names the
 unreadable panes and statuses once whenever the sorted set changes; a pane the watcher first saw
@@ -281,6 +281,22 @@ The Coordinator responses are in `skills/coordinate/SKILL.md`: inspect panes,
 route blockers and errors to owners, verify disappeared sessions and arrange
 recovery, clear recovered warnings, and restore unreadable agents or producers.
 The audit reports workspace-level blocked lines.
+
+Owner-tagged workers emit `WORKER WAITING` after 600 seconds done or idle. The
+owning architect receives one native alert, then one repeat 1800 seconds after
+that alert; another 1800 seconds after the repeat escalates once to the
+Coordinator. Repeat/escalation gaps are at least 60 seconds. Architect/coordinator
+role tags and `Architect::` names or titles are excluded. State and policy keys
+use the session ID, falling back to the pane ID when no session is available
+(`workers:waiting:<identity>:<stage>`). Working, closing, a sequence change, or a
+successful loss/change of owner clears the alert and its queued native retries;
+unreadable snapshots preserve
+it. Before a due alert, the last 16 pane lines are checked for Claude monitor/shell
+or Codex background-terminal indicators. A busy pane preserves its timer and stage
+without sending. A failed pane read allows the alert and logs once until a
+successful read. Pane reads take at most five seconds each and ten seconds total,
+reserving five seconds of the pass for reduction; budget-skipped panes count as
+not busy. See [waiting settings and snapshot limits](../../docs/watchers.md#workers-waiting).
 
 ## Audit alerts
 

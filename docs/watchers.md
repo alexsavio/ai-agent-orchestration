@@ -10,7 +10,7 @@ The watchers write alerts to files, and one notifier turns them into a feed at `
 | host | Memory, swap, processes, open files, load |
 | hog | Big processes and long or big `git` processes |
 | balance | Worktree CPU and memory against the heavy-slot cap |
-| workers | Blocked, errored or vanished agents |
+| workers | Blocked, errored or vanished agents; finished workers waiting on their architect |
 | user-todo | What waits on you (see [The to-do pane](todo.md)) |
 
 **With services**: set `[watchers] service = true` (with `[herdr] bin` and `socket`) and run the installer again. It registers the watchers (audit and pulls only when `pr.author` is set in the config file, not just exported) with launchd (macOS) or `systemd --user` (Linux) to run now and at login. Back to `false` removes them. Off by default.
@@ -56,3 +56,38 @@ Queued terminal bytes are preserved; undecodable claims retry independently.
 Answer previews retain the watcher deadline without consuming submissions.
 Directory-read failures retain replay IDs. Failed pane setup closes the new pane
 through the intentional-close helper, leaving the question file available to retry.
+
+## Workers waiting
+
+A session in an owner-tagged workspace that stays `done` or `idle` for more than
+`workers.wait_s` seconds (default 600) emits
+`WORKER WAITING <name> pane=<pane> owner=<workspace> <minutes>m session=<id>`.
+Architect and Coordinator role panes, and panes with an `Architect::` name or
+title, are excluded. The owning architect gets a native message through its
+binding and the existing bounded retry outbox. There is one repeat at
+`workers.wait_repeat_s` seconds after the initial alert (default 1800), then one
+native Coordinator escalation after another such interval. Each gap is at least
+60 seconds, including after laptop sleep. No further repeats. The feed
+records every stage; the user's to-do list is unchanged.
+
+An observed `working` status resets the timer. Closing the session, removing its
+owner tag, or changing its owner clears its old alert immediately. Clears also
+cancel queued native retries for that owner and identity, preserving other
+messages and later restarts. An unreadable
+workspace or agent snapshot preserves state; a successful empty ownership read
+clears it. Timers are keyed by session ID (or pane ID when no session is available)
+and removed when that identity vanishes, so a successor using the same pane and
+name starts fresh. A change in Herdr's per-agent `state_change_seq` also resets
+the timer, catching state transitions between polls even when both snapshots are
+done/idle. The timer starts at the first observed done/idle snapshot and survives
+watcher restarts.
+
+Before a due alert, the watcher reads the last 16 pane lines. Claude monitor/shell
+footers or monitor status-line counts, and Codex's background-terminal running
+line, suppress delivery without resetting the timer or advancing its stage. A
+failed pane read is treated as not busy and logged once until a successful read.
+Reads have a five-second per-pane timeout and a ten-second total budget, reduced
+to reserve five seconds for the rest of the pass. Budget-skipped panes count as
+not busy.
+These text indicators are incomplete, so every waiting line retains the caveat
+`(may be waiting on its own job)`, including native alerts and escalation.
