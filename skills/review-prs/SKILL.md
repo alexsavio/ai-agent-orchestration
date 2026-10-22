@@ -21,7 +21,8 @@ Read-only for the orchestrator: this skill never merges, closes, or assigns revi
 
 From `~/.claude/orchestration.toml` ([docs/settings.md](../../docs/settings.md)):
 
-- `models.codex_worker` (`ORCH_CODEX_WORKER_MODEL`): the review model. Empty or a `<placeholder>`: dispatch nothing and tell the user to fill it in.
+- `models.codex_worker` (`ORCH_CODEX_WORKER_MODEL`): the review model. Empty or a `<placeholder>` while Codex is on: dispatch nothing and tell the user to fill it in.
+- `codex.enabled` (`ORCH_CODEX_ENABLED`): when 0, list and watch as with `--no-dispatch`, run no Auto-dispatch, start no Codex pane, and say once in one line: "Codex is off (codex.enabled = false), so no review is dispatched." Start no other reviewer in its place. `dispatch-queue` then returns an empty queue with that note, and `dispatch.sh` refuses before any claim, pane or agent.
 - `watchers.pr_scope` (`ORCH_WATCHERS_PR_SCOPE`): the scope when no scope flag is given outside a repo.
 
 Repo settings of the PR's clone shape the prompt: `guard.big_repo` forbids broad Git reads, `legacy.scan` adds the legacy check.
@@ -33,7 +34,7 @@ Repo settings of the PR's clone shape the prompt: `guard.big_repo` forbids broad
 - `--org ORG` — every repo in the org.
 - `--all` — every PR requesting you, anywhere.
 - `--actionable` — list only Ready-for-review PRs.
-- `--no-dispatch` — never open Herdr/Codex panes.
+- `--no-dispatch` — never open Herdr/Codex panes. Also the behaviour whenever `ORCH_CODEX_ENABLED` is 0 (`codex.enabled = false`).
 
 With no scope flag, the script uses the GitHub repo of the current directory, else `watchers.pr_scope`, else `--all`.
 

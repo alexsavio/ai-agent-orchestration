@@ -92,6 +92,35 @@ dispatch() {
   [ ! -e "$TMP/review-herdr.calls" ]
 }
 
+@test "with Codex off dispatch refuses before any claim, pane or agent" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  ORCH_CODEX_ENABLED=0 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" 'codex.enabled = false'
+  [ ! -e "$TMP/review-herdr.calls" ]
+  [ ! -e "$HOME/.cache/review-prs/dispatched.json" ]
+}
+
+@test "with Codex off dispatch-queue plans nothing and never reads GitHub" {
+  stub_review_tools
+  printf '#!/bin/sh\ntouch "%s/gh.called"\nexit 1\n' "$TMP" >"$BIN/gh"
+  printf '[codex]\nenabled = false\n' >"$TMP/off.toml"
+  run env ORCH_CONFIG="$TMP/off.toml" ORCH_CODEX_WORKER_MODEL='<codex-worker-model>' python3 "$ROOT/$SKILL_DIR/scripts/prs.py" dispatch-queue --all
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["queue"], "codex.enabled = false" in d["note"])')" = "[] True" ]
+  [ ! -e "$TMP/gh.called" ]
+}
+
+@test "with Codex on dispatch-queue still reads GitHub and needs the worker model" {
+  stub_review_tools
+  printf '#!/bin/sh\ntouch "%s/gh.called"\nexit 1\n' "$TMP" >"$BIN/gh"
+  : >"$TMP/none.toml"
+  run env ORCH_CONFIG="$TMP/none.toml" python3 "$ROOT/$SKILL_DIR/scripts/prs.py" dispatch-queue --all
+  [ "$status" -ne 0 ]
+  [ -e "$TMP/gh.called" ]
+}
+
 @test "review prompt ends the Codex turn once the review is posted" {
   stub_review_tools
   : >"$TMP/none.toml"
