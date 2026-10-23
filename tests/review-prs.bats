@@ -178,6 +178,28 @@ dispatch() {
   grep -qF 'claude-haiku-5-5' "$ROOT/skills/architect/SKILL.md"
 }
 
+@test "the skills and snippet announce no heavy slot and keep messages and watches to action lines" {
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md snippets/CLAUDE.md.snippet docs/architecture.md; do
+    run grep -nE 'Announce (start|the end|when it ends)' "$ROOT/$file"
+    [ "$status" -eq 1 ]
+  done
+  grep -qF 'message nobody about a slot' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'message nobody about a slot' "$ROOT/snippets/CLAUDE.md.snippet"
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md; do
+    grep -qF 'a question, an order, or an action event only' "$ROOT/$file"
+    grep -qF 'no heartbeat' "$ROOT/$file"
+  done
+  grep -qF 'coordinator-fyi.log' "$ROOT/skills/coordinate/SKILL.md"
+  grep -qF 'coordinator-fyi.log' "$ROOT/docs/architecture.md"
+}
+
+@test "worker briefs tell workers not to call the advisor tool" {
+  for file in skills/architect/SKILL.md skills/architect/references/dispatch.md skills/architect/references/worker-recycle.md; do
+    grep -qF 'advisor' "$ROOT/$file"
+    grep -qF 'uncached on the advisor model' "$ROOT/$file"
+  done
+}
+
 @test "the skill holds no org, model, login or personal path literals" {
   run grep -rniE 'combinaut|sparkle|gpt-[0-9]|sleistner|/Users/|/private/tmp|31691' "$ROOT/$SKILL_DIR"
   [ "$status" -eq 1 ]

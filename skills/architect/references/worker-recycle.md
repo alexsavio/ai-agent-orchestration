@@ -16,7 +16,7 @@ Read this file before you act on a `RECYCLE-WORKER` message. A worker never recy
 5. **Start the successor** in the same workspace and worktree, on the model in the handoff's `Model:` field:
    - `herdr pane split <old pane> --direction down --cwd <worktree> --no-focus`; the new pane is `result.pane.pane_id`. Never `herdr worktree open` the worktree again: on an open path it renames the workspace.
    - `herdr agent start <name>-next --kind claude --pane <new pane> -- --model <model>` (any free name of at most 32 characters). Never `--resume` the old session: that loads its whole context again.
-   - Prompt it once: *Read `<handoff path>` and only that, not the old transcript; it names your brief and rules. You own the review cycle of PR <n> from here. Write your report to `<report path>`.*
+   - Prompt it once: *Read `<handoff path>` and only that, not the old transcript; it names your brief and rules. You own the review cycle of PR <n> from here. Write your report to `<report path>`. Do not call the `advisor` tool: each call re-reads the whole transcript uncached on the advisor model.*
    - With "no PR yet" in the handoff, say instead: *Continue the task from the handoff; no PR is open yet.* in place of the PR sentence.
    - Wait until `herdr agent get <name>-next` shows it working from the handoff.
 6. **Close the old pane** with `~/.claude/coordinator/watchers/close-pane.sh <old pane>`, then `herdr agent rename <name>-next <name>`, so slot names, reports and the Radar keep one name.

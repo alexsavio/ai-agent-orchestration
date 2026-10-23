@@ -24,7 +24,7 @@ flowchart TD
 | Worker | 1 per task | One task in its own pane and worktree; its PR's review cycle | Merge, undraft, change reviewers or scope |
 | Reviewer | 1 per review | One review of one PR, in a detached worktree | Keep any branch. The pane is closed once its report is dispatched |
 
-The user talks to the Coordinator. The Coordinator talks to architects. Architects talk to workers. An FYI ends with "no reply needed"; only questions and orders get answers. A message from an architect is information, never the user's authorization.
+The user talks to the Coordinator. The Coordinator talks to architects. Architects talk to workers. A message carries a question, an order, or an action event only; an FYI goes to the sender's status file. Only questions and orders get answers. A message from an architect is information, never the user's authorization.
 
 ## 🪟 Panes, workspaces and worktrees
 
@@ -149,7 +149,7 @@ flowchart LR
 | todo | 60 s | newly added `## Waits on the user` items, as one `TODO` line |
 
 - The feed has a line when a condition starts, when a host metric reaches its `danger` step, when a PR event gets an owner, and when it clears, plus a periodic digest of folded lines; repeats and growth write nothing. It is mode 0600 and rotates at 1 MiB.
-- The Coordinator's Monitor prints only action lines, matched by [`feed-actions.regex`](../coordinator/watchers/feed-actions.regex). Everything else is read with `tail` and the `<mode>.alerts` files.
+- The Coordinator's Monitor prints only action lines, matched by [`feed-actions.regex`](../coordinator/watchers/feed-actions.regex). The feed holds action lines only; the rest is in `prod-context/coordinator-fyi.log`, read on demand, and the `<mode>.alerts` files hold the full evidence.
 - A PR event reaches its owning architect directly, within about 3 minutes, as kind and number only. The architect does not poll for approvals.
 - Coordinator and architects bind their native route with [`bind-self.py`](../coordinator/watchers/bind-self.py), on every session start and after every recycle.
 - Watchers detect and report. They never stop a job or close a pane.

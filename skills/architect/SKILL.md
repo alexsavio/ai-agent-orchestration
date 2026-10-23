@@ -129,10 +129,9 @@ Put it in the brief: which launcher to use, that the worker must stop its instan
 A heavy job is a test runner (Vitest, browser tests), Storybook, a Playwright or screenshot run, or a local Vite build.
 
 1. **Check the machine first:** `ulimit -n`, `sysctl kern.num_files kern.maxfiles`, `vm_stat`, and which heavy processes are already up.
-2. **At most `ORCH_HEAVY_SLOTS_MAX` heavy jobs at once on the machine** (default 4), across all sessions. Run every heavy command through `heavy-slot take <architect>-<job> -- <command> [args...]`; it atomically creates a file containing the child pid, removes it on completion or handled signals, waits up to 1800 seconds when full, and then prints `NEED SLOT`. Use `heavy-slot count` to inspect capacity and `heavy-slot list` to see live and stale records. Do not hand-write slot files. Balance uses the same configured value for its slot boundary. Announce start and end to the other architects (`ListAgents`).
+2. **At most `ORCH_HEAVY_SLOTS_MAX` heavy jobs at once on the machine** (default 4), across all sessions. Run every heavy command through `heavy-slot take <architect>-<job> -- <command> [args...]`; it atomically creates a file containing the child pid, removes it on completion or handled signals, waits up to 1800 seconds when full, and then prints `NEED SLOT`. Use `heavy-slot count` to inspect capacity and `heavy-slot list` to see live and stale records. Do not hand-write slot files. Balance uses the same configured value for its slot boundary. `heavy-slot list` is the source of truth; message nobody about a slot.
 3. **Keep the system in sight while it runs.** Stop the job if open files or memory climb.
 4. **Close what you start:** Storybook, Playwright browsers, Vite and watchers. Kill by pidfile, never broad `pkill`.
-5. **Announce the end** to the same architects, so the next job can start.
 
 **A local pi model is not a `heavy-slot` job, and has its own memory rule.** A loaded local model takes about 20 GB and outlives any single command. With JIT loading on in LM Studio, the first request from a pi worker on a local provider loads the model, so the checks below apply before you start a local pi worker, not only before `lms load`. Check `vm_stat` and the host-pressure alerts first; start only with real headroom. At most one local model is loaded on the machine; run `lms ps` first, and if one is loaded, share it or wait. When the last pi worker on it closes, run `lms unload <id>` for that model only, and only if `herdr agent list` shows no other pi agent on the machine (and stop `lms server` if you started it). Never probe a local provider with a throwaway pi run.
 
@@ -148,7 +147,7 @@ Use `gh` and `gh api` for GitHub actions and queries.
 
 **GitHub duty.** A worker that asks twice to perform an authorized GitHub action loses its GitHub duty; the architect does that GitHub action itself with `gh`.
 
-**Message discipline.** An FYI ends with "no reply needed"; do not reply to one. Answer only questions and orders. Rewrite `~/.claude/coordinator/status/<architect-name>.md` on every state change, and keep its `## Closed workers` section: `close-worker.sh` writes it, and its lines are the only place that holds a closed worker's resume id. Keep `## Waits on the user` current, one `- <what> -> <session name or GitHub URL>` per item. The Coordinator derives the immediate user list from these files; never hand-maintain it. Read `~/.claude/coordinator/notes.md` at the start of each real turn and on recycle; it carries broadcast rules while idle architects stay unmessaged.
+**Message discipline.** A `SendMessage` or pane prompt carries a question, an order, or an action event only. An FYI ("no reply needed") goes into your status file instead; do not send it, and do not reply to one. Answer only questions and orders. A Monitor or background watch prints only lines that need an action: no "started", no heartbeat, no repeat of a known state. Rewrite `~/.claude/coordinator/status/<architect-name>.md` on every state change, and keep its `## Closed workers` section: `close-worker.sh` writes it, and its lines are the only place that holds a closed worker's resume id. Keep `## Waits on the user` current, one `- <what> -> <session name or GitHub URL>` per item. The Coordinator derives the immediate user list from these files; never hand-maintain it. Read `~/.claude/coordinator/notes.md` at the start of each real turn and on recycle; it carries broadcast rules while idle architects stay unmessaged.
 
 Do **not** ask whether to start work already implied by the task. Dispatch it when dependencies permit: create and manage worktrees and branches, edit, test, format, commit, push, create and update PRs, and fix CI caused by the work.
 
@@ -182,6 +181,7 @@ No code starts until the Coordinator answers `LEGACY OK`. Other projects skip th
 
 ## Guardrails in every handoff
 
+- Workers do not call the `advisor` tool; architects and the Coordinator keep it. Each call re-reads the whole transcript uncached on the advisor model.
 - Prove the test **fails first**. Mutate one guard at a time and report which test caught it. A test that stays green under its own mutation pins nothing.
 - Run the linter **and** the formatter. Passing lint is not passing CI.
 - A pure refactor edits **no spec**, and the test count matches before and after.
