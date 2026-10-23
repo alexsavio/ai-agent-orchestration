@@ -949,6 +949,78 @@ class ProvidersTest(SettingsTest):
         with self.assertRaisesRegex(s.ConfigError, 'unknown entry ""'):
             self.resolve(ORCH_PROVIDERS="claude,")
 
+    def test_one_codex_model_is_enough_and_serves_both_tiers(self):
+        for worker, smart in (
+            ("gpt-w", ""),
+            ("", "gpt-s"),
+            ("<codex-worker-model>", "gpt-s"),
+        ):
+            values = self.resolve(
+                f'[models]\ncodex_worker = "{worker}"\ncodex_smart = "{smart}"\n'
+            )
+            model = worker if s.filled(worker) else smart
+            kept = (
+                "ORCH_CODEX_WORKER_MODEL"
+                if s.filled(worker)
+                else "ORCH_CODEX_SMART_MODEL"
+            )
+            self.assertEqual(values["ORCH_PROVIDERS"], "claude,codex")
+            self.assertEqual(
+                s.required_models(values),
+                ["ORCH_COORDINATOR_MODEL", "ORCH_ARCHITECT_MODEL", kept],
+            )
+            self.assertEqual(s.fill_models(values), [kept])
+            self.assertEqual(s.tier_model(values, "ORCH_CODEX_WORKER_MODEL"), model)
+            self.assertEqual(s.tier_model(values, "ORCH_CODEX_SMART_MODEL"), model)
+
+    def test_print_shows_the_set_codex_model_for_an_unset_tier(self):
+        for text, model in (
+            ('[models]\ncodex_smart = "only-smart"\n', "only-smart"),
+            (
+                '[models]\ncodex_worker = "only-worker"\ncodex_smart = ""\n',
+                "only-worker",
+            ),
+        ):
+            values = s.printed(self.resolve(text))
+            self.assertEqual(values["ORCH_CODEX_WORKER_MODEL"], model)
+            self.assertEqual(values["ORCH_CODEX_SMART_MODEL"], model)
+            self.assertEqual(
+                s.fill_models(self.resolve(text)),
+                [
+                    m
+                    for m in ("ORCH_CODEX_WORKER_MODEL", "ORCH_CODEX_SMART_MODEL")
+                    if m.endswith("WORKER_MODEL") == (model == "only-worker")
+                ],
+            )
+
+    def test_print_keeps_codex_and_pi_values_that_need_no_fallback(self):
+        for text in (
+            '[models]\ncodex_worker = "w"\ncodex_smart = "s"\n',
+            "",
+            '[models]\ncodex_worker = ""\ncodex_smart = ""\npi_smart = "lm/q"\n',
+        ):
+            values = self.resolve(text)
+            self.assertEqual(s.printed(values), values)
+
+    def test_both_codex_models_set_are_both_still_listed(self):
+        values = self.resolve('[models]\ncodex_worker = "w"\ncodex_smart = "s"\n')
+        self.assertEqual(
+            s.fill_models(values), ["ORCH_CODEX_WORKER_MODEL", "ORCH_CODEX_SMART_MODEL"]
+        )
+
+    def test_both_codex_tiers_empty_need_both_and_serve_none(self):
+        values = self.resolve('[models]\ncodex_worker = ""\n')
+        self.assertEqual(
+            s.fill_models(values), ["ORCH_CODEX_WORKER_MODEL", "ORCH_CODEX_SMART_MODEL"]
+        )
+        self.assertEqual(s.tier_model(values, "ORCH_CODEX_WORKER_MODEL"), "")
+        self.assertEqual(s.tier_model(values, "ORCH_CODEX_SMART_MODEL"), "")
+
+    def test_an_empty_pi_tier_is_not_served_by_the_other(self):
+        values = self.resolve('[models]\npi_smart = "lmstudio/q"\n')
+        self.assertEqual(s.tier_model(values, "ORCH_PI_WORKER_MODEL"), "")
+        self.assertEqual(s.tier_model(values, "ORCH_PI_SMART_MODEL"), "lmstudio/q")
+
     def test_every_provider_names_existing_model_settings(self):
         self.assertEqual(
             s.BY_KEY["providers.enabled"].choices, [p.name for p in s.PROVIDERS]
@@ -956,6 +1028,52 @@ class ProvidersTest(SettingsTest):
         for provider in s.PROVIDERS:
             for model in provider.models:
                 self.assertIn(model, s.BY_ENV)
+
+
+class ClaudeTiersTest(SettingsTest):
+    resolve = ProvidersTest.resolve
+
+    def test_the_default_allows_every_tier(self):
+        self.assertEqual(self.resolve()["ORCH_CLAUDE_TIERS"], "sonnet,opus,fable")
+        self.assertEqual(
+            s.BY_KEY["providers.claude"].default, ["sonnet", "opus", "fable"]
+        )
+
+    def test_a_list_resolves_in_tier_order_and_an_export_wins(self):
+        self.assertEqual(
+            self.resolve('[providers]\nclaude = ["opus", "sonnet"]\n')[
+                "ORCH_CLAUDE_TIERS"
+            ],
+            "sonnet,opus",
+        )
+        self.assertEqual(
+            self.resolve('[providers]\nclaude = ["opus"]\n', ORCH_CLAUDE_TIERS="fable")[
+                "ORCH_CLAUDE_TIERS"
+            ],
+            "fable",
+        )
+
+    def test_an_unknown_tier_is_an_error(self):
+        self.assertIn(
+            'providers.claude: unknown entry "haiku"; known: sonnet, opus, fable',
+            self.error('[providers]\nclaude = ["sonnet", "haiku"]\n'),
+        )
+        with self.assertRaisesRegex(
+            s.ConfigError,
+            r'providers.claude \(ORCH_CLAUDE_TIERS\): unknown entry "Opus"',
+        ):
+            self.resolve(ORCH_CLAUDE_TIERS="Opus")
+
+    def test_an_empty_list_is_an_error(self):
+        self.assertIn(
+            "providers.claude: must name at least one of sonnet, opus, fable",
+            self.error("[providers]\nclaude = []\n"),
+        )
+        with self.assertRaisesRegex(
+            s.ConfigError,
+            r"providers.claude \(ORCH_CLAUDE_TIERS\): must name at least one",
+        ):
+            self.resolve(ORCH_CLAUDE_TIERS="")
 
 
 class DriftTest(SettingsTest):
