@@ -193,6 +193,24 @@ dispatch() {
   grep -qF 'coordinator-fyi.log' "$ROOT/docs/architecture.md"
 }
 
+@test "an Opus author gets a fresh Opus reviewer and the Coordinator pins the Sonnet review" {
+  grep -qF 'An Opus author gets a fresh Opus pane' "$ROOT/skills/architect/SKILL.md"
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md skills/architect/references/dispatch.md; do
+    grep -qF 'a fresh Opus pane for an Opus author' "$ROOT/$file"
+  done
+  grep -qF 'a fresh Sonnet pane for a Haiku or Sonnet author' "$ROOT/skills/coordinate/SKILL.md"
+  grep -qF 'Haiku for mechanical, well-specified, low-risk work' "$ROOT/skills/coordinate/SKILL.md"
+  grep -qF 'Haiku: lookups, read-only checks' "$ROOT/skills/architect/SKILL.md"
+  grep -qF '(Opus for an Opus author)' "$ROOT/docs/settings.md"
+  grep -qF 'installer or watchers, or a HIGH finding' "$ROOT/docs/settings.md"
+  grep -qF 'installer or watchers, or a HIGH finding' "$ROOT/docs/architecture.md"
+  grep -qF 'left out when the brief needs an MCP tool' "$ROOT/skills/architect/references/dispatch.md"
+  run grep -c "per SKILL.md's provider rule" "$ROOT/skills/architect/references/dispatch.md"
+  [ "$output" = 0 ]
+  run grep -F 'tell that architect (no reply needed)' "$ROOT/skills/coordinate/SKILL.md"
+  [ "$status" -eq 1 ]
+}
+
 @test "worker briefs tell workers not to call the advisor tool" {
   for file in skills/architect/SKILL.md skills/architect/references/dispatch.md skills/architect/references/worker-recycle.md; do
     grep -qF 'advisor' "$ROOT/$file"
