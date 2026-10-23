@@ -29,10 +29,10 @@ web_url() {
     https://*) rest=${u#https://}; authority=${rest%%/*}; host=${authority##*@}; path=${rest#*/} ;;
     ssh://*) rest=${u#ssh://}; authority=${rest%%/*}; host=${authority##*@}; host=${host%%:*}; path=${rest#*/} ;;
     *://*) return 1 ;;
-    *@*:*)
-      # git's rule: a "/" before the first ":" makes it a local path
+    *:*)
+      # [user@]host:path. git's rule: a "/" before the first ":" makes it a local path
       [[ ${u%%:*} != */* ]] || return 1
-      host=${u#*@}; host=${host%%:*}; path=${u#*:} ;;
+      host=${u%%:*}; host=${host#*@}; path=${u#*:} ;;
     *) return 1 ;;
   esac
   host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
@@ -87,9 +87,9 @@ if [ -n "$dir" ] && git -C "$dir" --no-optional-locks rev-parse --is-inside-work
       repo_host=${repo_host%%:*}
       case $repo_host in
         *gitlab*) branch_url="$repo_url/-/tree/$(url_encode "$remote_branch")" ;;
-        dev.azure.com) branch_url="" ;;
         bitbucket.org) branch_url="$repo_url/src/$(url_encode "$remote_branch")" ;;
-        *) branch_url="$repo_url/tree/$(url_encode "$remote_branch")" ;;
+        *github*) branch_url="$repo_url/tree/$(url_encode "$remote_branch")" ;;
+        *) branch_url="" ;;
       esac
     fi
   else

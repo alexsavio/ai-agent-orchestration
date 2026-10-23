@@ -306,3 +306,30 @@ plain_remotes() {
   [[ "$output" == *"${OSC}https://dev.azure.com:443/org/proj/_git/repo${BEL}"* ]] || return 1
   [[ "$output" != *"/tree/"* ]] || return 1
 }
+
+@test "unknown hosts keep the repo link but get no branch link" {
+  make_repo "$REPO" main git@gitea.example.com:acme/proj.git
+  track "$REPO" origin main
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://gitea.example.com/acme/proj${BEL}proj"* ]] || return 1
+  [[ "$output" != *"/tree/"* && "$output" != *"/src/"* ]] || return 1
+}
+
+@test "GitHub Enterprise host (github in the name) uses /tree/" {
+  make_repo "$REPO" main git@github.corp.example:acme/proj.git
+  track "$REPO" origin main
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://github.corp.example/acme/proj/tree/main${BEL}"* ]] || return 1
+}
+
+@test "scp-style remote without user@ is linked" {
+  make_repo "$REPO" main github.com:acme/proj.git
+  track "$REPO" origin main
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://github.com/acme/proj${BEL}proj"* ]] || return 1
+  [[ "$output" == *"${OSC}https://github.com/acme/proj/tree/main${BEL}"* ]] || return 1
+}
+
+@test "scp-style forms without user@ that are local paths or have no dotted host stay plain" {
+  plain_remotes ./a:b a/b:c c:foo
+}
