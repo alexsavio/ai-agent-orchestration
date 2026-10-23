@@ -120,6 +120,32 @@ EOF
   [ "$(config_get ORCH_PROVIDERS)" = claude,codex ]
 }
 
+@test "an exported empty providers.enabled does not hide the list in the file" {
+  fresh_install
+  config_set ORCH_PROVIDERS claude,codex
+  export ORCH_PROVIDERS=
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude,codex ]
+}
+
+@test "an exported empty pi model does not hide the pi model in the file" {
+  fresh_install
+  config_set ORCH_PI_SMART_MODEL lm/pi-file
+  export ORCH_PI_SMART_MODEL=
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude,pi ]
+}
+
+@test "a pi model that is only exported does not add pi to the file" {
+  fresh_install
+  export ORCH_PI_WORKER_MODEL=lm/pi-env
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude ]
+}
+
 @test "a run without a terminal leaves providers.enabled empty" {
   fresh_install
   install_ok

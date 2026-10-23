@@ -134,6 +134,7 @@ dispatch() {
   grep -qF 'for a Fable author, a fresh Fable pane' "$ROOT/skills/architect/SKILL.md"
   grep -qF 'a Fable author has none: a fresh Fable pane' "$ROOT/skills/coordinate/SKILL.md"
   grep -qF 'for a Fable author, a fresh Fable pane' "$ROOT/docs/settings.md"
+  grep -qF 'a Fable author has none: a fresh Fable pane' "$ROOT/skills/architect/references/dispatch.md"
 }
 
 @test "the skill holds no org, model, login or personal path literals" {
