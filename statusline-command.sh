@@ -77,9 +77,11 @@ if [ -n "$dir" ] && git -C "$dir" --no-optional-locks rev-parse --is-inside-work
   remote_url=$(git -C "$dir" --no-optional-locks remote get-url "$remote" 2>/dev/null)
   if [ -n "$remote_url" ] && repo_url=$(web_url "$remote_url"); then
     if [ -n "$remote_branch" ]; then
-      case $repo_url in
-        https://*gitlab*/*) branch_url="$repo_url/-/tree/$(url_encode "$remote_branch")" ;;
-        https://bitbucket.org/*) branch_url="$repo_url/src/$(url_encode "$remote_branch")" ;;
+      repo_host=${repo_url#https://}
+      repo_host=${repo_host%%/*}
+      case $repo_host in
+        *gitlab*) branch_url="$repo_url/-/tree/$(url_encode "$remote_branch")" ;;
+        bitbucket.org) branch_url="$repo_url/src/$(url_encode "$remote_branch")" ;;
         *) branch_url="$repo_url/tree/$(url_encode "$remote_branch")" ;;
       esac
     fi

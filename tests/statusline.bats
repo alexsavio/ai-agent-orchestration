@@ -77,6 +77,13 @@ setup() {
   [[ "$output" == *"${OSC}https://gitlab.example.com/acme/sub/proj/-/tree/main${BEL}"* ]] || return 1
 }
 
+@test "gitlab in the owner or repo name of a github remote still uses /tree/" {
+  make_repo "$REPO" main git@github.com:gitlab-org/gitlab-foss.git
+  track "$REPO" origin main
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://github.com/gitlab-org/gitlab-foss/tree/main${BEL}"* ]] || return 1
+}
+
 @test "bitbucket uses /src/" {
   make_repo "$REPO" main git@bitbucket.org:acme/proj.git
   track "$REPO" origin main
