@@ -439,6 +439,11 @@ def departure(url, login):
     return "cleared"
 
 
+def last_known_conflict(entry):
+    conflict = entry.get("conflict")
+    return conflict if conflict is not None else entry.get("last_conflict")
+
+
 def changes(before, after, login=None):
     lines = []
     still_open = {}
@@ -449,7 +454,6 @@ def changes(before, after, login=None):
             kind = blocker(now) or "ready"
             lines.append(f"new: {url} — {now['title']} by {now['author']} ({kind})")
             continue
-        # conflict: True, False, or None while GitHub recomputes mergeability.
         parts = []
         if was["draft"] and not now["draft"]:
             parts.append("now ready for review")
@@ -466,16 +470,37 @@ def changes(before, after, login=None):
                 "EXPECTED": "CI running",
             }.get(now["ci"] or "", f"CI {now['ci'] or 'cleared'}")
             parts.append(label)
-        if was["conflict"] is not True and now["conflict"] is True:
+        was_conflict = last_known_conflict(was)
+        ready_now = not now["draft"] and now["ci"] in (None, "SUCCESS")
+        readiness_changed = (
+            was["draft"]
+            or was_conflict is not False
+            or was["ci"] not in (None, "SUCCESS")
+            or (was.get("sha") != now.get("sha"))
+        )
+        deferred_ready = False
+        if now["conflict"] is None:
+            kept = dict(now)
+            if was_conflict is not None:
+                kept["last_conflict"] = was_conflict
+            if ready_now and (was.get("pending_ready") or readiness_changed):
+                kept["pending_ready"] = True
+            after[url] = kept
+        elif was.get("pending_ready") and ready_now and now["conflict"] is False:
+            deferred_ready = True
+            parts.append("now ready for review")
+        elif was_conflict is not True and now["conflict"] is True:
             parts.append("now conflicts")
-        elif was["conflict"] is True and now["conflict"] is False:
+        elif was_conflict is True and now["conflict"] is False:
             parts.append("conflicts cleared")
-        elif was["conflict"] is None and now["conflict"] is False:
+        elif (
+            was["conflict"] is None
+            and was_conflict is None
+            and now["conflict"] is False
+        ):
             parts.append("merge state known")
-        elif was["conflict"] is not None and now["conflict"] is None:
-            parts.append("merge state unknown")
         if parts:
-            became_ready = (
+            became_ready = deferred_ready or (
                 not now["draft"]
                 and now["conflict"] is False
                 and now["ci"] in (None, "SUCCESS")
