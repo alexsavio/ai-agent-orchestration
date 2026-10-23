@@ -138,16 +138,17 @@ templates, are registered as active jobs (see the top-level README, install step
 
 The feed is mode 0600 and append-only; each batch is one `O_APPEND` write of whole lines, `<local ISO time> <mode>: <text> (<reason>)`. At 1 MiB it rotates to `coordinator-feed.log.1`, replacing the previous backup, so the feed takes at most 2 MiB. A single batch over 1 MiB keeps its newest lines that fit, after `watchers: <n> feed lines over the size cap dropped (digest)`.
 
-**The feed holds action lines only.** A line that needs nothing from its reader never reaches a chat: `notify-inbox.py` writes it, in the same line format, to `prod-context/coordinator-fyi.log` (mode 0600, same 1 MiB rotation to `.1`) and sends it no native message. Nobody monitors the fyi file; a session reads it on demand. `feed-fyi.regex` lists the fyi lines (Python regular expressions, matched like `feed-actions.regex`); every other line is an action line, so a new kind defaults to the feed. The fyi file is written first, under the feed lock, and the pending batch records that (`fyi`), so a restart does not write it twice. A `(clear)` still cancels a queued WAITING escalation, whichever file it lands in.
+**The feed holds action lines only.** A line that needs nothing from its reader never reaches a chat: `notify-inbox.py` writes it, in the same line format, to `prod-context/coordinator-fyi.log` (mode 0600, same 1 MiB rotation to `.1`) and sends it no native message. Nobody monitors the fyi file; a session reads it on demand. `feed-fyi.regex` lists the fyi lines (Python regular expressions, matched like `feed-actions.regex`); every other line is an action line, so a new kind defaults to the feed. The fyi file is written first, under the feed lock, and the pending batch records that (`fyi`) after the write. The fyi write is at least once: a crash between the write and that record repeats the fyi lines after a restart, and a write cut short can leave one broken fyi line. The feed keeps its exact-once place record. A `(clear)` still cancels a queued WAITING escalation, whichever file it lands in.
 
 | Line | Where | Why |
 |---|---|---|
 | `context: RECYCLE`, `RECYCLE-WORKER`, `workers: WORKER IDLE`, `WORKER` blocked/error/dead, `pulls: RED/CHANGES/THREADS/APPROVED*/COPILOT/MERGED`, `host: HOST … (danger)`, `HOG`/`GITBIG`/`GITLONG` start, `todo: TODO <n> new`, `TODO READFAIL`, `TODO IGNORED`, `answers:`, `STATE RESET`, `HEARTBEAT STALE`, `unparsed` | feed (+ native as before) | The reader must do something new. |
-| `workers: WORKER WAITING … ESCALATE` start | feed + native to the Coordinator | The worker waited through the architect alert and its repeat (1 hour); the Coordinator must look. |
+| `workers: WORKER WAITING … ESCALATE` start | feed + native to the Coordinator | The worker waited for the alert and its repeat (both now fyi); the Coordinator looks. |
 | `workers: WORKER WAITING` start and `REPEAT` | fyi | A worker waiting on a review is normal; the state is known. |
 | `balance: BALANCE READFAIL …` start and clear | fyi | Flaps with the sampler; the sustained form is `balance read failed <n> times`, which stays in the feed. |
 | `<mode> read failed …`, `READFAIL` of other modes, and their clears | feed | A read failure that lasted; the clear tells the reader to stop worrying. |
-| `audit: AUDIT BASELINE`, `NOREVIEWER`, `RED`, `THREADS`, `COPILOT`, `CONFLICT`, `CHANGES`, `APPROVED*`, `LEGACY`, `TRUNCATED`, `NOCHECKS` | fyi | Repeats of PR states that `pulls:` already reports to the owner; no reader acts on the audit copy. |
+| `audit: RED`, `THREADS`, `COPILOT`, `CHANGES`, `APPROVED*` | fyi | `pulls:` reports the same five kinds to the owner (same author and repos); the audit copy repeats it. |
+| `audit: AUDIT BASELINE`, `CONFLICT`, `NOREVIEWER`, `LEGACY`, `TRUNCATED`, `NOCHECKS` | feed | `pulls:` does not report these; the Coordinator acts on them. |
 | `audit: BLOCKED`, `STALESLOT`, `SLOTDIR`, `PACKS`, `WORKTREES`, `READFAIL` | feed | Machine or worker health. |
 | `watchers: Watcher digest` | fyi | A summary of lines that were already folded. |
 | every other `(clear)` | fyi | The condition ended; nobody waits on it. |
@@ -314,9 +315,9 @@ recovery, clear recovered warnings, and restore unreadable agents or producers.
 The audit reports workspace-level blocked lines.
 
 Owner-tagged workers emit `WORKER WAITING` after 600 seconds done or idle. The
-owning architect receives one native alert, then one repeat 1800 seconds after
-that alert; another 1800 seconds after the repeat escalates once to the
-Coordinator. Repeat/escalation gaps are at least 60 seconds. Architect/coordinator
+line goes to the fyi file (no native message); a repeat follows 1800 seconds
+after it, also fyi; another 1800 seconds after the repeat escalates once to the
+Coordinator, natively and in the feed. Repeat/escalation gaps are at least 60 seconds. Architect/coordinator
 role tags and `Architect::` names or titles are excluded. State and policy keys
 use the session ID, falling back to the pane ID when no session is available
 (`workers:waiting:<identity>:<stage>`). Working, closing, a sequence change, or a

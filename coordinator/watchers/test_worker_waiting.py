@@ -108,7 +108,7 @@ class WaitingTests(IsolatedTestCase):
                 )
                 self.assertEqual(
                     [path for path, _ in messages],
-                    [str(args.binding if now == 4201 else owner)],
+                    [str(args.binding)] if now == 4201 else [],
                 )
 
     def test_known_working_status_resets_during_ownership_outage(self):
@@ -156,7 +156,7 @@ class WaitingTests(IsolatedTestCase):
                     messages = inbox.native_messages(
                         args, ["time " + lines[0]], False, inbox.action_patterns()
                     )
-                    self.assertEqual([path for path, _ in messages], [str(owner)])
+                    self.assertEqual(messages, [])
 
     def test_readable_owner_change_clears_during_status_or_session_gap(self):
         for gap in ("status", "session"):
@@ -490,25 +490,7 @@ class WaitingTests(IsolatedTestCase):
             self.assertIn("ESCALATE", self.scan(193)[0])
             self.assertEqual(self.scan(99999), [])
 
-    def test_missing_owner_binding_still_queues_native_waiting_message(self):
-        line = self.start()
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            args = argparse.Namespace(
-                bindings_dir=base, binding=base / "coordinator.json"
-            )
-            messages = inbox.native_messages(
-                args,
-                ["time workers: " + line + " (start)"],
-                False,
-                inbox.action_patterns(),
-            )
-            self.assertEqual(
-                [path for path, _ in messages], [str(base / "architect-architect.json")]
-            )
-            self.assertIn(alert_policy.WORKER_WAIT_NOTE, messages[0][1])
-
-    def test_native_owner_route_and_coordinator_only_for_escalation(self):
+    def test_only_escalation_goes_native(self):
         line = self.start()
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -522,7 +504,7 @@ class WaitingTests(IsolatedTestCase):
                 messages = inbox.native_messages(
                     args, stamped, True, inbox.action_patterns()
                 )
-                self.assertEqual([path for path, _ in messages], [str(owner)])
+                self.assertEqual(messages, [])
             stamped = ["time workers: " + self.scan(4201)[0] + " (start)"]
             messages = inbox.native_messages(
                 args, stamped, False, inbox.action_patterns()

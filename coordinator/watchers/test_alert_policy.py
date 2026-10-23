@@ -3127,7 +3127,7 @@ class DeliveryTest(IsolatedTestCase):
         )
 
 
-class QuietFeedTest(unittest.TestCase):
+class QuietFeedTest(IsolatedTestCase):
     """The feed and native delivery carry action lines; the rest goes to coordinator-fyi.log."""
 
     def setUp(self):
@@ -3218,19 +3218,30 @@ class QuietFeedTest(unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_fyi(line)
 
-    def test_audit_noreviewer_is_fyi(self):
-        self.assert_fyi("audit: NOREVIEWER o/r#7 Fix (start)")
-
-    def test_audit_baseline_is_fyi(self):
-        self.assert_fyi(
-            "audit: AUDIT BASELINE github [3 active lines; see audit.json before.sources] (start)"
-        )
+    def test_the_audit_kinds_that_pulls_does_not_report_stay_action(self):
+        for line in (
+            "audit: AUDIT BASELINE github [3 active lines; see audit.json before.sources] (start)",
+            "audit: NOREVIEWER o/r#7 Fix (start)",
+            "audit: CONFLICT o/r#7 Fix (start)",
+            "audit: LEGACY o/r#7 Fix [2 lines: a, b] (start)",
+            "audit: TRUNCATED more than 100 checks (start)",
+            "audit: NOCHECKS o/r#7 Fix (start)",
+        ):
+            with self.subTest(line=line):
+                self.assert_action(line, native=False)
 
     def test_audit_red_is_fyi(self):
         self.assert_fyi("audit: RED o/r#7 Fix [ci] (start)")
 
     def test_the_other_audit_pr_kinds_are_fyi(self):
-        for kind in ("THREADS", "COPILOT", "CONFLICT", "CHANGES", "APPROVED"):
+        for kind in (
+            "THREADS",
+            "COPILOT",
+            "CHANGES",
+            "APPROVED",
+            "APPROVED-OLDHEAD",
+            "APPROVED-STACKED",
+        ):
             with self.subTest(kind=kind):
                 self.assert_fyi(f"audit: {kind} o/r#7 Fix (start)")
 
@@ -3295,6 +3306,31 @@ class QuietFeedTest(unittest.TestCase):
         cursor = {inbox.PENDING_KEY: dict(lines=[line], fed=False, fyi=True)}
         inbox.finish(args, cursor, 1000, inbox.action_patterns())
         self.assertFalse((self.base / "coordinator-fyi.log").exists())
+
+    def test_a_batch_over_the_size_cap_counts_only_its_feed_lines(self):
+        actions = [
+            f"context: RECYCLE-WORKER w1:p1 owner=wA job{n:02} 310k (start)"
+            for n in range(30)
+        ]
+        lines = [
+            line
+            for n, a in enumerate(actions)
+            for line in (a, f"pulls: RED o/r#{n} Fix (clear)")
+        ]
+        with patch.object(inbox, "FEED_BYTES", 2000):
+            feed, fyi, sent = self.route(*lines)
+        self.assertEqual(len(fyi), 30)
+        self.assertTrue(
+            feed[0].endswith("feed lines over the size cap dropped (digest)")
+        )
+        kept = feed[1:]
+        self.assertEqual(kept, actions[-len(kept) :])
+        dropped = 30 - len(kept)
+        self.assertEqual(feed[0].split(" ")[1], str(dropped))
+        self.assertTrue(0 < len(kept) < 30)
+        text = "\n".join(text for _, text in sent)
+        for n in range(30):
+            self.assertEqual(text.count(f"job{n:02} "), 1, n)
 
     def test_recovery_of_an_old_pending_batch_matches_only_its_feed_lines(self):
         args = argparse.Namespace(

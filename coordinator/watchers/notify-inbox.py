@@ -223,17 +223,15 @@ def native_messages(args, stamped, fallback, patterns):
     by_owner = {}
     for line in stamped:
         body = line.split(" ", 1)[1].replace(alert_policy.WORKER_WAIT_NOTE, "")
-        waiting = WAIT_OWNER.match(body)
-        if waiting and (body.endswith(" ESCALATE (start)") or line.endswith("(clear)")):
-            continue
-        owner = OWNER.match(body) or waiting
+        if WAIT_OWNER.match(body):
+            continue  # WAITING start and REPEAT are fyi; ESCALATE goes to the Coordinator below
+        owner = OWNER.match(body)
         if (
             owner
             and not line.endswith("(clear)")
             and args.bindings_dir
             and (
-                waiting
-                or " RECYCLE-WORKER " in line
+                " RECYCLE-WORKER " in line
                 or " WORKER IDLE " in line
                 or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()
             )
