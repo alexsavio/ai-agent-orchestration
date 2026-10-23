@@ -89,19 +89,19 @@ teardown() {
   : >"$ORCH_CONFIG"
   run "$ROOT/orch-settings"
   [ "$status" -eq 0 ]
-  has_line 'ORCH_CLAUDE_TIERS=sonnet,opus,fable'
-  printf '[providers]\nclaude = ["opus", "sonnet"]\n' >"$ORCH_CONFIG"
+  has_line 'ORCH_CLAUDE_TIERS=haiku,sonnet,opus,fable'
+  printf '[providers]\nclaude = ["opus", "haiku", "sonnet"]\n' >"$ORCH_CONFIG"
   run "$ROOT/orch-settings"
   [ "$status" -eq 0 ]
-  has_line 'ORCH_CLAUDE_TIERS=sonnet,opus'
-  printf '[providers]\nclaude = ["haiku"]\n' >"$ORCH_CONFIG"
+  has_line 'ORCH_CLAUDE_TIERS=haiku,sonnet,opus'
+  printf '[providers]\nclaude = ["mini"]\n' >"$ORCH_CONFIG"
   run "$ROOT/orch-settings"
   [ "$status" -eq 2 ]
-  [[ "$output" == *'ERROR: '*'providers.claude: unknown entry "haiku"; known: sonnet, opus, fable'* ]]
+  [[ "$output" == *'ERROR: '*'providers.claude: unknown entry "mini"; known: haiku, sonnet, opus, fable'* ]]
   printf '[providers]\nclaude = []\n' >"$ORCH_CONFIG"
   run "$ROOT/orch-settings"
   [ "$status" -eq 2 ]
-  [[ "$output" == *'providers.claude: must name at least one of sonnet, opus, fable'* ]]
+  [[ "$output" == *'providers.claude: must name at least one of haiku, sonnet, opus, fable'* ]]
 }
 
 @test "orch-settings defaults architect Remote Control on and accepts it off" {

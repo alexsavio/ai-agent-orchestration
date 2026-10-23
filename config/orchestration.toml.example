@@ -41,8 +41,8 @@ kill_grace = 10
 [providers]
 # Worker families this machine uses (claude, codex, pi); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi when a pi model is set. A family left out is never started or asked for, and its model settings may stay empty
 enabled = []
-# Claude worker tiers the architects may pick (sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings
-claude = ["sonnet", "opus", "fable"]
+# Claude worker tiers the architects may pick (haiku, sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings
+claude = ["haiku", "sonnet", "opus", "fable"]
 
 [models]
 # Model of the Coordinator

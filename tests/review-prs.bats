@@ -168,6 +168,16 @@ dispatch() {
   done
 }
 
+@test "the architect and Coordinator route to the lightest tier and review on a fresh Sonnet pane" {
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md; do
+    grep -qF 'lightest allowed tier' "$ROOT/$file"
+    grep -qF 'Haiku' "$ROOT/$file"
+  done
+  grep -qF 'on Sonnet when the author was Haiku or Sonnet' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'or when the Sonnet review finds a HIGH' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'claude-haiku-5-5' "$ROOT/skills/architect/SKILL.md"
+}
+
 @test "the skill holds no org, model, login or personal path literals" {
   run grep -rniE 'combinaut|sparkle|gpt-[0-9]|sleistner|/Users/|/private/tmp|31691' "$ROOT/$SKILL_DIR"
   [ "$status" -eq 1 ]

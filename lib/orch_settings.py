@@ -77,7 +77,7 @@ PROVIDERS = [
     Provider("pi", ["ORCH_PI_WORKER_MODEL", "ORCH_PI_SMART_MODEL"], "none"),
 ]
 REQUIRED_PROVIDERS = ["claude"]
-CLAUDE_TIERS = ["sonnet", "opus", "fable"]
+CLAUDE_TIERS = ["haiku", "sonnet", "opus", "fable"]
 
 DEFAULT_PATH = [
     "~/.local/bin",
@@ -199,7 +199,7 @@ SETTINGS = [
         "ORCH_CLAUDE_TIERS",
         "list",
         list(CLAUDE_TIERS),
-        "Claude worker tiers the architects may pick (sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings",
+        "Claude worker tiers the architects may pick (haiku, sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings",
         sep=",",
         choices=CLAUDE_TIERS,
         nonempty=True,
