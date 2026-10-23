@@ -1,3 +1,4 @@
+import argparse
 import importlib.util
 import io
 import json
@@ -1354,6 +1355,12 @@ class DeliveryTest(IsolatedTestCase):
     def feed_lines(self):
         return [line.split(" ", 1)[1] for line in self.feed.read_text().splitlines()]
 
+    def fyi_lines(self):
+        fyi = self.base / inbox.FYI_NAME
+        if not fyi.exists():
+            return []
+        return [line.split(" ", 1)[1] for line in fyi.read_text().splitlines()]
+
     def monitor(self, now):
         self.beat.touch()
         os.utime(self.beat, (now, now))
@@ -1958,9 +1965,9 @@ class DeliveryTest(IsolatedTestCase):
         self.assertTrue(
             any(
                 feed.startswith("context: RECYCLE-WORKER ") and feed.endswith("(clear)")
-                for feed in self.feed_lines()
+                for feed in self.fyi_lines()
             ),
-            self.feed_lines(),
+            self.fyi_lines(),
         )
 
     def test_only_a_worker_recycle_names_an_owner_in_a_context_line(self):
@@ -2450,7 +2457,7 @@ class DeliveryTest(IsolatedTestCase):
         ):
             warnings.simplefilter("ignore", ResourceWarning)
             inbox.main()
-        self.assertEqual(self.feed_lines(), ["audit: RED o/r#1 Fix [ci] (start)"])
+        self.assertEqual(self.fyi_lines(), ["audit: RED o/r#1 Fix [ci] (start)"])
 
     def test_a_fresh_cursor_seeds_audit_from_its_snapshot_and_skips_its_history(self):
         old = json.dumps(
@@ -2491,7 +2498,7 @@ class DeliveryTest(IsolatedTestCase):
         ):
             warnings.simplefilter("ignore", ResourceWarning)
             inbox.main()
-        self.assertEqual(self.feed_lines(), ["audit: RED o/r#1 Fix [ci] (start)"])
+        self.assertEqual(self.fyi_lines(), ["audit: RED o/r#1 Fix [ci] (start)"])
 
     def test_a_fresh_cursor_does_not_replay_resolved_history(self):
         self.host_cycle(swap=16079.0)
@@ -2762,10 +2769,10 @@ class DeliveryTest(IsolatedTestCase):
         self.deliver(now, modes=("host", "pulls"))
         self.assertEqual(
             self.feed_lines(),
-            [
-                "pulls: RED o/r#7 owner=wA Fix [ci] (start)",
-                "pulls: APPROVED o/r#7 owner=wA Fix (clear)",
-            ],
+            ["pulls: RED o/r#7 owner=wA Fix [ci] (start)"],
+        )
+        self.assertEqual(
+            self.fyi_lines(), ["pulls: APPROVED o/r#7 owner=wA Fix (clear)"]
         )
         self.assertEqual(
             json.loads((self.base / "deliver.cursor").read_text())["pulls"]["seq"], 299
@@ -3118,6 +3125,191 @@ class DeliveryTest(IsolatedTestCase):
             [json.loads(row)["type"] for row in received[0].splitlines()],
             ["auth", "user"],
         )
+
+
+class QuietFeedTest(unittest.TestCase):
+    """The feed and native delivery carry action lines; the rest goes to coordinator-fyi.log."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="coord-quiet-")
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+
+    def route(self, *lines, monitor=False):
+        """Delivers one batch; returns (feed lines, fyi lines, native messages as (binding file, text))."""
+        args = argparse.Namespace(
+            bindings_dir=self.base,
+            binding=self.base / "coordinator.json",
+            cursor=self.base / "cursor",
+            feed=self.base / "coordinator-feed.log",
+        )
+        sent = []
+        for name in ("coordinator-feed.log", "coordinator-fyi.log"):
+            (self.base / name).unlink(missing_ok=True)
+        with patch.object(
+            inbox,
+            "send_line",
+            side_effect=lambda path, text: sent.append((Path(path).name, text)) or True,
+        ):
+            inbox.deliver(args, {}, list(lines), 1000, inbox.action_patterns())
+
+        def read(name):
+            path = self.base / name
+            if not path.exists():
+                return []
+            return [line.split(" ", 1)[1] for line in path.read_text().splitlines()]
+
+        return read("coordinator-feed.log"), read("coordinator-fyi.log"), sent
+
+    def assert_fyi(self, line):
+        feed, fyi, sent = self.route(line)
+        self.assertEqual((feed, fyi, sent), ([], [line], []))
+
+    def assert_action(self, line, native=True):
+        feed, fyi, sent = self.route(line)
+        self.assertEqual((feed, fyi), ([line], []))
+        if native:
+            self.assertTrue(sent, "no native message")
+
+    WAIT = "workers: WORKER WAITING job pane=w1:p1 owner=wA 41m session=s1{} (may be waiting on its own job) ({})"
+
+    def test_waiting_start_is_fyi(self):
+        self.assert_fyi(self.WAIT.format("", "start"))
+
+    def test_waiting_repeat_is_fyi(self):
+        self.assert_fyi(self.WAIT.format(" REPEAT", "start"))
+
+    def test_waiting_escalate_stays_action(self):
+        line = self.WAIT.format(" ESCALATE", "start")
+        feed, fyi, sent = self.route(line)
+        self.assertEqual((feed, fyi), ([line], []))
+        self.assertEqual([name for name, _ in sent], ["coordinator.json"])
+
+    def test_waiting_clear_is_fyi(self):
+        self.assert_fyi(self.WAIT.format(" cleared", "clear"))
+
+    def test_balance_readfail_start_is_fyi(self):
+        self.assert_fyi("balance: BALANCE READFAIL processes (start)")
+
+    def test_balance_readfail_clear_is_fyi(self):
+        self.assert_fyi("balance: BALANCE READFAIL processes (clear)")
+
+    def test_a_sustained_read_failure_stays_action_and_so_does_its_clear(self):
+        for line in (
+            "balance: balance read failed 3 times (TimeoutError) (start)",
+            "balance: balance read failed 3 times (TimeoutError) (clear)",
+            "hog: hog read failed 3 times (TimeoutExpired) (clear)",
+            "host: HOST READFAIL swap (clear)",
+            "todo: TODO READFAIL /x/architect-a.md (clear)",
+        ):
+            with self.subTest(line=line):
+                self.assert_action(line, native=False)
+
+    def test_recycle_clear_is_fyi(self):
+        self.assert_fyi("context: RECYCLE w1:p1 architect-a 302k (clear)")
+
+    def test_pulls_and_worker_clears_are_fyi(self):
+        for line in (
+            "pulls: RED o/r#7 owner=wA Fix (clear)",
+            "pulls: MERGED o/r#7 owner=wA Fix (clear)",
+            "workers: WORKER w1:p1 blocked (clear)",
+            "hog: HOG 1/x 6.0GB (clear)",
+        ):
+            with self.subTest(line=line):
+                self.assert_fyi(line)
+
+    def test_audit_noreviewer_is_fyi(self):
+        self.assert_fyi("audit: NOREVIEWER o/r#7 Fix (start)")
+
+    def test_audit_baseline_is_fyi(self):
+        self.assert_fyi(
+            "audit: AUDIT BASELINE github [3 active lines; see audit.json before.sources] (start)"
+        )
+
+    def test_audit_red_is_fyi(self):
+        self.assert_fyi("audit: RED o/r#7 Fix [ci] (start)")
+
+    def test_the_other_audit_pr_kinds_are_fyi(self):
+        for kind in ("THREADS", "COPILOT", "CONFLICT", "CHANGES", "APPROVED"):
+            with self.subTest(kind=kind):
+                self.assert_fyi(f"audit: {kind} o/r#7 Fix (start)")
+
+    def test_the_audit_machine_kinds_stay_action(self):
+        for line in (
+            "audit: BLOCKED worker w1:p1 (start)",
+            "audit: STALESLOT slot:x (start)",
+            "audit: READFAIL github: boom (start)",
+        ):
+            with self.subTest(line=line):
+                self.assert_action(line, native=False)
+
+    def test_the_watcher_digest_is_fyi(self):
+        self.assert_fyi(
+            "watchers: Watcher digest, 1 folded: WORKER w1:p1 closed (digest)"
+        )
+
+    def test_the_action_kinds_reach_the_feed_and_native_delivery(self):
+        for line in (
+            "context: RECYCLE-WORKER w1:p1 owner=wA job 310k (start)",
+            "workers: WORKER IDLE w1:p1 owner=wA 5m (start)",
+        ):
+            with self.subTest(line=line):
+                feed, fyi, sent = self.route(line)
+                self.assertEqual((feed, fyi), ([line], []))
+                self.assertEqual([name for name, _ in sent], ["architect-wA.json"])
+        for line in (
+            "context: RECYCLE w1:p1 architect-a 302k (start)",
+            "pulls: RED o/r#7 Fix (start)",
+            "pulls: MERGED o/r#7 Fix (start)",
+            "todo: TODO 1 new: architect-a.md: do it (start)",
+            "host: HOST FILES 160000 (danger)",
+        ):
+            with self.subTest(line=line):
+                self.assert_action(line)
+        # A hog start stays in the feed as today; no native copy and no Monitor line (not in feed-actions.regex).
+        self.assert_action("hog: HOG 1/x 6.0GB (start)", native=False)
+
+    def test_a_mixed_batch_splits_and_keeps_the_order(self):
+        recycle = "context: RECYCLE w1:p1 architect-a 302k (start)"
+        clear = "pulls: RED o/r#7 Fix (clear)"
+        todo = "todo: TODO 1 new: architect-a.md: do it (start)"
+        wait = self.WAIT.format("", "start")
+        feed, fyi, _ = self.route(recycle, clear, wait, todo)
+        self.assertEqual((feed, fyi), ([recycle, todo], [clear, wait]))
+        self.assertEqual(
+            stat.S_IMODE((self.base / "coordinator-fyi.log").stat().st_mode), 0o600
+        )
+
+    def test_a_batch_that_is_all_fyi_leaves_the_feed_untouched(self):
+        self.route("pulls: RED o/r#7 Fix (clear)")
+        self.assertFalse((self.base / "coordinator-feed.log").exists())
+
+    def test_a_restart_after_the_fyi_write_does_not_repeat_it(self):
+        args = argparse.Namespace(
+            bindings_dir=self.base,
+            binding=self.base / "coordinator.json",
+            cursor=self.base / "cursor",
+            feed=self.base / "coordinator-feed.log",
+        )
+        line = "2026-10-23T10:00:00+0200 pulls: RED o/r#7 Fix (clear)"
+        cursor = {inbox.PENDING_KEY: dict(lines=[line], fed=False, fyi=True)}
+        inbox.finish(args, cursor, 1000, inbox.action_patterns())
+        self.assertFalse((self.base / "coordinator-fyi.log").exists())
+
+    def test_recovery_of_an_old_pending_batch_matches_only_its_feed_lines(self):
+        args = argparse.Namespace(
+            bindings_dir=self.base,
+            binding=self.base / "coordinator.json",
+            cursor=self.base / "cursor",
+            feed=self.base / "coordinator-feed.log",
+        )
+        action = "2026-10-23T10:00:00+0200 todo: TODO 1 new: a.md: do it (start)"
+        clear = "2026-10-23T10:00:01+0200 pulls: RED o/r#7 Fix (clear)"
+        args.feed.write_bytes((action + "\n").encode())
+        cursor = {inbox.PENDING_KEY: dict(lines=[action, clear], fed=False)}
+        with patch.object(inbox, "send_line", return_value=True):
+            inbox.recover(args, cursor, 1000, inbox.action_patterns())
+        self.assertEqual(args.feed.read_text(), action + "\n")
 
 
 if __name__ == "__main__":

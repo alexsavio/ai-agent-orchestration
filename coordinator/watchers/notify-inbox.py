@@ -22,6 +22,7 @@ import watchers as w
 from feed_actions import (
     ACTIONS_PATH,  # noqa: F401  (read as inbox.ACTIONS_PATH by the tests)
     action_patterns,
+    fyi_patterns,
     is_action,
     native,
 )
@@ -43,6 +44,8 @@ OUTBOX_RETRY_SECONDS = 60
 OUTBOX_KEEP_SECONDS = 3600
 MONITOR_ACK_SECONDS = 20
 FEED_NAME = "coordinator-feed.log"
+FYI_NAME = "coordinator-fyi.log"
+FYI = fyi_patterns()
 FEED_BYTES = 1024 * 1024
 WAIT_OWNER = re.compile(
     r"^workers: WORKER WAITING .+ pane=\S+ owner=([A-Za-z0-9_-]+) \d+m session=\S+"
@@ -130,6 +133,11 @@ def feed_data(lines):
             + data
         )
     return data
+
+
+def feed_lines(lines):
+    """The action lines of a batch; the others go to the fyi file."""
+    return [line for line in lines if not is_action(line, FYI)]
 
 
 def place_batch(path, data):
@@ -384,10 +392,23 @@ def finish(args, cursor, now, patterns):
     record decides the Coordinator copy: none when the Monitor will read it (kept waiting until the Monitor has read it),
     native otherwise. Its native messages then go to the outbox, all committed with the cursor."""
     pending = cursor[PENDING_KEY]
-    data = feed_data(pending["lines"])
+    lines = pending["lines"]
+    in_feed_index = [i for i, line in enumerate(lines) if not is_action(line, FYI)]
+    data = feed_data([lines[i] for i in in_feed_index])
     if not pending["fed"]:
         with locked(args.feed):
-            if "inode" not in pending or not batch_written(
+            fyi = [line for line in lines if is_action(line, FYI)]
+            if fyi and not pending.get("fyi"):
+                fyi_path = args.feed.with_name(FYI_NAME)
+                fyi_data = feed_data(fyi)
+                place_batch(fyi_path, fyi_data)
+                write_batch(fyi_path, fyi_data)
+                pending["fyi"] = True
+                commit(args, cursor)
+            if not in_feed_index:
+                pending.update(fed=True, coordinator="none")
+                commit(args, cursor)
+            elif "inode" not in pending or not batch_written(
                 args.feed, pending["inode"], pending["offset"], data
             ):
                 if "inode" in pending and partial_batch(
@@ -405,25 +426,30 @@ def finish(args, cursor, now, patterns):
                     pending["inode"], pending["offset"] = place_batch(args.feed, data)
                     commit(args, cursor)
                     write_batch(args.feed, data)
-            record = read_record(args.feed.with_name(MONITOR_NAME), time.time())
-            pending.update(
-                fed=True,
-                coordinator="watch"
-                if will_read(record, pending["inode"], pending["offset"])
-                else "native",
-            )
-            commit(args, cursor)
+            if in_feed_index:
+                record = read_record(args.feed.with_name(MONITOR_NAME), time.time())
+                pending.update(
+                    fed=True,
+                    coordinator="watch"
+                    if will_read(record, pending["inode"], pending["offset"])
+                    else "native",
+                )
+                commit(args, cursor)
     coordinator = pending.get(
         "coordinator", "native" if pending.get("fallback") else "none"
     )
-    active = cancel_waiting(cursor, pending["lines"])
-    dropped = dropped_lines(pending["lines"])
+    active = cancel_waiting(cursor, lines)
+    dropped_count = len(dropped_lines([lines[i] for i in in_feed_index]))
     in_feed = [
-        line
-        for index, line in enumerate(pending["lines"])
-        if index >= len(dropped) and index in active
+        lines[i]
+        for position, i in enumerate(in_feed_index)
+        if position >= dropped_count and i in active
     ]
-    dropped = [line for index, line in enumerate(dropped) if index in active]
+    dropped = [
+        lines[i]
+        for position, i in enumerate(in_feed_index)
+        if position < dropped_count and i in active
+    ]
     for target, text in native_messages(args, in_feed, coordinator != "none", patterns):
         entry = dict(binding=target, text=text, at=now)
         # WAITING escalation is native even with a Monitor: that feed line is deliberately not an action.
@@ -454,7 +480,7 @@ def recover(args, cursor, now, patterns):
         cursor[PENDING_KEY] = {"lines": cursor[PENDING_KEY], "fed": False}
     pending = cursor.get(PENDING_KEY)
     if pending and not pending["fed"] and "inode" not in pending:
-        data = feed_data(pending["lines"])
+        data = feed_data(feed_lines(pending["lines"]))
         try:
             info = args.feed.stat()
             with args.feed.open("rb") as stream:

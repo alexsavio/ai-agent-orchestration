@@ -611,7 +611,7 @@ class WaitingOutboxTests(IsolatedTestCase):
         inbox.finish(args, cursor, now, inbox.action_patterns())
 
     def test_clear_cancels_failed_waiting_retries_but_preserves_other_messages(self):
-        for stage in ("", "REPEAT", "ESCALATE"):
+        for stage in ("ESCALATE",):
             with self.subTest(stage=stage), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 args = argparse.Namespace(
@@ -625,7 +625,7 @@ class WaitingOutboxTests(IsolatedTestCase):
                     self.finish(
                         args,
                         cursor,
-                        [self.line(stage=stage), self.line(sid="s2")],
+                        [self.line(stage=stage), self.line(sid="s2", stage=stage)],
                         1000,
                     )
                 self.assertIn(inbox.OUTBOX_KEY, cursor)
@@ -654,8 +654,9 @@ class WaitingOutboxTests(IsolatedTestCase):
             )
             cursor = {}
             with patch.object(inbox, "send_line", return_value=True) as send:
-                self.finish(args, cursor, [self.line(), self.line(clear=True)], 1000)
+                escalate = self.line(stage="ESCALATE")
+                self.finish(args, cursor, [escalate, self.line(clear=True)], 1000)
                 send.assert_not_called()
-                self.finish(args, cursor, [self.line(clear=True), self.line()], 1060)
+                self.finish(args, cursor, [self.line(clear=True), escalate], 1060)
             self.assertEqual(send.call_count, 1)
             self.assertIn("session=s1", send.call_args.args[1])
