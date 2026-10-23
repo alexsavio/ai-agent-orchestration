@@ -19,9 +19,9 @@ Read-only for the orchestrator: this skill never merges, closes, or assigns revi
 
 ## Settings
 
-From `~/.claude/orchestration.toml` ([docs/settings.md](../../docs/settings.md)):
+Read through `orch-settings` ([docs/settings.md](../../docs/settings.md)), which prints the resolved values; never read `~/.claude/orchestration.toml` directly, since an empty `providers.enabled` there still means Codex is on:
 
-- `models.codex_worker` (`ORCH_CODEX_WORKER_MODEL`): the review model. Empty or a `<placeholder>`: dispatch nothing and tell the user to fill it in.
+- `models.codex_worker` (`ORCH_CODEX_WORKER_MODEL`): the review model. Applies only when `codex` is in `ORCH_PROVIDERS`; then, empty or a `<placeholder>`: dispatch nothing and tell the user to fill it in.
 - `providers.enabled` (`ORCH_PROVIDERS`): without `codex`, `dispatch-queue` plans an empty queue with a `note` and `dispatch.sh` refuses; list and watch as with `--no-dispatch`, and say once in one line that Codex reviews are off.
 - `watchers.pr_scope` (`ORCH_WATCHERS_PR_SCOPE`): the scope when no scope flag is given outside a repo.
 

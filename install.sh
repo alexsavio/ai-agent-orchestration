@@ -502,7 +502,7 @@ fill_keys() {
 
 # First run on a terminal: asks for each empty or placeholder key; "-" leaves it empty.
 ask_config_keys() {
-  local key value keys
+  local key value keys codex_empty=0 families
   interactive || return 0
   keys=$(fill_keys)
   for key in $keys; do
@@ -517,12 +517,20 @@ ask_config_keys() {
     esac
     ask "$key (- leaves it empty)" "$(detect_default "$key")"
     if [ -z "$ANSWER" ] || [ "$ANSWER" = - ]; then
+      case "$key" in ORCH_CODEX_*) codex_empty=$((codex_empty + 1)) ;; esac
       [ -n "$value" ] || continue
       ANSWER=""
     fi
     write_config_key "$key" "$ANSWER"
     printf -v "$key" '%s' "$ANSWER"
   done
+  # Both Codex models left empty and no family list yet: the user has no Codex, so switch it off.
+  if [ "$codex_empty" = 2 ] && [ -z "$(config_value ORCH_PROVIDERS)" ]; then
+    families=claude
+    [ -z "$(config_value ORCH_PI_WORKER_MODEL)$(config_value ORCH_PI_SMART_MODEL)" ] || families=claude,pi
+    write_config_key ORCH_PROVIDERS "$families"
+    printf -v ORCH_PROVIDERS '%s' "$families"
+  fi
 }
 
 # convert_old_config: with no orchestration.toml, orchestration.env is converted and renamed to orchestration.env.bak.

@@ -46,7 +46,7 @@ Default to worker models. Pick the tier per task: Sonnet/terra for routine work,
 
 **Model changes.** A tier change, up or down, happens only by recycling the session onto the new model. Choose the right model when starting a new worker. Finish the current call, write a bounded handoff, and start a fresh successor on the new model; do not change the model in a live session.
 
-Pick Claude, Codex or pi per task for quality, **only from the families in `$ORCH_PROVIDERS`**. Prefer a **different** family for independent review or escalation; pi counts as a third family, though a hard review still goes to Claude or Codex. **When no other enabled family can take the review, it goes to a stronger tier of the author's family** (a Sonnet author gets an Opus or Fable reviewer; a worker-tier author gets the smart tier), in a fresh pane that did not write the code. Never ask which provider to use. If a provider refuses work because of quota, route new work to the other automatically and say so **once**.
+Pick Claude, Codex or pi per task for quality, **only from the families in `$ORCH_PROVIDERS`**. Prefer a **different** family for independent review or escalation; pi counts as a third family, though a hard review still goes to Claude or Codex. **When no other enabled family can take the review, it goes to a stronger tier of the author's family** (a Sonnet author gets an Opus or Fable reviewer; a worker-tier author gets the smart tier), in a fresh pane that did not write the code. **A Fable author has no stronger tier:** it gets a fresh Fable pane. Never ask which provider to use. If a provider refuses work because of quota, route new work to the other automatically and say so **once**.
 
 Create and manage panes, worktrees and agent sessions yourself. Never ask the user to create them.
 
@@ -230,7 +230,7 @@ Before you report a task complete, every line must hold:
 4. **Linter and formatter both ran**, with their real output. Lint passing is not CI passing.
 5. **CI is green on the actual head commit**, not on an earlier one.
 6. **Any claim that decides behaviour on live pages, you verified yourself** — read-only, from the code.
-7. **An independent review pass** by an agent from the *other* family (or a stronger tier of the same family when the other is off; see the provider rule above), which did not write the code.
+7. **An independent review pass** by an agent from the *other* family (or a stronger tier of the same family when the other is off; for a Fable author, a fresh Fable pane; see the provider rule above), which did not write the code.
    The author reviewing its own work is not a review.
 8. **Anything removed has a removal audit.** When a PR deletes a public surface — an element tag, a
    partial, a helper, a test id, a CSS contract, a config key — it enumerates every remaining
