@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
 # shellcheck disable=SC2154 # bats provides status and output after run.
+# shellcheck disable=SC2030,SC2031 # run in a helper function sets output; bats runs each test in one shell.
 
 @test "context segment includes remaining percentage and rounded used tokens" {
   run /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
@@ -188,4 +189,94 @@ setup() {
   [ "$linked" = "$plain" ]
   [ "$plain" = "Claude | proj | "$'\xee\x9c\xa5'" feat/x" ]
   [[ "$linked_raw" == *"$OSC"* ]] || return 1
+}
+
+@test "non-ASCII branch name is encoded byte by byte (bash 3.2 safe)" {
+  make_repo "$REPO" 'café' git@github.com:acme/proj.git
+  track "$REPO" origin 'café'
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://github.com/acme/proj/tree/caf%C3%A9${BEL}"* ]] || return 1
+}
+
+@test "non-ASCII branch name is encoded the same under a UTF-8 locale" {
+  make_repo "$REPO" 'café' git@github.com:acme/proj.git
+  track "$REPO" origin 'café'
+  LC_ALL=nl_NL.UTF-8 run_line "$REPO"
+  [[ "$output" == *"${OSC}https://github.com/acme/proj/tree/caf%C3%A9${BEL}"* ]] || return 1
+}
+
+@test "a semicolon in the branch name is encoded" {
+  make_repo "$REPO" 'a;b' git@github.com:acme/proj.git
+  track "$REPO" origin 'a;b'
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://github.com/acme/proj/tree/a%3Bb${BEL}"* ]] || return 1
+}
+
+# plain_remotes <url>...: each remote gives no link (a github remote gives one, as the control).
+plain_remotes() {
+  rm -rf "$REPO"
+  make_repo "$REPO" main git@github.com:acme/proj.git
+  run_line "$REPO"
+  [[ "$output" == *"$OSC"* ]] || return 1
+  for url in "$@"; do
+    rm -rf "$REPO"
+    make_repo "$REPO" main "$url"
+    track "$REPO" origin main
+    run_line "$REPO"
+    [[ "$output" != *$'\033]8;'* ]] || { echo "linked: $url"; return 1; }
+  done
+}
+
+@test "malformed remotes never put part of a credential in a link" {
+  make_repo "$REPO" main 'https://user:tok/en@github.com/acme/proj.git'
+  track "$REPO" origin main
+  run_line "$REPO"
+  [[ "$output" != *tok* ]] || return 1
+  [[ "$output" != *$'\033]8;'* ]] || return 1
+  plain_remotes 'https://user:tok/en@github.com/acme/proj.git' 'user:token@host.example:o/r.git' 'ssh://user:pa/ss@host.example/o/r' 'user:p@ss@github.com:o/r.git' 'a@b@host.example:o/r.git' 'git@host.example:a:b/r.git'
+}
+
+@test "host without a dot (ssh alias) stays plain" {
+  plain_remotes git@github-work:acme/proj.git
+}
+
+@test "empty host stays plain" {
+  plain_remotes https:///acme/proj.git
+}
+
+@test "Azure DevOps: ssh stays plain, https links the repo only" {
+  plain_remotes git@ssh.dev.azure.com:v3/org/proj/repo
+  make_repo "$BATS_TEST_TMPDIR/az" main https://org@dev.azure.com/org/proj/_git/repo
+  track "$BATS_TEST_TMPDIR/az" origin main
+  run_line "$BATS_TEST_TMPDIR/az"
+  [[ "$output" == *"${OSC}https://dev.azure.com/org/proj/_git/repo${BEL}"* ]] || return 1
+  [[ "$output" != *"/tree/"* ]] || return 1
+}
+
+@test "local-path forms stay plain; sourcehut ~user still links" {
+  plain_remotes git@host.example:/srv/git/proj.git git@host.example:~/proj.git me@work.example/repos:old/proj.git
+  make_repo "$BATS_TEST_TMPDIR/sr" main git@git.sr.ht:~user/repo
+  run_line "$BATS_TEST_TMPDIR/sr"
+  [[ "$output" == *"${OSC}https://git.sr.ht/~user/repo${BEL}"* ]] || return 1
+}
+
+@test "branch.<b>.merge without a remote gives no branch link; a removed upstream remote falls back to origin" {
+  make_repo "$REPO" feat/x git@github.com:acme/proj.git
+  git -C "$REPO" config branch.feat/x.merge refs/heads/feat/x
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://github.com/acme/proj${BEL}proj"* ]] || return 1
+  [[ "$output" != *"/tree/"* ]] || return 1
+  track "$REPO" gone feat/x
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://github.com/acme/proj${BEL}proj"* ]] || return 1
+  [[ "$output" != *"/tree/"* ]] || return 1
+}
+
+@test "an upstream that is not a branch (tag ref) gives no branch link" {
+  make_repo "$REPO" feat/x git@github.com:acme/proj.git
+  track "$REPO" origin refs/tags/v1
+  git -C "$REPO" config branch.feat/x.merge refs/tags/v1
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://github.com/acme/proj${BEL}proj"* ]] || return 1
+  [[ "$output" != *"/tree/"* ]] || return 1
 }

@@ -28,14 +28,18 @@ web_url() {
   case $u in
     https://*) rest=${u#https://}; authority=${rest%%/*}; host=${authority##*@}; path=${rest#*/} ;;
     ssh://*) rest=${u#ssh://}; authority=${rest%%/*}; host=${authority##*@}; host=${host%%:*}; path=${rest#*/} ;;
-    */*@*:* | *://*) return 1 ;;
-    *@*:*) host=${u#*@}; host=${host%%:*}; path=${u#*:} ;;
+    *://*) return 1 ;;
+    *@*:*)
+      # git's rule: a "/" before the first ":" makes it a local path
+      [[ ${u%%:*} != */* ]] || return 1
+      host=${u#*@}; host=${host%%:*}; path=${u#*:} ;;
     *) return 1 ;;
   esac
   path=${path%/}; path=${path%.git}
-  [[ -n $host && $path == */* ]] || return 1
+  [[ $host == *.* && $path == */* && $path != /* && $path != \~/* && $path != *[@:]* ]] || return 1
+  [[ $host != ssh.dev.azure.com ]] || return 1
   rest="https://$host/$path"
-  [[ $rest =~ ^[A-Za-z0-9._~/:@%+-]+$ ]] || return 1
+  [[ $rest =~ ^[A-Za-z0-9._~/:%+-]+$ ]] || return 1
   printf '%s' "$rest"
 }
 
@@ -47,7 +51,7 @@ url_encode() {
     c=${s:i:1}
     case $c in
       [A-Za-z0-9._~/-]) out+=$c ;;
-      *) out+=$(printf '%%%02X' "'$c") ;;
+      *) out+=$(printf '%%%02X' "$(($(printf '%d' "'$c") & 255))") ;;
     esac
   done
   printf '%s' "$out"
@@ -68,10 +72,10 @@ if [ -n "$dir" ] && git -C "$dir" --no-optional-locks rev-parse --is-inside-work
   remote=""
   remote_branch=""
   if [ -n "$branch" ]; then
-    remote=$(git -C "$dir" --no-optional-locks config --get "branch.$branch.remote" 2>/dev/null)
-    merge=$(git -C "$dir" --no-optional-locks config --get "branch.$branch.merge" 2>/dev/null)
+    # git's own upstream rule: empty when there is no usable upstream
+    IFS='|' read -r remote merge < <(git -C "$dir" --no-optional-locks for-each-ref --format='%(upstream:remotename)|%(upstream:remoteref)' "refs/heads/$branch" 2>/dev/null)
     remote_branch=${merge#refs/heads/}
-    if [ "$remote" = "." ] || [ "$remote_branch" = "$merge" ]; then remote=""; remote_branch=""; fi
+    if [ "$remote" = "." ]; then remote=""; remote_branch=""; fi
   fi
   [ -n "$remote" ] || remote=origin
   remote_url=$(git -C "$dir" --no-optional-locks remote get-url "$remote" 2>/dev/null)
@@ -81,6 +85,7 @@ if [ -n "$dir" ] && git -C "$dir" --no-optional-locks rev-parse --is-inside-work
       repo_host=${repo_host%%/*}
       case $repo_host in
         *gitlab*) branch_url="$repo_url/-/tree/$(url_encode "$remote_branch")" ;;
+        dev.azure.com) branch_url="" ;;
         bitbucket.org) branch_url="$repo_url/src/$(url_encode "$remote_branch")" ;;
         *) branch_url="$repo_url/tree/$(url_encode "$remote_branch")" ;;
       esac
