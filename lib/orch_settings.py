@@ -32,10 +32,18 @@ class Setting:
         sep=" ",
         paths=False,
         local_only=False,
+        choices=None,
+        required=(),
+        why="",
     ):
         self.key, self.env, self.kind, self.default = key, env, kind, default
         self.scope, self.doc, self.sep, self.paths = scope, doc, sep, paths
-        self.local_only = local_only
+        self.local_only, self.choices, self.required, self.why = (
+            local_only,
+            choices,
+            required,
+            why,
+        )
 
     @property
     def table(self):
@@ -53,6 +61,20 @@ def _g(key, env, kind, default, doc, **kw):
 def _r(key, env, kind, default, doc, **kw):
     return Setting(key, env, kind, default, "repo", doc, **kw)
 
+
+class Provider:
+    """A worker family and its model settings; an optional one is on by default only when one of its models is set."""
+
+    def __init__(self, name, models, optional=False):
+        self.name, self.models, self.optional = name, models, optional
+
+
+PROVIDERS = [
+    Provider("claude", ["ORCH_COORDINATOR_MODEL", "ORCH_ARCHITECT_MODEL"]),
+    Provider("codex", ["ORCH_CODEX_WORKER_MODEL", "ORCH_CODEX_SMART_MODEL"]),
+    Provider("pi", ["ORCH_PI_WORKER_MODEL", "ORCH_PI_SMART_MODEL"], optional=True),
+]
+REQUIRED_PROVIDERS = ["claude"]
 
 DEFAULT_PATH = [
     "~/.local/bin",
@@ -157,6 +179,17 @@ SETTINGS = [
         "int",
         10,
         "Seconds a stopped job gets before it is killed",
+    ),
+    _g(
+        "providers.enabled",
+        "ORCH_PROVIDERS",
+        "list",
+        [],
+        "Worker families this machine uses (claude, codex, pi); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi when a pi model is set. A family left out is never started or asked for, and its model settings may stay empty",
+        sep=",",
+        choices=[p.name for p in PROVIDERS],
+        required=REQUIRED_PROVIDERS,
+        why="the Coordinator and the architects run on it",
     ),
     _g(
         "models.coordinator",
@@ -560,6 +593,54 @@ class ConfigError(ValueError):
     pass
 
 
+def list_problem(setting, items):
+    """Why items break the setting's choices or required entries, else None."""
+    if setting.choices is not None:
+        unknown = [item for item in items if item not in setting.choices]
+        if unknown:
+            return f"unknown entry {json.dumps(unknown[0])}; known: {', '.join(setting.choices)}"
+    missing = [item for item in setting.required if item not in items]
+    if items and missing:
+        return f"must include {json.dumps(missing[0])}" + (
+            f" ({setting.why})" if setting.why else ""
+        )
+    return None
+
+
+def filled(value):
+    return bool(value) and not (value.startswith("<") and value.endswith(">"))
+
+
+def enabled_providers(values):
+    """The provider names resolved ORCH_* values turn on, in PROVIDERS order."""
+    setting = BY_KEY["providers.enabled"]
+    text = values.get(setting.env, "")
+    if not text:
+        return [
+            p.name
+            for p in PROVIDERS
+            if not p.optional or any(filled(values.get(m, "")) for m in p.models)
+        ]
+    names = text.split(setting.sep)
+    problem = list_problem(setting, names)
+    if problem:
+        raise ConfigError(f"{setting.key} ({setting.env}): {problem}")
+    return [p.name for p in PROVIDERS if p.name in names]
+
+
+def required_models(values):
+    """Model settings that must be filled: every model of each enabled provider that is not optional."""
+    enabled = enabled_providers(values)
+    return [
+        m for p in PROVIDERS if p.name in enabled and not p.optional for m in p.models
+    ]
+
+
+def fill_models(values):
+    """The required model settings without a usable built-in default: the ones the user has to fill in."""
+    return [m for m in required_models(values) if not filled(BY_ENV[m].default)]
+
+
 def scoped(scope):
     return [s for s in SETTINGS if s.scope == scope]
 
@@ -686,6 +767,9 @@ def validate(data, label, scope):
                             f"{label}: {key}: entry {json.dumps(item)} is empty or contains {what}, "
                             "which separates entries"
                         )
+                problem = list_problem(setting, value)
+                if problem:
+                    raise ConfigError(f"{label}: {key}: {problem}")
             found[setting] = value
     return found
 
@@ -706,10 +790,12 @@ def as_env(values):
 def resolved_global(path, environ):
     """Every global ORCH_* setting as the scripts see it: default < the file < an exported variable."""
     file = load_global(path)
-    return {
+    values = {
         s.env: environ.get(s.env, file.get(s.env, env_value(s, s.default)))
         for s in scoped("global")
     }
+    values[BY_KEY["providers.enabled"].env] = ",".join(enabled_providers(values))
+    return values
 
 
 def config_path(environ):
@@ -1751,12 +1837,29 @@ def main(argv):
             print(" ".join(drop_keys(argv[2])))
         elif command == "keys" and len(argv) == 3:
             print(" ".join(file_keys(argv[2], "global")))
+        elif command == "providers" and len(argv) <= 3:
+            print(
+                ",".join(
+                    enabled_providers(
+                        resolved_global(print_path(argv[2:], os.environ), os.environ)
+                    )
+                )
+            )
+        elif command == "fill-models" and len(argv) <= 3:
+            print(
+                " ".join(
+                    fill_models(
+                        resolved_global(print_path(argv[2:], os.environ), os.environ)
+                    )
+                )
+            )
         elif command == "names" and len(argv) == 2:
             print(" ".join(env_names()))
         else:
             print(
                 "usage: orch_settings.py global <file> | print [<file>] | repo <dir> | migrate <env> <toml> <snippet-dir> "
-                "| upgrade [--watched <global-file>] <repo-file>... [--clones <dir>...] | set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | example global|repo | table global|repo | names",
+                "| upgrade [--watched <global-file>] <repo-file>... [--clones <dir>...] | set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | providers [<file>] | fill-models [<file>] "
+                "| example global|repo | table global|repo | names",
                 file=sys.stderr,
             )
             return 2

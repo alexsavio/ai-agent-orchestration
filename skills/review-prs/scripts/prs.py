@@ -71,7 +71,24 @@ def setting(name):
         sys.exit(str(error))
 
 
+def codex_enabled():
+    config = os.environ.get("ORCH_CONFIG") or str(
+        Path.home() / ".claude" / "orchestration.toml"
+    )
+    try:
+        return "codex" in orch_settings.enabled_providers(
+            orch_settings.resolved_global(config, os.environ)
+        )
+    except orch_settings.ConfigError as error:
+        sys.exit(str(error))
+
+
+CODEX_OFF = "codex is off in providers.enabled (ORCH_PROVIDERS); Codex reviews are not dispatched"
+
+
 def worker_model():
+    if not codex_enabled():
+        sys.exit(CODEX_OFF)
     model = setting("ORCH_CODEX_WORKER_MODEL")
     if not model or model.startswith("<"):
         sys.exit(
@@ -590,11 +607,25 @@ def cmd_watch(args, scope, _label):
 
 
 def cmd_dispatch_queue(args, scope, label):
+    if not codex_enabled():
+        print(
+            json.dumps(
+                {
+                    "scope": label,
+                    "model": "",
+                    "queue": [],
+                    "skipped": 0,
+                    "note": CODEX_OFF,
+                },
+                indent=2,
+            )
+        )
+        return
+    model = worker_model()
     nodes, _login = fetch(scope)
     if any(p["mergeable"] == "UNKNOWN" for p in nodes):
         time.sleep(3)
         nodes, _login = fetch(scope)
-    model = worker_model()
     dispatched = load_dispatched()
     queue = []
     for pr in nodes:
