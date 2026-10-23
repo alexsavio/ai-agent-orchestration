@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -3331,6 +3332,57 @@ class QuietFeedTest(IsolatedTestCase):
         text = "\n".join(text for _, text in sent)
         for n in range(30):
             self.assertEqual(text.count(f"job{n:02} "), 1, n)
+
+    def test_over_the_size_cap_the_monitor_covers_kept_lines_and_native_covers_dropped(
+        self,
+    ):
+        actions = [
+            f"context: RECYCLE w1:p1 architect-{n:02} 302k (start)" for n in range(30)
+        ]
+        lines = [
+            line
+            for n, a in enumerate(actions)
+            for line in (a, f"pulls: RED o/r#{n} Fix (clear)")
+        ]
+        args = argparse.Namespace(
+            bindings_dir=self.base,
+            binding=self.base / "coordinator.json",
+            cursor=self.base / "cursor",
+            feed=self.base / "coordinator-feed.log",
+        )
+        (self.base / inbox.MONITOR_NAME).touch()
+        cursor, sent = {}, []
+        with (
+            patch.object(inbox, "FEED_BYTES", 2000),
+            patch.object(
+                inbox,
+                "send_line",
+                side_effect=lambda path, text: (
+                    sent.append((Path(path).name, text)) or True
+                ),
+            ),
+        ):
+            inbox.deliver(args, cursor, lines, 1000, inbox.action_patterns())
+        kept = [
+            line.split(" ", 1)[1] for line in args.feed.read_text().splitlines()[1:]
+        ]
+        dropped = 30 - len(kept)
+        self.assertTrue(0 < dropped < 30)
+
+        def ids(text):
+            return sorted(int(m) for m in re.findall(r"architect-(\d\d) ", text))
+
+        queue = cursor[inbox.OUTBOX_KEY]
+        native = [e for e in queue if "watch" not in e]
+        watched = [e for e in queue if "watch" in e]
+        # The native copies queue behind the watched ones, so nothing is sent yet.
+        self.assertEqual(sent, [])
+        self.assertEqual(
+            ids("\n".join(e["text"] for e in native)), list(range(dropped))
+        )
+        self.assertEqual(
+            ids("\n".join(e["text"] for e in watched)), list(range(dropped, 30))
+        )
 
     def test_recovery_of_an_old_pending_batch_matches_only_its_feed_lines(self):
         args = argparse.Namespace(
