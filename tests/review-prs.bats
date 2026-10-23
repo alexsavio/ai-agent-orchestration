@@ -200,6 +200,16 @@ dispatch() {
   done
 }
 
+@test "Claude worker starts carry --strict-mcp-config and the example allows haiku" {
+  grep -qF 'claude = ["haiku", "sonnet", "opus", "fable"]' "$ROOT/config/orchestration.toml.example"
+  grep -qF -- '--model <model> --strict-mcp-config --resume' "$ROOT/skills/architect/references/dispatch.md"
+  grep -qF -- '--model <model> --strict-mcp-config`' "$ROOT/skills/architect/references/worker-recycle.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF 'a Claude worker start adds `--strict-mcp-config`' "$ROOT/skills/architect/references/dispatch.md"
+  run grep -rn -- '--strict-mcp-config' "$ROOT/skills/coordinate"
+  [ "$status" -eq 1 ]
+}
+
 @test "the skill holds no org, model, login or personal path literals" {
   run grep -rniE 'combinaut|sparkle|gpt-[0-9]|sleistner|/Users/|/private/tmp|31691' "$ROOT/$SKILL_DIR"
   [ "$status" -eq 1 ]
