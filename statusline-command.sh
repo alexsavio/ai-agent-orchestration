@@ -35,6 +35,7 @@ web_url() {
       host=${u#*@}; host=${host%%:*}; path=${u#*:} ;;
     *) return 1 ;;
   esac
+  host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
   path=${path%/}; path=${path%.git}
   [[ $host == *.* && $path == */* && $path != /* && $path != \~/* && $path != *[@:]* ]] || return 1
   [[ $host != ssh.dev.azure.com ]] || return 1
@@ -83,6 +84,7 @@ if [ -n "$dir" ] && git -C "$dir" --no-optional-locks rev-parse --is-inside-work
     if [ -n "$remote_branch" ]; then
       repo_host=${repo_url#https://}
       repo_host=${repo_host%%/*}
+      repo_host=${repo_host%%:*}
       case $repo_host in
         *gitlab*) branch_url="$repo_url/-/tree/$(url_encode "$remote_branch")" ;;
         dev.azure.com) branch_url="" ;;

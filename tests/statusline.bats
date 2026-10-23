@@ -280,3 +280,29 @@ plain_remotes() {
   [[ "$output" == *"${OSC}https://github.com/acme/proj${BEL}proj"* ]] || return 1
   [[ "$output" != *"/tree/"* ]] || return 1
 }
+
+@test "host names are matched case-insensitively" {
+  make_repo "$REPO" main git@GitLab.com:acme/proj.git
+  track "$REPO" origin main
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://gitlab.com/acme/proj/-/tree/main${BEL}"* ]] || return 1
+  rm -rf "$REPO"
+  make_repo "$REPO" main git@BitBucket.org:acme/proj.git
+  track "$REPO" origin main
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://bitbucket.org/acme/proj/src/main${BEL}"* ]] || return 1
+  plain_remotes git@SSH.DEV.AZURE.COM:v3/org/proj/repo
+}
+
+@test "an explicit https port does not change the host routing" {
+  make_repo "$REPO" main https://bitbucket.org:443/acme/proj.git
+  track "$REPO" origin main
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://bitbucket.org:443/acme/proj/src/main${BEL}"* ]] || return 1
+  rm -rf "$REPO"
+  make_repo "$REPO" main https://dev.azure.com:443/org/proj/_git/repo
+  track "$REPO" origin main
+  run_line "$REPO"
+  [[ "$output" == *"${OSC}https://dev.azure.com:443/org/proj/_git/repo${BEL}"* ]] || return 1
+  [[ "$output" != *"/tree/"* ]] || return 1
+}
