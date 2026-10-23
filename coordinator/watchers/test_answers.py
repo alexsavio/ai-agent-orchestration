@@ -94,7 +94,7 @@ class AnswersTest(IsolatedTestCase):
                 side_effect=["x", "t", "t", *"123456789", KeyboardInterrupt],
             ),
             patch("builtins.input", side_effect=["  ", " typed answer "]),
-            patch.object(question_pane, "show"),
+            patch.object(question_pane.Panel, "show"),
             patch.object(question_pane.time, "sleep"),
             patch.object(question_pane, "atomic_write") as write,
         ):
@@ -318,7 +318,7 @@ class AnswersTest(IsolatedTestCase):
         ]
         with (
             patch.object(question_pane, "read_key", side_effect=keys),
-            patch.object(question_pane, "show"),
+            patch.object(question_pane.Panel, "show"),
             patch.object(question_pane.time, "sleep"),
             patch.object(question_pane, "atomic_write") as write,
         ):
@@ -329,7 +329,7 @@ class AnswersTest(IsolatedTestCase):
             patch.object(
                 question_pane, "read_key", side_effect=["", KeyboardInterrupt]
             ),
-            patch.object(question_pane, "show"),
+            patch.object(question_pane.Panel, "show"),
             patch.object(question_pane, "atomic_write") as write,
         ):
             question_pane.follow(Path("ship.md"))

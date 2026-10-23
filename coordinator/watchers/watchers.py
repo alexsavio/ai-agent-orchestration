@@ -20,8 +20,9 @@ from time import monotonic as _monotonic
 import alert_policy
 import audit
 import discovery
+import question_remind
 import watcher_runtime as runtime
-from question_lock import answers_lock, questions_directory
+from question_lock import HELD, answers_lock, questions_directory
 from watcher_platform import (
     MissingMetric,
     balance_metrics,
@@ -1423,6 +1424,17 @@ def answer_order(path):
         return 0, path.name
 
 
+def open_question(slug, question):
+    argv = [
+        "/usr/bin/env",
+        f"{HELD}=1",
+        str(ROOT.parents[1] / "ask-user-question"),
+        slug,
+        str(question),
+    ]
+    return runtime.run(argv, timeout=question_remind.OPEN_TIMEOUT).returncode
+
+
 def collect_answers(before, consume=True):
     directory = questions_directory()
     answers, unreadable, blocked = [], [], set()
@@ -1468,6 +1480,11 @@ def collect_answers(before, consume=True):
         except (OSError, UnicodeError):
             blocked.add(slug)
             unreadable.append(str(processing))
+    if consume:
+        try:
+            question_remind.reopen_due(directory, time.time(), open_question)
+        except (OSError, subprocess.SubprocessError):
+            pass
     return {"answers": answers, "unreadable": unreadable}
 
 

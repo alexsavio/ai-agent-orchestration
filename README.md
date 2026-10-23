@@ -80,7 +80,7 @@ The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list 
 
 ### ❓ User questions
 
-Every user question gets a pane. Create its Markdown file under `~/.claude/coordinator/questions/`, then run `ask-user-question <slug> <file>`; it stacks below the to-do pane without taking focus. Number keys or `t` record an answer, which the shared feed Monitor reports. Run `ask-user-question close <slug>` after handling it to find the pane by its exact `Q: <slug>` label, close it through `close-pane.sh`, then remove its files. A failed close keeps the files for retry.
+Every question for you gets its own pane under the to-do pane, with keys to answer, dismiss it, or be reminded later. Details, keys and the feed lines: [`docs/questions.md`](docs/questions.md).
 
 ### 🔍 Review PRs
 
@@ -103,6 +103,7 @@ If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`
 - [`docs/architecture.md`](docs/architecture.md): how the Coordinator, architects, workers and watchers fit together.
 - [`docs/installer.md`](docs/installer.md): every installer step, the file table and a troubleshooting table.
 - [`docs/settings.md`](docs/settings.md): every setting in `~/.claude/orchestration.toml` and in the repo files.
+- [`docs/questions.md`](docs/questions.md): the question pane, its keys, Dismiss and Remind.
 - [`docs/watchers.md`](docs/watchers.md): the watchers, running them with or without services, and the host-pressure response.
 - [`docs/todo.md`](docs/todo.md): the to-do pane and the `prefix+t` popup.
 - [`docs/workers.md`](docs/workers.md): workers, recycles, handoffs and owner tags.
