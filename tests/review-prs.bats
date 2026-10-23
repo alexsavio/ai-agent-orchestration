@@ -121,6 +121,22 @@ dispatch() {
   grep -q 'coordinator/watchers/close-pane.sh' "$ROOT/$SKILL_DIR/SKILL.md"
 }
 
+@test "the skill reads the settings through orch-settings and asks for the Codex model only when codex is on" {
+  settings=$(sed -n '/^## Settings/,/^## Arguments/p' "$ROOT/$SKILL_DIR/SKILL.md")
+  contains "$settings" 'orch-settings'
+  worker=$(printf '%s\n' "$settings" | grep -F 'models.codex_worker')
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  contains "$worker" 'only when `codex` is in `ORCH_PROVIDERS`'
+}
+
+@test "a Fable author's fallback reviewer is named in the architect, Coordinator and gate texts" {
+  grep -qF 'A Fable author has no stronger tier' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'for a Fable author, a fresh Fable pane' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'a Fable author has none: a fresh Fable pane' "$ROOT/skills/coordinate/SKILL.md"
+  grep -qF 'for a Fable author, a fresh Fable pane' "$ROOT/docs/settings.md"
+  grep -qF 'a Fable author has none: a fresh Fable pane' "$ROOT/skills/architect/references/dispatch.md"
+}
+
 @test "the skill holds no org, model, login or personal path literals" {
   run grep -rniE 'combinaut|sparkle|gpt-[0-9]|sleistner|/Users/|/private/tmp|31691' "$ROOT/$SKILL_DIR"
   [ "$status" -eq 1 ]

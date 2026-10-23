@@ -500,9 +500,9 @@ fill_keys() {
   printf '%s\n' ORCH_PR_AUTHOR $models ORCH_HERDR_BIN ORCH_HERDR_SOCKET
 }
 
-# First run on a terminal: asks for each empty or placeholder key; "-" leaves it empty.
+# On a terminal: asks for each empty or placeholder key; "-" leaves it empty.
 ask_config_keys() {
-  local key value keys
+  local key value keys codex_empty=0 families
   interactive || return 0
   keys=$(fill_keys)
   for key in $keys; do
@@ -517,12 +517,21 @@ ask_config_keys() {
     esac
     ask "$key (- leaves it empty)" "$(detect_default "$key")"
     if [ -z "$ANSWER" ] || [ "$ANSWER" = - ]; then
+      case "$key" in ORCH_CODEX_*) codex_empty=$((codex_empty + 1)) ;; esac
       [ -n "$value" ] || continue
       ANSWER=""
     fi
     write_config_key "$key" "$ANSWER"
     printf -v "$key" '%s' "$ANSWER"
   done
+  # Both Codex models left empty and no family list in the file: the user has no Codex, so switch it off.
+  # The file decides, as services read it without the installer's environment.
+  if [ "$codex_empty" = 2 ] && [ -z "$(unset ORCH_PROVIDERS && config_value ORCH_PROVIDERS)" ]; then
+    families=claude
+    [ -z "$(unset ORCH_PI_WORKER_MODEL ORCH_PI_SMART_MODEL && config_value ORCH_PI_WORKER_MODEL)$(unset ORCH_PI_WORKER_MODEL ORCH_PI_SMART_MODEL && config_value ORCH_PI_SMART_MODEL)" ] || families=claude,pi
+    write_config_key ORCH_PROVIDERS "$families"
+    printf -v ORCH_PROVIDERS '%s' "$families"
+  fi
 }
 
 # convert_old_config: with no orchestration.toml, orchestration.env is converted and renamed to orchestration.env.bak.

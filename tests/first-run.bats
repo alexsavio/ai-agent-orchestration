@@ -86,6 +86,72 @@ EOF
   [ "$(config_line ORCH_HERDR_SOCKET)" = 'ORCH_HERDR_SOCKET=""' ]
 }
 
+@test "both Codex answers empty on a first run write providers.enabled claude" {
+  fresh_install
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude ]
+  install_ok
+  not_contains "$output" 'ORCH_CODEX'
+}
+
+@test "both Codex answers empty with a pi model set write claude and pi" {
+  fresh_install
+  config_set ORCH_PI_WORKER_MODEL pi-fixture
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude,pi ]
+}
+
+@test "one Codex answer empty and the other set leaves providers.enabled empty and the key to fill" {
+  fresh_install
+  on_tty $'-\ngpt-x\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = "" ]
+  install_ok
+  contains "$output" 'ORCH_CODEX_SMART_MODEL'
+}
+
+@test "both Codex answers empty keep a providers.enabled the user already set" {
+  fresh_install
+  config_set ORCH_PROVIDERS claude,codex
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude,codex ]
+}
+
+@test "an exported empty providers.enabled does not hide the list in the file" {
+  fresh_install
+  config_set ORCH_PROVIDERS claude,codex
+  export ORCH_PROVIDERS=
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude,codex ]
+}
+
+@test "an exported empty pi model does not hide the pi model in the file" {
+  fresh_install
+  config_set ORCH_PI_SMART_MODEL lm/pi-file
+  export ORCH_PI_SMART_MODEL=
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude,pi ]
+}
+
+@test "a pi model that is only exported does not add pi to the file" {
+  fresh_install
+  export ORCH_PI_WORKER_MODEL=lm/pi-env
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude ]
+}
+
+@test "a run without a terminal leaves providers.enabled empty" {
+  fresh_install
+  install_ok
+  [ "$(config_get ORCH_PROVIDERS)" = "" ]
+}
+
 @test "a dash empties a placeholder key" {
   fresh_install
   on_tty $'-\n-\n-\n-\n-'

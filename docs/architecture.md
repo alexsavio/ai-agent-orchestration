@@ -85,7 +85,7 @@ flowchart LR
 - The architect picks the family and tier per task without asking the user, and re-tiers at every dispatch.
 - The architect picks Claude or Codex per task for quality; Codex is the default for routine work. Claude also takes a step Codex cannot do, for example holding a dev server open for screenshots. `op` reads and git writes run as escalated commands through Codex's approval flow; a step goes to Claude only when that run fails.
 - pi is a third family, available only when its two model settings are filled in. DeepSeek (named in the provider or the model id) runs only in a repo whose `.orchestration.local.toml` sets `pi.deepseek = true`. pi has no native channel, so follow-ups go through `herdr agent prompt`.
-- A provider that refuses work for quota is replaced by the other family for new work, and the architect says so once.
+- A provider that refuses work for quota is replaced by another enabled family for new work; with only one family on, new work goes to another tier of that family. The architect says so once.
 - A live session never changes model. A tier change happens through a recycle onto the new model.
 - The model settings of each enabled family (`providers.enabled`: the claude and codex models) must be filled in `~/.claude/orchestration.toml`; the skills stop while one is empty or a placeholder. A family left out of the list needs none.
 
@@ -211,6 +211,6 @@ The Coordinator session is the user's remote channel. An instruction it relays a
 
 - A merge uses `gh pr merge <n> --squash` or `gh pr merge <n> --squash --auto`; never a merge commit or a rebase merge. The named PR must be approved, green and not draft when it merges.
 - An approval is not merge authorization. The Coordinator relays every approval and merge to its owner.
-- Acceptance gate before an architect calls work done: output diffs against base where rendering changed, a mutation table with a kill per guard, no spec edits in a pure refactor, linter and formatter both run, CI green on the actual head, any claim that decides behavior on live pages verified by the architect itself from the code, an independent review by the other family, and a removal audit when a PR deletes a public surface.
+- Acceptance gate before an architect calls work done: output diffs against base where rendering changed, a mutation table with a kill per guard, no spec edits in a pure refactor, linter and formatter both run, CI green on the actual head, any claim that decides behavior on live pages verified by the architect itself from the code, an independent review by the other family (or, when no other family is on, a fresh pane of a stronger tier of the author's family; for a Fable author, a fresh Fable pane that did not write the code), and a removal audit when a PR deletes a public surface.
 - A ready PR has a human reviewer. When there is none, the architect asks the user at once.
 - A worker owns its PR's review cycle: it resolves every thread, verifies each bot claim against the code, and re-requests the bot review after each push. Merging, undrafting, reviewer changes and scope changes are never the worker's.

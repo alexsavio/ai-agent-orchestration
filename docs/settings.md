@@ -33,7 +33,7 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `codex` | `models.codex_worker`, `models.codex_smart` | both |
 | `pi` | `models.pi_worker`, `models.pi_smart` | neither; an empty tier is not used |
 
-A family left out is never started: the installer does not ask for its models, architects do not pick it (a review falls back to a stronger tier of the author's family), `/review-prs` dispatches no Codex review, and `pi-start.sh` refuses. Its model settings may stay empty. A new family is one more entry in `PROVIDERS` in `lib/orch_settings.py`, with its model settings.
+A family left out is never started: the installer does not ask for its models, architects do not pick it (a review falls back to a stronger tier of the author's family; for a Fable author, a fresh Fable pane that did not write the code), `/review-prs` dispatches no Codex review, and `pi-start.sh` refuses. Its model settings may stay empty. On a terminal run with `providers.enabled` empty, answering `-` to both Codex model questions writes `enabled = ["claude"]` (plus `"pi"` when a pi model is set). A new family is one more entry in `PROVIDERS` in `lib/orch_settings.py`, with its model settings.
 
 ## Global settings
 
