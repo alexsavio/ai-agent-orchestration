@@ -33,9 +33,9 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 | `codex` | `models.codex_worker`, `models.codex_smart` | at least one; it then serves both tiers, and `orch-settings` prints it for both |
 | `pi` | `models.pi_worker`, `models.pi_smart` | neither; an empty tier is not used |
 
-A family left out is never started: the installer does not ask for its models, architects do not pick it (a review falls back to a stronger allowed tier of the author's family; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), `/review-prs` dispatches no Codex review, and `pi-start.sh` refuses. Its model settings may stay empty. On a terminal run with `providers.enabled` empty, answering `-` to both Codex model questions writes `enabled = ["claude"]` (plus `"pi"` when a pi model is set). A new family is one more entry in `PROVIDERS` in `lib/orch_settings.py`, with its model settings.
+A family left out is never started: the installer does not ask for its models, architects do not pick it (a review falls back to a fresh Sonnet pane of the author's family (Opus for an Opus author), a stronger allowed tier only for credentials, security, shared config, money, installer or watchers, or a HIGH finding; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), `/review-prs` dispatches no Codex review, and `pi-start.sh` refuses. Its model settings may stay empty. On a terminal run with `providers.enabled` empty, answering `-` to both Codex model questions writes `enabled = ["claude"]` (plus `"pi"` when a pi model is set). A new family is one more entry in `PROVIDERS` in `lib/orch_settings.py`, with its model settings.
 
-`[providers] claude` lists the Claude worker tiers the architects may start: `sonnet`, `opus`, `fable` (the default is all three). Only these names, at least one; anything else stops with an `ERROR:`. The architects pick Claude tiers only from the list, and `orch-settings` prints it as `ORCH_CLAUDE_TIERS`. The Coordinator and architect models are their own settings.
+`[providers] claude` lists the Claude worker tiers the architects may start: `haiku`, `sonnet`, `opus`, `fable` (the default is all four). Only these names, at least one; anything else stops with an `ERROR:`. The architects pick Claude tiers only from the list, and `orch-settings` prints it as `ORCH_CLAUDE_TIERS`. The Coordinator and architect models are their own settings.
 
 ## Global settings
 
@@ -55,7 +55,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `heavy_slots.dir` | `ORCH_HEAVY_SLOTS_DIR` | empty | Slot directory; empty means ~/.claude/heavy-slots |
 | `heavy_slots.kill_grace` | `ORCH_HEAVY_SLOTS_KILL_GRACE` | `10` | Seconds a stopped job gets before it is killed |
 | `providers.enabled` | `ORCH_PROVIDERS` | empty | Worker families this machine uses (claude, codex, pi); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi when a pi model is set. A family left out is never started or asked for, and its model settings may stay empty |
-| `providers.claude` | `ORCH_CLAUDE_TIERS` | `["sonnet", "opus", "fable"]` | Claude worker tiers the architects may pick (sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings |
+| `providers.claude` | `ORCH_CLAUDE_TIERS` | `["haiku", "sonnet", "opus", "fable"]` | Claude worker tiers the architects may pick (haiku, sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings |
 | `models.coordinator` | `ORCH_COORDINATOR_MODEL` | `"claude-opus-5-5"` | Model of the Coordinator |
 | `models.architect` | `ORCH_ARCHITECT_MODEL` | `"claude-opus-5-5"` | Model of the architects |
 | `models.codex_worker` | `ORCH_CODEX_WORKER_MODEL` | `"<codex-worker-model>"` | Codex model for routine work; empty or a placeholder means codex_smart serves it too. With codex on, set at least one of the two |

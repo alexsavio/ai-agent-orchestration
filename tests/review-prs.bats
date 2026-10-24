@@ -181,6 +181,76 @@ dispatch() {
   done
 }
 
+@test "the architect and Coordinator route to the lightest tier and review on a fresh Sonnet pane" {
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md; do
+    grep -qF 'lightest allowed tier' "$ROOT/$file"
+    grep -qF 'Haiku' "$ROOT/$file"
+  done
+  grep -qF 'on Sonnet when the author was Haiku or Sonnet' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'or when the Sonnet review finds a HIGH' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'claude-haiku-5-5' "$ROOT/skills/architect/SKILL.md"
+}
+
+@test "the skills and snippet announce no heavy slot and keep messages and watches to action lines" {
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md snippets/CLAUDE.md.snippet docs/architecture.md; do
+    run grep -nE 'Announce (start|the end|when it ends)' "$ROOT/$file"
+    [ "$status" -eq 1 ]
+  done
+  grep -qF 'message nobody about a slot' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'message nobody about a slot' "$ROOT/snippets/CLAUDE.md.snippet"
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md; do
+    grep -qF 'a question, an order, or an action event only' "$ROOT/$file"
+    grep -qF 'no heartbeat' "$ROOT/$file"
+  done
+  grep -qF 'coordinator-fyi.log' "$ROOT/skills/coordinate/SKILL.md"
+  grep -qF 'coordinator-fyi.log' "$ROOT/docs/architecture.md"
+}
+
+@test "an Opus author gets a fresh Opus reviewer and the Coordinator pins the Sonnet review" {
+  grep -qF 'An Opus author gets a fresh Opus pane' "$ROOT/skills/architect/SKILL.md"
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md skills/architect/references/dispatch.md; do
+    grep -qF 'a fresh Opus pane for an Opus author' "$ROOT/$file"
+  done
+  grep -qF 'a fresh Sonnet pane for a Haiku or Sonnet author' "$ROOT/skills/coordinate/SKILL.md"
+  grep -qF 'Haiku for mechanical, well-specified, low-risk work' "$ROOT/skills/coordinate/SKILL.md"
+  grep -qF 'Haiku: lookups, read-only checks' "$ROOT/skills/architect/SKILL.md"
+  grep -qF '(Opus for an Opus author)' "$ROOT/docs/settings.md"
+  grep -qF 'installer or watchers, or a HIGH finding' "$ROOT/docs/settings.md"
+  grep -qF 'installer or watchers, or a HIGH finding' "$ROOT/docs/architecture.md"
+  grep -qF 'left out when the brief needs an MCP tool' "$ROOT/skills/architect/references/dispatch.md"
+  run grep -c "per SKILL.md's provider rule" "$ROOT/skills/architect/references/dispatch.md"
+  [ "$output" = 0 ]
+  run grep -F 'tell that architect (no reply needed)' "$ROOT/skills/coordinate/SKILL.md"
+  [ "$status" -eq 1 ]
+}
+
+@test "worker briefs tell workers not to call the advisor tool" {
+  for file in skills/architect/SKILL.md skills/architect/references/dispatch.md skills/architect/references/worker-recycle.md; do
+    grep -qF 'advisor' "$ROOT/$file"
+    grep -qF 'uncached on the advisor model' "$ROOT/$file"
+  done
+}
+
+@test "Claude worker starts carry --strict-mcp-config and the example allows haiku" {
+  grep -qF 'claude = ["haiku", "sonnet", "opus", "fable"]' "$ROOT/config/orchestration.toml.example"
+  grep -qF -- '--model <model> --strict-mcp-config --resume' "$ROOT/skills/architect/references/dispatch.md"
+  grep -qF -- '--model <model> --strict-mcp-config`' "$ROOT/skills/architect/references/worker-recycle.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF 'a Claude worker start adds `--strict-mcp-config`' "$ROOT/skills/architect/references/dispatch.md"
+  run grep -rn -- '--strict-mcp-config' "$ROOT/skills/coordinate"
+  [ "$status" -eq 1 ]
+}
+
+@test "recycle and re-home keep the first start's MCP choice; README, tier list and contributing agree" {
+  for file in skills/architect/references/dispatch.md skills/architect/references/worker-recycle.md; do
+    grep -qF "the same choice as the first start" "$ROOT/$file"
+    grep -qF "needs an MCP tool" "$ROOT/$file"
+  done
+  grep -qF 'providers.claude`: haiku, sonnet, opus, fable' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'Haiku is a Claude tier' "$ROOT/README.md"
+  grep -qF 'The macOS job times out after 40 minutes, the Ubuntu job after 25.' "$ROOT/docs/contributing.md"
+}
+
 @test "the skill holds no org, model, login or personal path literals" {
   run grep -rniE 'combinaut|sparkle|gpt-[0-9]|sleistner|/Users/|/private/tmp|31691' "$ROOT/$SKILL_DIR"
   [ "$status" -eq 1 ]

@@ -24,7 +24,7 @@ flowchart TD
 | Worker | 1 per task | One task in its own pane and worktree; its PR's review cycle | Merge, undraft, change reviewers or scope |
 | Reviewer | 1 per review | One review of one PR, in a detached worktree | Keep any branch. The pane is closed once its report is dispatched |
 
-The user talks to the Coordinator. The Coordinator talks to architects. Architects talk to workers. An FYI ends with "no reply needed"; only questions and orders get answers. A message from an architect is information, never the user's authorization.
+The user talks to the Coordinator. The Coordinator talks to architects. Architects talk to workers. A message carries a question, an order, or an action event only; an FYI goes to the sender's status file. Only questions and orders get answers. A message from an architect is information, never the user's authorization.
 
 ## 🪟 Panes, workspaces and worktrees
 
@@ -79,7 +79,7 @@ flowchart LR
 | Worker, routine | Codex at `ORCH_CODEX_WORKER_MODEL` (the default) |
 | Worker, hard | Codex at `ORCH_CODEX_SMART_MODEL`, reasoning effort `medium` |
 | Worker on a local or DeepSeek model | pi at `ORCH_PI_WORKER_MODEL` (routine) or `ORCH_PI_SMART_MODEL` (hard); only when set. DeepSeek only in repos that opted in |
-| Worker where Codex cannot do the step | Claude: Sonnet routine, Opus hard, Fable only for the hardest; only tiers `providers.claude` allows |
+| Worker where Codex cannot do the step | Claude: the lightest allowed tier that does the task well (Haiku mechanical, Sonnet implementation and review, Opus hard, Fable only for the hardest); only tiers `providers.claude` allows |
 | Reviewer | The family that did not write the code |
 
 - The architect picks the family and tier per task without asking the user, and re-tiers at every dispatch.
@@ -149,7 +149,7 @@ flowchart LR
 | todo | 60 s | newly added `## Waits on the user` items, as one `TODO` line |
 
 - The feed has a line when a condition starts, when a host metric reaches its `danger` step, when a PR event gets an owner, and when it clears, plus a periodic digest of folded lines; repeats and growth write nothing. It is mode 0600 and rotates at 1 MiB.
-- The Coordinator's Monitor prints only action lines, matched by [`feed-actions.regex`](../coordinator/watchers/feed-actions.regex). Everything else is read with `tail` and the `<mode>.alerts` files.
+- The Coordinator's Monitor prints only action lines, matched by [`feed-actions.regex`](../coordinator/watchers/feed-actions.regex). The feed holds action lines only; the rest is in `prod-context/coordinator-fyi.log`, read on demand, and the `<mode>.alerts` files hold the full evidence.
 - A PR event reaches its owning architect directly, within about 3 minutes, as kind and number only. The architect does not poll for approvals.
 - Coordinator and architects bind their native route with [`bind-self.py`](../coordinator/watchers/bind-self.py), on every session start and after every recycle.
 - Watchers detect and report. They never stop a job or close a pane.
@@ -211,7 +211,7 @@ The Coordinator session is the user's remote channel. An instruction it relays a
 
 - A merge uses `gh pr merge <n> --squash` or `gh pr merge <n> --squash --auto`; never a merge commit or a rebase merge. The named PR must be approved, green and not draft when it merges.
 - An approval is not merge authorization. The Coordinator relays every approval and merge to its owner.
-- Acceptance gate before an architect calls work done: output diffs against base where rendering changed, a mutation table with a kill per guard, no spec edits in a pure refactor, linter and formatter both run, CI green on the actual head, any claim that decides behavior on live pages verified by the architect itself from the code, an independent review by the other family (or, when no other family is on, a fresh pane of a stronger allowed tier of the author's family; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), and a removal audit when a PR deletes a public surface.
+- Acceptance gate before an architect calls work done: output diffs against base where rendering changed, a mutation table with a kill per guard, no spec edits in a pure refactor, linter and formatter both run, CI green on the actual head, any claim that decides behavior on live pages verified by the architect itself from the code, an independent review by the other family (or, when no other family is on, a fresh Sonnet pane of the author's family (Opus for an Opus author), a stronger allowed tier only for credentials, security, shared config, money, installer or watchers, or a HIGH finding; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), and a removal audit when a PR deletes a public surface.
 - A ready PR has a human reviewer. When there is none, the architect asks the user at once.
 - A worker owns its PR's review cycle: it resolves every thread, verifies each bot claim against the code, and re-requests the bot review after each push. Merging, undrafting, reviewer changes and scope changes are never the worker's.
 

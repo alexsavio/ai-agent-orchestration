@@ -1034,17 +1034,18 @@ class ClaudeTiersTest(SettingsTest):
     resolve = ProvidersTest.resolve
 
     def test_the_default_allows_every_tier(self):
-        self.assertEqual(self.resolve()["ORCH_CLAUDE_TIERS"], "sonnet,opus,fable")
+        self.assertEqual(self.resolve()["ORCH_CLAUDE_TIERS"], "haiku,sonnet,opus,fable")
         self.assertEqual(
-            s.BY_KEY["providers.claude"].default, ["sonnet", "opus", "fable"]
+            s.BY_KEY["providers.claude"].default,
+            ["haiku", "sonnet", "opus", "fable"],
         )
 
     def test_a_list_resolves_in_tier_order_and_an_export_wins(self):
         self.assertEqual(
-            self.resolve('[providers]\nclaude = ["opus", "sonnet"]\n')[
+            self.resolve('[providers]\nclaude = ["opus", "haiku", "sonnet"]\n')[
                 "ORCH_CLAUDE_TIERS"
             ],
-            "sonnet,opus",
+            "haiku,sonnet,opus",
         )
         self.assertEqual(
             self.resolve('[providers]\nclaude = ["opus"]\n', ORCH_CLAUDE_TIERS="fable")[
@@ -1055,8 +1056,8 @@ class ClaudeTiersTest(SettingsTest):
 
     def test_an_unknown_tier_is_an_error(self):
         self.assertIn(
-            'providers.claude: unknown entry "haiku"; known: sonnet, opus, fable',
-            self.error('[providers]\nclaude = ["sonnet", "haiku"]\n'),
+            'providers.claude: unknown entry "mini"; known: haiku, sonnet, opus, fable',
+            self.error('[providers]\nclaude = ["sonnet", "mini"]\n'),
         )
         with self.assertRaisesRegex(
             s.ConfigError,
@@ -1066,7 +1067,7 @@ class ClaudeTiersTest(SettingsTest):
 
     def test_an_empty_list_is_an_error(self):
         self.assertIn(
-            "providers.claude: must name at least one of sonnet, opus, fable",
+            "providers.claude: must name at least one of haiku, sonnet, opus, fable",
             self.error("[providers]\nclaude = []\n"),
         )
         with self.assertRaisesRegex(
