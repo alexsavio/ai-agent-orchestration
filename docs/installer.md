@@ -14,7 +14,7 @@ macOS or Linux, Bash 3.2 or newer; `git`, `jq`, `python3`, `curl`; `gh` for the 
 
 ## 🚀 The one-line entry: get.sh
 
-`get.sh` asks `install.sh --print-repo-path` for the clone folder (`ORCH_INSTALL_DIR` overrides it), clones the repo if the folder is missing, then runs that clone's `install.sh` with your arguments, which fast-forwards the clone. It stops with a message for an unsupported OS, Bash older than 3.2, missing `git` or `curl`, a folder that is not a git clone, a clone whose `origin` is another repo, and a clone with uncommitted edits. It never uses `sudo`. The documented command runs it only after curl succeeded, and the script's last line is an unclosed brace until it is complete, so a cut-off download runs nothing.
+`get.sh` asks `install.sh --print-repo-path` for the clone folder (`ORCH_INSTALL_DIR` overrides it), clones the repo if the folder is missing, then runs that clone's `install.sh` with your arguments, which fast-forwards the clone. It stops with a message for an unsupported OS, Bash older than 3.2, missing `git` or `curl`, a folder that is not a git clone, a clone whose `origin` is another repo, and a clone with uncommitted edits. It never uses `sudo`. Run it as `curl -fsSL <raw get.sh URL> | bash`, with options as `... | bash -s -- --env herdr`. The script's last line is an unclosed brace until it is complete, so a cut-off download runs nothing. When the script arrives on stdin and `/dev/tty` can be opened, `install.sh` reads its answers from the terminal; a redirected stdin (`bash get.sh < answers`) or no terminal keeps stdin as it is.
 
 ## 🔧 What the installer does
 
@@ -90,7 +90,7 @@ The installer prints the fix with each error.
 | Message | Fix |
 |---|---|
 | `curl: (22) …` and nothing installs | The download failed. Check the network and run the command again. |
-| `s: empty download` | The download returned nothing. The command exits non-zero; run it again. |
+| `curl: (22)` or another curl error, nothing else | The download failed, so nothing ran. The pipeline still exits 0 (use `set -o pipefail` in scripts); run it again. |
 | `git not found. Fix: …` | macOS: `xcode-select --install`. Debian/Ubuntu: `sudo apt-get install git`. |
 | `jq not found. Fix: …` | macOS: `brew install jq`. Debian/Ubuntu: `sudo apt-get install jq`. |
 | `curl not found. Fix: …` | macOS: `brew install curl`. Debian/Ubuntu: `sudo apt-get install curl`. |
