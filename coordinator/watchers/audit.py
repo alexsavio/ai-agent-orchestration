@@ -18,12 +18,12 @@ from watcher_platform import MissingMetric, herdr_bin, read_slots
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
 import orch_settings
 
-SELECTION = """number title state isDraft mergeable baseRefName headRefName headRefOid headRepository{nameWithOwner}
+SELECTION = """number title state isDraft author{login} mergeable baseRefName headRefName headRefOid headRepository{nameWithOwner}
 repository{nameWithOwner defaultBranchRef{name}}
 latestOpinionatedReviews(first:10){nodes{state commit{oid}}}
 reviewDecision reviewRequests(first:3){totalCount}
 reviewThreads(first:$ni){pageInfo{hasNextPage} nodes{isResolved}}
-reviews(last:6){nodes{author{login} body}}
+reviews(last:6){nodes{author{login} state body}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:$ni){pageInfo{hasNextPage}
 nodes{... on CheckRun{name conclusion startedAt} ... on StatusContext{context state}}}}}}}"""
 QUERY = (
@@ -458,6 +458,22 @@ def legacy_line(label, hits, kinds):
     )
 
 
+def commented_review(pr, bot):
+    """The latest COMMENTED review with a body from someone other than the PR author or the bot."""
+    owner = (pr.get("author") or {}).get("login")
+    found = [
+        review
+        for review in pr["reviews"]["nodes"]
+        if review.get("state") == "COMMENTED"
+        and (review.get("body") or "").strip()
+        and not (
+            (review.get("author") or {}).get("login")
+            and review["author"]["login"] in (owner, bot)
+        )
+    ]
+    return found[-1] if found else None
+
+
 def pr_lines(pr, page_nodes=100, settings=None):
     if pr["state"] != "OPEN":
         return []
@@ -508,6 +524,12 @@ def pr_lines(pr, page_nodes=100, settings=None):
     if "Needs a closer look" in body:
         summary = re.search(r"Needs a closer look\s*\n+([^\n]+)", body)
         emit("COPILOT", summary[1] if summary else "see overview")
+    commented = commented_review(pr, bot)
+    if commented:
+        emit(
+            "COMMENTED",
+            "by " + ((commented.get("author") or {}).get("login") or "unknown"),
+        )
     if pr["mergeable"] == "CONFLICTING":
         emit("CONFLICT", "conflicts with " + pr["baseRefName"])
     decision = pr["reviewDecision"]

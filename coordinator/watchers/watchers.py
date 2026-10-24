@@ -69,9 +69,9 @@ PULLS_DEPARTED_SECONDS = 60
 PULLS_SELECTION = audit.SELECTION.replace(
     "nodes{isResolved}", "nodes{id isResolved}"
 ).replace(
-    "reviews(last:6){nodes{author{login} body}}",
+    "reviews(last:6){nodes{author{login} state body}}",
     "reviews(last:100){pageInfo{hasPreviousPage} nodes{id author{login}}} "
-    "recentReviews:reviews(last:6){nodes{id author{login} body}}",
+    "recentReviews:reviews(last:6){nodes{id author{login} state body}}",
 )
 GITHUB_REMOTE = discovery.GITHUB_REMOTE
 
@@ -1253,6 +1253,8 @@ def pull_identities(pr, lines):
     ]
     if "COPILOT" in lines:
         identities["COPILOT"] = reviews[-1]["id"]
+    if "COMMENTED" in lines:
+        identities["COMMENTED"] = audit.commented_review(pr, bot)["id"]
     return identities
 
 
@@ -1314,7 +1316,7 @@ def reduce_pulls(before, raw):
                 and identity is not None
             ):
                 changed = bool(set(identity) - set(previous["identities"][kind]))
-            if kind == "COPILOT" and identity is not None:
+            if kind in ("COPILOT", "COMMENTED") and identity is not None:
                 # Seed legacy active state silently on its first identity-aware read.
                 changed = identity not in seen and not legacy_reviews
                 seen.add(identity)
