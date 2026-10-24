@@ -22,11 +22,79 @@ fi
 
 dir_name=$(basename "$dir" 2>/dev/null)
 
+# https://host/owner/repo for an ssh, ssh:// or https remote URL, credentials dropped; fails otherwise.
+web_url() {
+  local u=$1 rest authority host path
+  case $u in
+    https://*) rest=${u#https://}; authority=${rest%%/*}; host=${authority##*@}; path=${rest#*/} ;;
+    ssh://*) rest=${u#ssh://}; authority=${rest%%/*}; host=${authority##*@}; host=${host%%:*}; path=${rest#*/} ;;
+    *://*) return 1 ;;
+    *:*)
+      # [user@]host:path. git's rule: a "/" before the first ":" makes it a local path
+      [[ ${u%%:*} != */* ]] || return 1
+      host=${u%%:*}; host=${host#*@}; path=${u#*:} ;;
+    *) return 1 ;;
+  esac
+  host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
+  path=${path%/}; path=${path%.git}
+  [[ $host == *.* && $path == */* && $path != /* && $path != \~/* && $path != *[@:]* ]] || return 1
+  [[ $host != ssh.dev.azure.com ]] || return 1
+  rest="https://$host/$path"
+  [[ $rest =~ ^[A-Za-z0-9._~/:%+-]+$ ]] || return 1
+  printf '%s' "$rest"
+}
+
+# Percent-encode everything except unreserved characters and "/".
+url_encode() {
+  local s=$1 out="" c i
+  local LC_ALL=C
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    case $c in
+      [A-Za-z0-9._~/-]) out+=$c ;;
+      *) out+=$(printf '%%%02X' "$(($(printf '%d' "'$c") & 255))") ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# OSC 8 hyperlink: link TEXT to URL; plain TEXT when URL is empty.
+link() {
+  if [ -n "$1" ]; then printf '\033]8;;%s\a%s\033]8;;\a' "$1" "$2"; else printf '%s' "$2"; fi
+}
+
 branch=""
 worktree=""
+repo_url=""
+branch_url=""
 if [ -n "$dir" ] && git -C "$dir" --no-optional-locks rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   branch=$(git -C "$dir" --no-optional-locks branch --show-current 2>/dev/null)
   toplevel=$(git -C "$dir" --no-optional-locks rev-parse --show-toplevel 2>/dev/null)
+  remote=""
+  remote_branch=""
+  if [ -n "$branch" ]; then
+    # git's own upstream rule: empty when there is no usable upstream
+    IFS='|' read -r remote merge < <(git -C "$dir" --no-optional-locks for-each-ref --format='%(upstream:remotename)|%(upstream:remoteref)' "refs/heads/$branch" 2>/dev/null)
+    remote_branch=${merge#refs/heads/}
+    if [ "$remote" = "." ]; then remote=""; remote_branch=""; fi
+  fi
+  [ -n "$remote" ] || remote=origin
+  remote_url=$(git -C "$dir" --no-optional-locks remote get-url "$remote" 2>/dev/null)
+  if [ -n "$remote_url" ] && repo_url=$(web_url "$remote_url"); then
+    if [ -n "$remote_branch" ]; then
+      repo_host=${repo_url#https://}
+      repo_host=${repo_host%%/*}
+      repo_host=${repo_host%%:*}
+      case $repo_host in
+        *gitlab*) branch_url="$repo_url/-/tree/$(url_encode "$remote_branch")" ;;
+        bitbucket.org) branch_url="$repo_url/src/$(url_encode "$remote_branch")" ;;
+        *github*) branch_url="$repo_url/tree/$(url_encode "$remote_branch")" ;;
+        *) branch_url="" ;;
+      esac
+    fi
+  else
+    repo_url=""
+  fi
   if [ -n "$toplevel" ]; then
     dir_name=$(basename "$toplevel")
     # Linked worktree: git-dir differs from git-common-dir; show repo/worktree
@@ -58,12 +126,12 @@ fi
 segments=()
 [ -n "$model" ] && segments+=("$(printf '\033[32m%s\033[0m' "$model")")
 [ -n "$ctx" ] && segments+=("$ctx")
-[ -n "$dir_name" ] && segments+=("$(printf '\033[33m%s\033[0m' "$dir_name")")
+[ -n "$dir_name" ] && segments+=("$(printf '\033[33m%s\033[0m' "$(link "$repo_url" "$dir_name")")")
 # \xef\x90\x82 = U+F402 Nerd Font oct-repo-forked (worktree)
-[ -n "$worktree" ] && segments+=("$(printf '\033[34m\xef\x90\x82 %s\033[0m' "$worktree")")
+[ -n "$worktree" ] && segments+=("$(printf '\033[34m\xef\x90\x82 %s\033[0m' "$(link "$branch_url" "$worktree")")")
 # \xee\x9c\xa5 = U+E725 Nerd Font git-branch (devicons)
 if [ -n "$branch" ] && [ -z "$worktree" ]; then
-  segments+=("$(printf '\033[36m\xee\x9c\xa5 %s\033[0m' "$branch")")
+  segments+=("$(printf '\033[36m\xee\x9c\xa5 %s\033[0m' "$(link "$branch_url" "$branch")")")
 fi
 if [ -n "$style" ] && [ "$style" != "default" ]; then
   segments+=("$(printf '\033[35m%s\033[0m' "$style")")

@@ -76,7 +76,7 @@ Workers, recycles and handoffs: [`docs/workers.md`](docs/workers.md).
 
 ### 📝 The to-do pane
 
-The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). Details, keys and settings: [docs/todo.md](docs/todo.md).
+The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). Items with numbered choices can be answered there: select one, press `a`, then choose a number or `t` for free text. Details, keys and settings: [docs/todo.md](docs/todo.md).
 
 ### ❓ User questions
 
@@ -84,7 +84,7 @@ Every question for you gets its own pane under the to-do pane, with keys to answ
 
 ### 🔍 Review PRs
 
-`/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`, or `ORCH_CODEX_SMART_MODEL` when only that one is set) in a Herdr pane for every PR that is ready; Codex posts the review and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. A PR absent from one search is checked directly before it is cleared; at most 10 checks run per poll and an unconfirmed absence clears after five misses. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
+`/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`, or `ORCH_CODEX_SMART_MODEL` when only that one is set) in a Herdr pane for every PR that is ready; Codex posts a commit-pinned `review.json` with `gh api .../reviews --input review.json` and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. A PR absent from one search is checked directly before it is cleared; at most 10 checks run per poll and an unconfirmed absence clears after five misses. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
 
 ### 🐘 Heavy jobs
 
@@ -112,3 +112,5 @@ If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`
 - [`docs/pr-tabs.md`](docs/pr-tabs.md): the Chrome PR tabs extension: automatic architect groups (repo fallback), install, use and troubleshooting.
 - [`env/README.md`](env/README.md): the env adapters (`herdr` and how to add one).
 - [`docs/contributing.md`](docs/contributing.md): running the tests and sending changes.
+
+Explicit completion, heartbeat and question commands: [worker signals](docs/workers.md#explicit-worker-signals).

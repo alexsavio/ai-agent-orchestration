@@ -24,7 +24,7 @@ TIMED_OUT = 124
 
 
 @contextmanager
-def answers_lock(directory=None):
+def answers_lock(directory=None, timeout=None):
     """Holds the lock; a process the holder started with HELD in its environment does not lock again."""
     if os.environ.get(HELD):
         yield
@@ -32,7 +32,19 @@ def answers_lock(directory=None):
     directory = Path(directory) if directory else questions_directory()
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / ".answers.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        if timeout is None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        else:
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("question lock wait timed out") from None
+                    time.sleep(min(0.05, remaining))
         yield
 
 
@@ -70,9 +82,18 @@ def stop_group(process, grace):
     process.wait()
 
 
-def run_group(argv, timeout, env=None, check=True):
+def run_group(argv, timeout, env=None, check=True, quiet=False):
     """Runs argv in its own process group, stopped when it outlives the timeout or this process is interrupted or terminated."""
-    process = subprocess.Popen(argv, start_new_session=True, env=env)
+    process = subprocess.Popen(
+        argv,
+        start_new_session=True,
+        env=env,
+        **(
+            {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+            if quiet
+            else {}
+        ),
+    )
 
     grace = TERM_GRACE if os.environ.get(HELD) else OUTER_GRACE
 

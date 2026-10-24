@@ -21,7 +21,9 @@ import alert_policy
 import audit
 import discovery
 import question_remind
+import todo_answers
 import watcher_runtime as runtime
+import worker_signals
 from question_lock import HELD, answers_lock, questions_directory
 from watcher_platform import (
     MissingMetric,
@@ -752,6 +754,8 @@ def reduce_waiting(previous, raw):
     current, events = {}, []
     for key, row in rows.items():
         entry = old.get(key)
+        if worker_signals.suppressed(row, raw):
+            continue
         if architect_like(row):
             continue
         if row.get("agent_status") == "working" and key not in gaps:
@@ -863,9 +867,38 @@ def reduce_workers(before, raw):
             )
         if new:
             events.append(worker_line(new))
+    active_done = {
+        record.get("id")
+        for record in raw.get("worker_signals", {}).values()
+        if record["kind"] == "done"
+    }
+    resumed = set(previous.get("resumed_done_ids", []))
+    idle_done = set(previous.get("idle_done_ids", []))
+    if "worker_signals" in raw:
+        resumed &= active_done
+        idle_done &= active_done
+    for row in agents(raw):
+        record = raw.get("worker_signals", {}).get(row["pane_id"])
+        if record and record["kind"] == "done" and now > record["at"]:
+            if row.get("agent_status") in IDLE_STATUSES:
+                idle_done.add(record.get("id"))
+            elif row.get("agent_status") == "working" and record.get("id") in idle_done:
+                resumed.add(record.get("id"))
+    raw = dict(raw, resumed_done_ids=list(resumed))
     waiting, waiting_events = reduce_waiting(previous, raw)
     events += waiting_events
-    return dict(
+    signal_events = raw.get("signal_events", [])
+    signal_ids = (
+        [record["id"] for record in signal_events]
+        if "signal_events" in raw
+        else previous.get("signal_ids", [])
+    )
+    events += [
+        worker_signals.event_line(record)
+        for record in signal_events
+        if record["id"] not in previous.get("signal_ids", [])
+    ]
+    result = dict(
         bad={key: value for key, value in bad.items() if key in present},
         present=present,
         unreadable=unreadable,
@@ -875,7 +908,14 @@ def reduce_workers(before, raw):
             "waiting_read_failures", previous.get("waiting_read_failures", [])
         ),
         idle=idle,
-    ), events + idle_events
+    )
+    if idle_done:
+        result["idle_done_ids"] = sorted(idle_done)
+    if resumed:
+        result["resumed_done_ids"] = sorted(resumed)
+    if signal_ids:
+        result["signal_ids"] = signal_ids
+    return result, events + idle_events
 
 
 def pull_owners(command, prs, failed=None, work=None):
@@ -1349,10 +1389,21 @@ def collect_todo(before):
     state = Path(
         os.environ.get("ORCH_USER_TODO_STATE") or coordinator / "user-todo.state.json"
     )
-    return module.merge(directory, output, state)
+    raw = module.merge(directory, output, state)
+    records, failed = todo_answers.collect(command)
+    if todo_answers.directory().exists():
+        raw["todo_answers"] = records
+        raw["todo_pending_ids"] = list(todo_answers.pending_ids())
+        raw["todo_answer_notices"] = [
+            notice for notice in failed if notice.startswith("answer discarded:")
+        ]
+        raw["unreadable"] += [
+            notice for notice in failed if not notice.startswith("answer discarded:")
+        ]
+    return raw
 
 
-def reduce_todo(before, raw):
+def reduce_todo_status(before, raw):
     current = {item["id"]: item for item in raw["now"]}
     directory_down = any(Path(path).suffix != ".md" for path in raw["unreadable"])
     if directory_down and before:
@@ -1414,6 +1465,35 @@ def reduce_todo(before, raw):
     }, events
 
 
+def reduce_todo(before, raw):
+    after, events = reduce_todo_status(before, raw)
+    events += [
+        "TODO READFAIL " + notice for notice in raw.get("todo_answer_notices", [])
+    ]
+    records = raw.get("todo_answers", [])
+    previous = set((before or {}).get("todo_answer_ids", []))
+    now = raw.get("observed_at", time.time())
+    retries = (before or {}).get("todo_answer_retry_at", {})
+    emitted = {
+        record["id"]
+        for record in records
+        if record["id"] not in previous
+        or now - retries.get(record["id"], now) >= todo_answers.KEEP_SECONDS + 60
+    }
+    events += [
+        todo_answers.event_line(record) for record in records if record["id"] in emitted
+    ]
+    pending = set(raw.get("todo_pending_ids", [record["id"] for record in records]))
+    seen = (previous & pending) | {record["id"] for record in records}
+    if seen:
+        after["todo_answer_ids"] = sorted(seen)
+        after["todo_answer_retry_at"] = {
+            identifier: now if identifier in emitted else retries.get(identifier, now)
+            for identifier in seen
+        }
+    return after, events
+
+
 def answer_order(path):
     claim = path.name.split(".", 2)[1]
     if re.fullmatch(r"[0-9]{20}-[0-9a-f]{32}", claim):
@@ -1424,7 +1504,17 @@ def answer_order(path):
         return 0, path.name
 
 
-def open_question(slug, question):
+def open_question(slug, question, timeout=question_remind.OPEN_TIMEOUT):
+    if slug == "close":
+        from question_lock import run_group
+
+        return run_group(
+            [str(ROOT.parents[1] / "ask-user-question"), slug, str(question)],
+            timeout,
+            env=dict(os.environ, **{HELD: "1"}),
+            check=False,
+            quiet=True,
+        )
     argv = [
         "/usr/bin/env",
         f"{HELD}=1",
@@ -1432,7 +1522,7 @@ def open_question(slug, question):
         slug,
         str(question),
     ]
-    return runtime.run(argv, timeout=question_remind.OPEN_TIMEOUT).returncode
+    return runtime.run(argv, timeout=timeout).returncode
 
 
 def collect_answers(before, consume=True):
@@ -1520,13 +1610,18 @@ def reduce_answers(before, raw):
 
 
 def acknowledge_answers(raw):
-    for _, _, path, _ in raw.get("answers", []):
+    notices = []
+    for slug, text, path, _ in raw.get("answers", []):
         if not path:
             continue
+        notice = worker_signals.bridge_user_answer(slug, text)
+        if notice:
+            notices.append(notice)
         processing = Path(path)
         processing.replace(
             processing.with_name(processing.name.removesuffix(".processing") + ".seen")
         )
+    return notices
 
 
 def reduce(mode, before, raw):
@@ -1804,6 +1899,14 @@ def cycle_pass(base, mode, collector, failures, budget):
             reduced = True
             if not state.get("baseline_pending") or mode == "answers":
                 events += reduced_events
+            else:
+                events += [
+                    line
+                    for line in reduced_events
+                    if line.startswith(
+                        ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ")
+                    )
+                ]
             if mode == "hog":
                 hog_hits = after
             if mode in PRESSURE_SETTINGS and not any(
@@ -1831,7 +1934,9 @@ def cycle_pass(base, mode, collector, failures, budget):
             events += failed_read(state, mode, failures, type(error).__name__)
         line = publish_events(base, mode, state, events)
         if mode == "answers" and reduced:
-            acknowledge_answers(raw)
+            notices = acknowledge_answers(raw)
+            if notices:
+                line = publish_events(base, mode, state, notices)
         if mode == "hog":
             log_events = log_hog_hits(base, state, hog_hits)
             if log_events:
@@ -2132,6 +2237,14 @@ def collect(mode, before, scope="", base=None):
                 MissingMetric,
             ):
                 raw["workspaces"] = None
+            owners = waiting_owners(raw)
+            if owners is not None and worker_signals.directory().exists():
+                signals, events = worker_signals.collect_live(
+                    command, raw["observed_at"]
+                )
+                raw["worker_signals"] = signals
+                raw["signal_events"] = events
+                raw["observed_at"] = time.time()
             collect_waiting_jobs(raw, before)
             if base is not None:
                 raw["closed"] = closed_panes(
