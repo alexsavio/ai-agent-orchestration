@@ -516,7 +516,15 @@ SETTINGS = [
         "ORCH_PR_TABS_DEFAULT_REPO",
         "str",
         "",
-        "Repo name for bare PR numbers; empty turns number jumps off",
+        "Repo name for bare PR numbers; number jumps are off when pr_tabs.repos is empty too",
+    ),
+    _g(
+        "pr_tabs.repos",
+        "ORCH_PR_TABS_REPOS",
+        "list",
+        [],
+        "Repo names in pr_tabs.org the popup can send a bare PR number to, besides default_repo; the popup shows a picker when there are two or more",
+        sep=",",
     ),
     _g(
         "pr_tabs.open_all",
