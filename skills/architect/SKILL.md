@@ -106,11 +106,11 @@ A reviewer gets its own detached worktree at the PR's head and its own workspace
 collide with the author's pane. It has one job and no branch of its own.
 
 The moment its report is read and its findings are dispatched to the owning pane, tear it down:
-`herdr workspace close <id>` and `git worktree remove <path> --force`. Do not leave reviewer
+close the reviewer's pane with `~/.claude/coordinator/watchers/close-pane.sh <pane>` (a workspace closes with its last pane; this also writes its usage ledger line), then `herdr workspace close <id>` only if the workspace is still there, then `git worktree remove <path> --force`. Do not leave reviewer
 workspaces accumulating — they hold file handles, clutter the sidebar, and imply work that is not
 happening. Close only what you created.
 
-**Close what is no longer needed, automatically, without asking.** In the same step as the event that ends a pane's job: a merged or closed PR → close its workspace and remove its worktree (if clean); a pane replaced by another (model change, budget out) → close the old pane; a reviewer or one-off pane → close once its report is dispatched. Keep a pane while it owns an open PR's review cycle.
+**Close what is no longer needed, automatically, without asking.** In the same step as the event that ends a pane's job: a merged or closed PR → close its pane with `close-pane.sh`, then its workspace if it is still there, and remove its worktree (if clean); a pane replaced by another (model change, budget out) → close the old pane; a reviewer or one-off pane → close once its report is dispatched. Keep a pane while it owns an open PR's review cycle.
 
 **A finished worker closes right away, without asking, once its report is read, it has no open work and nothing is typed in its composer. Close it with `~/.claude/coordinator/watchers/close-worker.sh <pane> --task <text> --report <path>`, which writes one recovery line in your status file and closes the pane; never pkill.** On `WORKER IDLE <pane> owner=<you>`, check the worker: close it the same way when its task is done, or keep it and do nothing else. Architects stay open. Read [`worker-close.md`](references/worker-close.md) before you close a worker.
 

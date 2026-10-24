@@ -2,6 +2,7 @@
 """The weekly limit read from the status line files, then session count and cost per workspace label from the ledger."""
 import csv
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -18,51 +19,53 @@ def age(seconds):
     return f'{minutes}m' if minutes < 60 else f'{minutes // 60}h{minutes % 60:02d}m'
 
 
+def number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def weekly(usage_dir, now):
-    """The `weekly:` line, from the .usage file with the newest mtime within the last 6 hours."""
-    fresh = []
+    """The `weekly:` line: among the .usage files under 6 hours old, the latest window, and its highest percentage."""
+    found = []
     for path in Path(usage_dir).glob('*.usage'):
         try:
             mtime = path.stat().st_mtime
-        except OSError:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
             continue
-        if 0 <= now - mtime <= FRESH_S:
-            fresh.append((mtime, path))
-    if not fresh:
+        if 0 <= now - mtime <= FRESH_S and isinstance(data, dict) and number(data.get('seven_day_pct')):
+            resets = data.get('seven_day_resets_at')
+            found.append((resets if number(resets) else -math.inf, data['seven_day_pct'], mtime))
+    if not found:
         return 'weekly: unknown'
-    mtime, path = max(fresh)
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return 'weekly: unknown'
-    pct = data.get('seven_day_pct') if isinstance(data, dict) else None
-    resets = data.get('seven_day_resets_at')
-    if not isinstance(pct, (int, float)) or isinstance(pct, bool):
-        return 'weekly: unknown'
-    if isinstance(resets, (int, float)) and resets <= now:
+    latest = max(item[0] for item in found)
+    resets, pct, mtime = max(item for item in found if item[0] == latest)
+    reading = f'(reading {age(now - mtime)} old)'
+    if resets == -math.inf:
+        return f'weekly: {pct:g}% {reading}'
+    if resets <= now:
         return f'weekly: unknown (window reset at {when(resets)})'
-    until = f' resets {when(resets)}' if isinstance(resets, (int, float)) else ''
-    return f'weekly: {pct:g}%{until} (reading {age(now - mtime)} old)'
+    return f'weekly: {pct:g}% resets {when(resets)} {reading}'
 
 
 def cost_of(text):
     try:
-        return float(text)
+        value = float(text)
     except ValueError:
         return None
+    return value if math.isfinite(value) else None
 
 
 def ledger_lines(ledger):
     """One line per workspace label, highest cost first, from the last ledger line of each session id."""
     try:
-        with open(ledger, newline='') as handle:
-            rows = list(csv.DictReader(handle, delimiter='\t'))
+        with open(ledger, newline='', errors='replace') as handle:
+            rows = list(csv.DictReader(handle, delimiter='\t', quoting=csv.QUOTE_NONE))
     except OSError:
         return ['ledger: none yet']
     last = {}
     for row in rows:
         session = row.get('session_id')
-        if session:
+        if session and row.get('closed_at') != 'closed_at':
             last[session] = row
     totals = {}
     for row in last.values():

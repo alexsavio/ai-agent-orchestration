@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -19,14 +20,34 @@ COLUMNS = (
 )
 
 
-def herdr(*argv):
+LOOKUP_TIMEOUT_S = 5
+# The whole ledger step; callers such as question_lock.py allow a close only 30 s.
+DEADLINE_S = 10
+
+
+class NoAgent(Exception):
+    """The pane has no agent: herdr answers agent_not_found."""
+
+
+def herdr(*argv, deadline=None):
     binary = (
         os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
     )
+    left = LOOKUP_TIMEOUT_S if deadline is None else deadline - time.monotonic()
     done = subprocess.run(
-        [binary, *argv], capture_output=True, text=True, check=False, timeout=30
+        [binary, *argv],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=max(min(LOOKUP_TIMEOUT_S, left), 0.1),
     )
     if done.returncode:
+        try:
+            code = (json.loads(done.stdout).get("error") or {}).get("code")
+        except (ValueError, AttributeError):
+            code = None
+        if code == "agent_not_found":
+            raise NoAgent(argv[-1])
         raise RuntimeError(
             f"herdr {' '.join(argv)} failed: {done.stderr.strip() or done.returncode}"
         )
@@ -52,13 +73,15 @@ def usage_of(session):
     return data if isinstance(data, dict) else {}
 
 
-def record(pane, now):
+def record(pane, now, deadline=None):
     """The ledger row for `pane`, or None when it has no agent."""
-    agent = herdr("agent", "get", pane).get("agent") or {}
+    agent = herdr("agent", "get", pane, deadline=deadline).get("agent") or {}
     session = (agent.get("agent_session") or {}).get("value")
     if not agent or not session:
         return None
-    workspace = herdr("workspace", "get", agent["workspace_id"])["workspace"]
+    workspace = herdr("workspace", "get", agent["workspace_id"], deadline=deadline)[
+        "workspace"
+    ]
     usage = usage_of(session)
     return (
         now.isoformat(timespec="seconds"),
@@ -82,9 +105,13 @@ def append(row):
 
 def main(argv):
     try:
-        row = record(argv[1], datetime.now().astimezone())
+        row = record(
+            argv[1], datetime.now().astimezone(), time.monotonic() + DEADLINE_S
+        )
         if row:
             append(row)
+    except NoAgent:
+        pass
     except Exception as error:  # best effort: the close must still run
         print(f"warning: usage ledger line not written: {error}", file=sys.stderr)
     return 0

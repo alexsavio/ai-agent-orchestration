@@ -13,7 +13,13 @@ setup() {
 printf '%s\n' "$*" >>"$HERDR_CALLS"
 key=${3//:/_}
 case "$1 $2" in
-  'agent get') [ -z "${HERDR_LOOKUP_FAIL:-}" ] && cat "$FX/agent-$key.json" ;;
+  'agent get')
+    [ -z "${HERDR_SLOW:-}" ] || exec sleep "$HERDR_SLOW"
+    if [ -n "${HERDR_NO_AGENT:-}" ]; then
+      printf '{"id":"cli:agent:get","error":{"code":"agent_not_found","message":"no agent in pane"}}\n'
+      exit 1
+    fi
+    [ -z "${HERDR_LOOKUP_FAIL:-}" ] && cat "$FX/agent-$key.json" ;;
   'workspace get') cat "$FX/ws-$key.json" ;;
   'pane close') [ -z "${HERDR_CLOSE_FAIL:-}" ] ;;
   *) exit 1 ;;
@@ -87,9 +93,8 @@ close_pane() {
   [ ! -e "$ORCH_CLOSED_DIR/wW:p1" ]
 }
 
-@test "a pane with no agent gets no line" {
-  printf '{"result":{"agent":null}}\n' >"$FX/agent-wW_p1.json"
-  close_pane wW:p1
+@test "a pane with no agent gets no line and no warning (real agent_not_found reply)" {
+  HERDR_NO_AGENT=1 close_pane wW:p1
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   [ ! -e "$LEDGER" ]
@@ -104,4 +109,23 @@ close_pane() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"warning: usage ledger line not written for wW:p1"* ]] || return 1
   grep -qx 'pane close wW:p1' "$HERDR_CALLS"
+}
+
+@test "a slow herdr lookup is cut off: the pane still closes, the exit code and the marker are unchanged" {
+  start=$SECONDS
+  HERDR_SLOW=30 close_pane wW:p1
+  [ "$status" -eq 0 ]
+  [ $((SECONDS - start)) -lt 20 ]
+  [[ "$output" == *"warning: usage ledger line not written: "* ]] || return 1
+  [ ! -e "$LEDGER" ]
+  grep -qx 'pane close wW:p1' "$HERDR_CALLS"
+  [ -f "$ORCH_CLOSED_DIR/wW:p1" ]
+}
+
+@test "a label with a tab and a newline stays one 8-column row" {
+  printf '{"result":{"workspace":{"workspace_id":"wW","label":"tab\\there\\nnewline","tokens":{"owner":"wA"}}}}\n' >"$FX/ws-wW.json"
+  close_pane wW:p1
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$LEDGER")" -eq 2 ]
+  [ "$(awk -F'\t' 'NR == 2 { print NF }' "$LEDGER")" -eq 8 ]
 }

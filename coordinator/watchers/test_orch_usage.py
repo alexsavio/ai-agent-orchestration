@@ -52,6 +52,28 @@ class WeeklyTests(IsolatedTestCase):
         self.assertTrue(line.startswith("weekly: unknown (window reset at "), line)
         self.assertNotIn("90", line)
 
+    def test_latest_window_wins_and_max_pct_among_its_files(self):
+        win = NOW + 3600
+        self.usage("active", {"seven_day_pct": 48, "seven_day_resets_at": win}, 600)
+        self.usage("idle", {"seven_day_pct": 40, "seven_day_resets_at": win}, 30)
+        self.usage(
+            "nextwin", {"seven_day_pct": 3, "seven_day_resets_at": win + 7200}, 900
+        )
+        self.usage(
+            "stale", {"seven_day_pct": 99, "seven_day_resets_at": win + 7200}, 7 * 3600
+        )
+        line = orch_usage.weekly(self.dir, NOW)
+        self.assertEqual(line.split(" resets ")[0], "weekly: 3%")
+        self.assertTrue(line.endswith("(reading 15m old)"), line)
+
+    def test_max_pct_reports_the_age_of_the_file_that_gave_it(self):
+        win = NOW + 3600
+        self.usage("active", {"seven_day_pct": 48, "seven_day_resets_at": win}, 600)
+        self.usage("idle", {"seven_day_pct": 40, "seven_day_resets_at": win}, 30)
+        line = orch_usage.weekly(self.dir, NOW)
+        self.assertTrue(line.startswith("weekly: 48% resets "), line)
+        self.assertTrue(line.endswith("(reading 10m old)"), line)
+
     def test_missing_pct_is_unknown_never_zero(self):
         self.usage("a", {"model": "m", "cost_usd": 1}, 60)
         line = orch_usage.weekly(self.dir, NOW)
@@ -101,6 +123,46 @@ class LedgerTests(IsolatedTestCase):
         self.assertEqual(
             orch_usage.ledger_lines(self.path),
             ["alpha: 2 sessions $1.00 (1 without cost)"],
+        )
+
+    def test_cell_starting_with_a_quote_does_not_swallow_later_rows(self):
+        self.write(
+            self.row('"quoted', "s1", "1.00"),
+            self.row("beta", "s2", "2.00"),
+            self.row("gamma", "s3", "3.00"),
+        )
+        self.assertEqual(
+            orch_usage.ledger_lines(self.path),
+            [
+                "gamma: 1 session $3.00",
+                "beta: 1 session $2.00",
+                '"quoted: 1 session $1.00',
+            ],
+        )
+
+    def test_a_second_header_row_is_not_data(self):
+        self.path.write_text(
+            HEADER + HEADER + "\t".join(self.row("alpha", "s1", "1.00")) + "\n"
+        )
+        self.assertEqual(orch_usage.ledger_lines(self.path), ["alpha: 1 session $1.00"])
+
+    def test_invalid_utf8_does_not_raise(self):
+        self.path.write_bytes(
+            HEADER.encode()
+            + "\t".join(self.row("alpha", "s1", "1.00")).encode()
+            + b"\xff\xfe\n"
+        )
+        self.assertEqual(orch_usage.ledger_lines(self.path)[0][:6], "alpha:")
+
+    def test_non_finite_cost_counts_as_unknown(self):
+        self.write(
+            self.row("alpha", "s1", "nan"),
+            self.row("alpha", "s2", "inf"),
+            self.row("alpha", "s3", "2.00"),
+        )
+        self.assertEqual(
+            orch_usage.ledger_lines(self.path),
+            ["alpha: 3 sessions $2.00 (2 without cost)"],
         )
 
     def test_missing_ledger(self):
