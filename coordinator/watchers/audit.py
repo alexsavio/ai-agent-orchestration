@@ -23,7 +23,7 @@ repository{nameWithOwner defaultBranchRef{name}}
 latestOpinionatedReviews(first:10){nodes{state commit{oid}}}
 reviewDecision reviewRequests(first:3){totalCount}
 reviewThreads(first:$ni){pageInfo{hasNextPage} nodes{isResolved}}
-reviews(last:6){nodes{author{login} state body}}
+reviews(last:6){nodes{author{login __typename} state body comments{totalCount}}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:$ni){pageInfo{hasNextPage}
 nodes{... on CheckRun{name conclusion startedAt} ... on StatusContext{context state}}}}}}}"""
 QUERY = (
@@ -459,13 +459,15 @@ def legacy_line(label, hits, kinds):
 
 
 def commented_review(pr, bot):
-    """The latest COMMENTED review with a body from someone other than the PR author or the bot."""
+    """The latest human COMMENTED review with a body and no inline comments, not by the PR author or the bot."""
     owner = (pr.get("author") or {}).get("login")
     found = [
         review
         for review in pr["reviews"]["nodes"]
         if review.get("state") == "COMMENTED"
         and (review.get("body") or "").strip()
+        and not (review.get("comments") or {}).get("totalCount")
+        and (review.get("author") or {}).get("__typename") != "Bot"
         and not (
             (review.get("author") or {}).get("login")
             and review["author"]["login"] in (owner, bot)

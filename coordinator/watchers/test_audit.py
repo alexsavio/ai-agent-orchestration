@@ -111,6 +111,14 @@ class AuditTests(IsolatedTestCase):
             self.review("R5", "sleistner", None, state="COMMENTED"),
             self.review("R6", "author", "My own reply"),
             self.review("R7", "robot", "Bot summary"),
+            dict(
+                self.review("R8", "sleistner", "See inline"),
+                comments=dict(totalCount=2),
+            ),
+            dict(
+                self.review("R9", "other-bot", "Automated"),
+                author=dict(login="other-bot", __typename="Bot"),
+            ),
         ):
             with self.subTest(review=review["id"]):
                 self.pr["reviews"]["nodes"] = [review]
@@ -124,6 +132,16 @@ class AuditTests(IsolatedTestCase):
             self.review("R3", "author", "Reply"),
         ]
         self.assertEqual(self.lines(), [f"COMMENTED {LABEL} [by second]"])
+
+    def test_commented_review_with_zero_inline_comments_and_a_user_author_fires(self):
+        self.pr["reviews"]["nodes"] = [
+            dict(
+                self.review("R1", "sleistner", "Findings"),
+                author=dict(login="sleistner", __typename="User"),
+                comments=dict(totalCount=0),
+            )
+        ]
+        self.assertEqual(self.lines(), [f"COMMENTED {LABEL} [by sleistner]"])
 
     def test_commented_review_from_a_deleted_author(self):
         self.pr["author"] = None

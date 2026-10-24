@@ -1720,7 +1720,7 @@ class PullsTest(IsolatedTestCase):
             w.PULLS_SELECTION,
         )
         self.assertIn(
-            "recentReviews:reviews(last:6){nodes{id author{login} state body}}",
+            "recentReviews:reviews(last:6){nodes{id author{login __typename} state body comments{totalCount}}}",
             w.PULLS_SELECTION,
         )
         self.assertEqual(w.PULLS_SELECTION.count(" body"), 1)
@@ -1774,6 +1774,39 @@ class PullsTest(IsolatedTestCase):
         state, events = w.reduce_pulls(
             state, w.collect_pulls(self.command([row]), state)
         )
+        self.assertEqual(events, [])
+
+    def test_state_saved_by_the_old_code_fires_an_old_qualifying_review_once(self):
+        old = self.review("R1", "sleistner", "Findings")
+        state, _ = w.reduce_pulls(
+            None, w.collect_pulls(self.command([self.commented_row()]), None)
+        )
+        saved = state["prs"]["owner/product#7"]
+        saved["seen_reviews"] = ["B1"]
+        self.assertNotIn("COMMENTED", saved["lines"])
+        row = self.commented_row(old)
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(
+            events,
+            [f"COMMENTED owner/product#7 owner=wArch {PR['title']} [by sleistner]"],
+        )
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+        self.assertEqual(events, [])
+
+    def test_legacy_snapshot_without_seen_reviews_seeds_commented_silently(self):
+        state, _ = w.reduce_pulls(
+            None, w.collect_pulls(self.command([self.commented_row()]), None)
+        )
+        state["prs"]["owner/product#7"].pop("seen_reviews")
+        row = self.commented_row(self.review("R1", "sleistner", "Findings"))
+        state, events = w.reduce_pulls(
+            state, w.collect_pulls(self.command([row]), state)
+        )
+        self.assertEqual(events, [])
+        self.assertIn("R1", state["prs"]["owner/product#7"]["seen_reviews"])
+        _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertEqual(events, [])
 
     def test_a_new_commented_review_fires_again(self):

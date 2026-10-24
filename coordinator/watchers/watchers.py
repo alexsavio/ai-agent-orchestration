@@ -69,9 +69,9 @@ PULLS_DEPARTED_SECONDS = 60
 PULLS_SELECTION = audit.SELECTION.replace(
     "nodes{isResolved}", "nodes{id isResolved}"
 ).replace(
-    "reviews(last:6){nodes{author{login} state body}}",
+    "reviews(last:6){nodes{author{login __typename} state body comments{totalCount}}}",
     "reviews(last:100){pageInfo{hasPreviousPage} nodes{id author{login}}} "
-    "recentReviews:reviews(last:6){nodes{id author{login} state body}}",
+    "recentReviews:reviews(last:6){nodes{id author{login __typename} state body comments{totalCount}}}",
 )
 GITHUB_REMOTE = discovery.GITHUB_REMOTE
 
