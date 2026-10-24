@@ -166,6 +166,32 @@ def my_review_sha(pr):
     return ((nodes[-1].get("commit") or {}).get("oid")) if nodes else None
 
 
+def dispatched_records(pr, dispatched):
+    """The valid per-head records for a PR from locally dispatched state."""
+    entry = dispatched.get(pr["url"]) if isinstance(dispatched, dict) else None
+    return heads(entry)
+
+
+def dispatched_current_head_done(pr, dispatched):
+    """Whether a completed local dispatch already covers this PR head."""
+    head = pr.get("headRefOid") or ""
+    return (
+        bool(head)
+        and dispatched_records(pr, dispatched).get(head, {}).get("state") == "done"
+    )
+
+
+def dispatched_done_on_other_head(pr, dispatched):
+    """Whether a completed local dispatch reviewed a SHA other than this head."""
+    head = pr.get("headRefOid") or ""
+    records = dispatched_records(pr, dispatched)
+    if not head or dispatched_current_head_done(pr, dispatched):
+        return False
+    return any(
+        sha != head and record.get("state") == "done" for sha, record in records.items()
+    )
+
+
 def fetch(scope):
     login = viewer_login()
     me = login.lower()
@@ -177,10 +203,15 @@ def fetch(scope):
         f"is:pr is:open reviewed-by:@me -review-requested:@me archived:false {scope}".strip(),
         login,
     )
+    dispatched = load_dispatched()
     moved = [
         n
         for n in reviewed
-        if my_review_sha(n) and my_review_sha(n) != n.get("headRefOid")
+        if not dispatched_current_head_done(n, dispatched)
+        and (
+            (my_review_sha(n) and my_review_sha(n) != n.get("headRefOid"))
+            or dispatched_done_on_other_head(n, dispatched)
+        )
     ]
     seen = set()
     nodes = []
@@ -305,10 +336,23 @@ def save_state(scope, snap):
     os.replace(tmp, path)
 
 
-def load_dispatched():
-    if not DISPATCH_FILE.exists():
+def read_dispatched():
+    """Reads valid dispatch state; only a missing file is an empty ledger."""
+    try:
+        data = json.loads(DISPATCH_FILE.read_text())
+    except FileNotFoundError:
         return {}
-    return json.loads(DISPATCH_FILE.read_text())
+    if not isinstance(data, dict):
+        raise ValueError("dispatched state must be a JSON object")
+    return data
+
+
+def load_dispatched():
+    """Best-effort dispatch state for discovery; invalid state means no fallback."""
+    try:
+        return read_dispatched()
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
 
 
 def update_dispatched(change):
@@ -316,7 +360,7 @@ def update_dispatched(change):
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     with open(STATE_DIR / "dispatched.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        data = load_dispatched()
+        data = read_dispatched()
         change(data)
         tmp = DISPATCH_FILE.with_suffix(f".{os.getpid()}.tmp")
         tmp.write_text(json.dumps(data, indent=1))
@@ -389,7 +433,8 @@ def needs_dispatch(pr, dispatched):
     if bucket(pr) != "ready":
         return False, None
     sha = pr.get("headRefOid") or ""
-    known = heads(dispatched.get(pr["url"]) or {})
+    entry = dispatched.get(pr["url"]) if isinstance(dispatched, dict) else None
+    known = heads(entry)
     if sha and sha in known:
         return False, None
     kind = "re-review" if known or my_review_sha(pr) else "review"
@@ -677,8 +722,15 @@ HEADS_KEPT = 20
 
 def heads(entry):
     """sha -> {state, agent, pane, at} for one PR; a mark from before per-head records counts as done."""
-    if "heads" in entry:
-        return entry["heads"]
+    if not isinstance(entry, dict):
+        return {}
+    records = entry.get("heads")
+    if isinstance(records, dict):
+        return {
+            sha: record for sha, record in records.items() if isinstance(record, dict)
+        }
+    if records is not None:
+        return {}
     return (
         {
             entry["sha"]: {
