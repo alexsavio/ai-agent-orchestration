@@ -241,6 +241,16 @@ dispatch() {
   [ "$status" -eq 1 ]
 }
 
+@test "recycle and re-home keep the first start's MCP choice; README, tier list and contributing agree" {
+  for file in skills/architect/references/dispatch.md skills/architect/references/worker-recycle.md; do
+    grep -qF "the same choice as the first start" "$ROOT/$file"
+    grep -qF "needs an MCP tool" "$ROOT/$file"
+  done
+  grep -qF 'providers.claude`: haiku, sonnet, opus, fable' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'Haiku is a Claude tier' "$ROOT/README.md"
+  grep -qF 'The macOS job times out after 40 minutes, the Ubuntu job after 25.' "$ROOT/docs/contributing.md"
+}
+
 @test "the skill holds no org, model, login or personal path literals" {
   run grep -rniE 'combinaut|sparkle|gpt-[0-9]|sleistner|/Users/|/private/tmp|31691' "$ROOT/$SKILL_DIR"
   [ "$status" -eq 1 ]
