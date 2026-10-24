@@ -3,12 +3,15 @@ import os
 import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
 from test_support import IsolatedTestCase
 
 SCRIPT = Path(__file__).resolve().parents[2] / "orch-usage"
-orch_usage = SourceFileLoader("orch_usage", str(SCRIPT)).load_module()
+_loader = SourceFileLoader("orch_usage", str(SCRIPT))
+orch_usage = module_from_spec(spec_from_loader("orch_usage", _loader))
+_loader.exec_module(orch_usage)
 
 NOW = 1_900_000_000
 HEADER = (
