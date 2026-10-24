@@ -32,7 +32,16 @@ case "$tier" in
   *)
     # A model id starts only when it is exactly one entry of models.pi_models.
     setting=ORCH_PI_MODELS model=
-    case ",${ORCH_PI_MODELS:-}," in *",$tier,"*) model=$tier ;; esac
+    # Plain string equality per entry: the argument is never a pattern.
+    case "$tier" in
+      *,* | *\** | *\?* | *\[* | *\]* | *[[:space:]]*) ;;
+      *)
+        IFS=, read -r -a pi_entries <<<"${ORCH_PI_MODELS:-}"
+        for entry in ${pi_entries[@]+"${pi_entries[@]}"}; do
+          [ "$entry" != "$tier" ] || model=$entry
+        done
+        ;;
+    esac
     if [ -z "$model" ]; then
       echo "pi-start.sh: '$tier' is not worker, smart or one entry of models.pi_models (ORCH_PI_MODELS) in $(orch_config_path)" >&2
       exit 2

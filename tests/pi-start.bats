@@ -277,3 +277,16 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"pi is not configured"* ]] || false
 }
+
+@test "a glob or comma in the model argument never matches a pi_models entry" {
+  printf '[models]\npi_models = ["a/x"]\n' >"$ORCH_CONFIG"
+  run "$SCRIPT" w1 pane1 a/x
+  [ "$status" -eq 0 ]
+  rm -f "$HERDR_CALLS"
+  printf '[models]\npi_models = ["lmstudio/qwen/x", "deepseek/deepseek-flash", "a/x", "b/y"]\n' >"$ORCH_CONFIG"
+  for id in 'lmstudio/*' '?mstudio/qwen/x' '[d]eepseek/[d]eepseek-flash' 'a/x,b/y' 'a/x b/y' '*'; do
+    run "$SCRIPT" w1 pane1 "$id"
+    [ "$status" -eq 2 ]
+  done
+  [ ! -e "$HERDR_CALLS" ]
+}
