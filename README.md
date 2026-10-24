@@ -100,6 +100,12 @@ heavy-slot list                          # names, pids, ages, stale records
 
 If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`](docs/heavy-slot.md).
 
+## 🏷️ Releases
+
+Releases are cut by [release-please](https://github.com/googleapis/release-please). Merging to `main` keeps a release PR open that bumps `version.txt` and `CHANGELOG.md` from the Conventional Commits since the last release. Merge that PR to tag the version and publish the GitHub release. The first release is 1.0.0. PR titles must be Conventional Commits (`feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`, `perf`, `build`, `revert`; optional scope; `!` for breaking).
+
+PRs opened with the default `GITHUB_TOKEN` trigger no checks, so the workflow dispatches Validate on the release PR branch. Closing and reopening the PR also works.
+
 ## 📚 Docs
 
 - [`docs/architecture.md`](docs/architecture.md): how the Coordinator, architects, workers and watchers fit together.
