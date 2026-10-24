@@ -6,6 +6,7 @@ watcher and tests; the executable name retains the documented hyphen.
 """
 
 import argparse
+import codecs
 import fcntl
 import json
 import os
@@ -19,6 +20,9 @@ import time
 import tty
 import unicodedata
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "watchers"))
+import todo_answers  # noqa: E402
 
 NOW = "## Waits on the user"
 PLACEHOLDERS = {"none", "none yet", "nothing", "nothing yet", "n/a", "-"}
@@ -120,6 +124,7 @@ def merge(directory, output, state_path, now=None):
             seen.setdefault(item["id"], now)
             item["age"] = max(0, int(now - seen[item["id"]]))
         present = {item["id"] for item in current}
+        dismissed.update(todo_answers.pending_item_ids(seen) & present)
         dismissed &= present
         state["first_seen"] = {
             key: value for key, value in seen.items() if key in present
@@ -354,26 +359,78 @@ def rendered_items(output, state_path=None):
     return [item for item in items if item["id"] not in dismissed]
 
 
+def dismiss_locked(item, state_path, output, state):
+    visible = rendered_items(output, state_path) if output else None
+    dismissed = set(state.get("dismissed", []))
+    dismissed.add(item["id"])
+    state["dismissed"] = sorted(dismissed)
+    atomic_write(state_path, json.dumps(state, sort_keys=True))
+    if output:
+        render(
+            output,
+            [candidate for candidate in visible if candidate["id"] != item["id"]],
+        )
+
+
 def dismiss_item(item, state_path, output=None):
     state_path = Path(state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     with state_path.with_suffix(state_path.suffix + ".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        visible = rendered_items(output, state_path) if output else None
         try:
             state = json.loads(state_path.read_text())
         except (OSError, ValueError):
             state = {"first_seen": {}, "items": {}}
-        dismissed = set(state.get("dismissed", []))
-        dismissed.add(item["id"])
-        state["dismissed"] = sorted(dismissed)
-        atomic_write(state_path, json.dumps(state, sort_keys=True))
-        if output:
-            render(
-                output,
-                [candidate for candidate in visible if candidate["id"] != item["id"]],
-            )
+        dismiss_locked(item, state_path, output, state)
     return True
+
+
+CURRENT_GENERATION = object()
+STALE_ANSWER = "stale answer: item changed; refresh and answer again"
+
+
+def answer_state_path():
+    return Path(
+        todo_answers.setting(
+            "ORCH_USER_TODO_STATE",
+            Path.home() / ".claude/coordinator/user-todo.state.json",
+        )
+    )
+
+
+def answer_generation(owner, text, state_path=None):
+    try:
+        state = json.loads(Path(state_path or answer_state_path()).read_text())
+        return state.get("first_seen", {}).get(todo_answers.item_id(owner, text))
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def answer_item(item, answer, state_path, output, generation=CURRENT_GENERATION):
+    owner = item["source"].removesuffix(".md")
+    state_path = Path(state_path)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    # Queue -> state matches pruning's lock order; the producer cannot replace a generation in between.
+    with todo_answers.queue_lock():
+        existing = todo_answers.prune(time.time())
+        with state_path.with_suffix(state_path.suffix + ".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                state = json.loads(state_path.read_text())
+                current = state.get("first_seen", {}).get(item["id"])
+            except (OSError, ValueError, AttributeError):
+                raise ValueError(STALE_ANSWER) from None
+            expected = current if generation is CURRENT_GENERATION else generation
+            if current is None or expected != current:
+                raise ValueError(STALE_ANSWER)
+            todo_answers.submit_locked(owner, item["text"], answer, expected, existing)
+            dismiss_locked(item, state_path, output, state)
+    return "answer queued (removed)"
+
+
+def answer_from_view(owner, text, answer, output, generation=CURRENT_GENERATION):
+    item = dict(source=owner + ".md", text=text, id=todo_answers.item_id(owner, text))
+    return answer_item(item, answer, answer_state_path(), output, generation)
 
 
 def item_display(item):
@@ -412,6 +469,24 @@ def clip_rows(line, width, limit):
                 return line[:position]
         column += cells
     return line
+
+
+def answer_footer(answering, width, height):
+    editor = answering["editor"]
+    if answering.get("gone"):
+        return [clip_rows("that item is gone; Esc cancels the answer", width, 1)]
+    limit = max(1, min(4, height - 3))
+    rows, column = [""], 0
+    for char in editor.prompt():
+        cells = cell_width(char)
+        if column + cells > width:
+            rows.append("")
+            column = 0
+        rows[-1] += char
+        column += cells
+    if editor.error:
+        return [clip_rows(editor.error, width, 1)] + rows[-max(1, limit - 1) :]
+    return rows[-limit:]
 
 
 def item_row_count(index, item, width):
@@ -455,7 +530,7 @@ def mouse_events(buffer):
         )
     ]
     remainder = re.sub(r"\x1b\[<\d+;\d+;\d+[Mm]", "", buffer)
-    partial = re.search(r"\x1b(?:\[(?:<[0-9;]*|[0-9]*)?)?$", remainder)
+    partial = re.search(r"\x1b(?:\[[0-?]*[ -/]*)?\Z", remainder)
     pending = partial.group() if partial else ""
     return events, remainder[: partial.start()] if partial else remainder, pending
 
@@ -474,6 +549,8 @@ def follow(
         "",
         0,
     )
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
+    answering = None
     last_count = None
     state_path = getattr(
         args, "state", Path(args.output).with_name("user-todo.state.json")
@@ -499,10 +576,18 @@ def follow(
             size = (
                 os.get_terminal_size() if os.isatty(fd) else os.terminal_size((80, 24))
             )
-            starts = page_starts(items, size.columns, size.lines)
+            answer_rows = (
+                answer_footer(answering, max(1, size.columns - 1), size.lines)
+                if answering
+                else []
+            )
+            list_height = size.lines - max(0, len(answer_rows) - 1)
+            starts = page_starts(items, size.columns, list_height)
             page = min(page, len(starts) - 1)
-            visible, rows = visible_items(items, size.columns, size.lines, starts[page])
-            room = max(1, size.lines - 3)
+            visible, rows = visible_items(
+                items, size.columns, list_height, starts[page]
+            )
+            room = max(1, list_height - 3)
             screen = [
                 clip_rows(item_line(n, item), size.columns, room) for n, item in visible
             ]
@@ -513,24 +598,36 @@ def follow(
                 if len(starts) > 1
                 else footer
             )
-            screen += ["", clip_rows(status, max(1, size.columns - 1), 1)]
+            if (
+                not answering
+                and 0 <= selected < len(items)
+                and todo_answers.choices(items[selected]["text"])
+            ):
+                status += " · a answer selected item"
+            screen += [""] + (
+                answer_rows
+                if answering
+                else [clip_rows(status, max(1, size.columns - 1), 1)]
+            )
             print("\033[2J\033[H" + "\n".join(screen), flush=True)
             readable, _, _ = wait([fd], [], [], 1)
             if readable:
                 key = read(fd, 64)
                 if not key:
                     break
-                key = key.decode(errors="ignore")
+                key = decoder.decode(key)
                 events, key, pending_mouse = mouse_events(pending_mouse + key)
                 paging = re.findall(r"\x1b\[([56])~", key)
                 key = re.sub(r"\x1b\[[56]~", "", key)
                 step = sum(1 if code == "6" else -1 for code in paging)
-                step += key.count("n") - key.count("p")
+                if not answering and "a" not in key:
+                    step += key.count("n") - key.count("p")
                 shown = items
                 for button, row, kind in events:
                     if kind == "M" and button in (64, 65):
                         step += 1 if button == 65 else -1
                     elif button == 0 and kind == "M" and 1 <= row <= len(rows):
+                        answering = None
                         selected = rows[row - 1]
                         footer = run_jump(shown[selected])
                         if jump_succeeded(footer) and dismiss_item(
@@ -539,7 +636,57 @@ def follow(
                             footer += " (removed)"
                             items = rendered_items(args.output, state_path)
                 page = max(0, page + step)
-                for char in key:
+                for char in re.findall(r"\x1b\[[0-?]*[ -/]*[@-~]|.", key, re.S):
+                    if answering and char.startswith("\x1b["):
+                        continue
+                    if answering:
+                        if answering.get("gone") or not any(
+                            item["id"] == answering["item"]["id"] for item in items
+                        ):
+                            answering["gone"] = True
+                            footer = "that item is gone; Esc cancels the answer"
+                            if char == "\x1b":
+                                answering, footer = None, "answer cancelled"
+                            continue
+                        action, answer = answering["editor"].feed(char)
+                        footer = (
+                            answering["editor"].error or answering["editor"].prompt()
+                        )
+                        if action == "cancel":
+                            answering, footer = None, "answer cancelled"
+                        elif action == "answer":
+                            try:
+                                footer = answer_item(
+                                    answering["item"],
+                                    answer,
+                                    state_path,
+                                    args.output,
+                                    answering["generation"],
+                                )
+                                items = rendered_items(args.output, state_path)
+                                answering = None
+                            except (ValueError, OSError) as error:
+                                answering["editor"].error = str(error)
+                        continue
+                    if char == "a":
+                        choice = (
+                            number_selection(typed, len(items)) if typed else selected
+                        )
+                        if choice is not None and 0 <= choice < len(items):
+                            options = todo_answers.choices(items[choice]["text"])
+                            if options:
+                                typed = ""
+                                selected = choice
+                                answering = {
+                                    "item": dict(items[choice]),
+                                    "generation": answer_generation(
+                                        items[choice]["source"].removesuffix(".md"),
+                                        items[choice]["text"],
+                                        state_path,
+                                    ),
+                                    "editor": todo_answers.AnswerInput(options),
+                                }
+                        continue
                     if char.isdigit():
                         typed += char
                         footer = "selected " + typed
@@ -559,6 +706,8 @@ def follow(
                                 footer += " (removed)"
                                 items = rendered_items(args.output, state_path)
                         typed = ""
+            elif answering and pending_mouse == "\x1b":
+                pending_mouse, answering, footer = "", None, "answer cancelled"
     finally:
         if saved is not None:
             sys.stdout.write("\033[?1000l\033[?1006l")

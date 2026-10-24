@@ -44,11 +44,12 @@ OUTBOX_KEEP_SECONDS = 3600
 MONITOR_ACK_SECONDS = 20
 FEED_NAME = "coordinator-feed.log"
 FEED_BYTES = 1024 * 1024
+TODO_OWNER = re.compile(r"^todo: TODO ANSWER owner=([A-Za-z0-9_-]+) ")
 WAIT_OWNER = re.compile(
     r"^workers: WORKER WAITING .+ pane=\S+ owner=([A-Za-z0-9_-]+) \d+m session=\S+"
 )
 OWNER = re.compile(
-    r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER \S+|workers: WORKER IDLE \S+) owner=([A-Za-z0-9_-]+) "
+    r"^(?:pulls: \S+ \S+#\d+|context: RECYCLE-WORKER \S+|workers: WORKER IDLE \S+|workers: WORKER (?:DONE|QUESTION) \S+) owner=([A-Za-z0-9_-]+) "
 )
 
 spec = importlib.util.spec_from_file_location("reader", w.ROOT / "read-alerts.py")
@@ -193,8 +194,16 @@ def batch_written(path, inode, offset, data):
 
 def send_line(binding_path, text):
     try:
+        if "TODO ANSWER " in text:
+            text = w.todo_answers.filter_canceled(text)
+            if not text:
+                return True
         path, token = binding(binding_path)
         send_to_socket(path, token, text)
+        if binding_path.name.startswith("architect-"):
+            w.todo_answers.mark_delivered(
+                text, binding_path.stem.removeprefix("architect-")
+            )
         return True
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(
@@ -218,7 +227,7 @@ def native_messages(args, stamped, fallback, patterns):
         waiting = WAIT_OWNER.match(body)
         if waiting and (body.endswith(" ESCALATE (start)") or line.endswith("(clear)")):
             continue
-        owner = OWNER.match(body) or waiting
+        owner = OWNER.match(body) or waiting or TODO_OWNER.match(body)
         if (
             owner
             and not line.endswith("(clear)")
@@ -227,11 +236,19 @@ def native_messages(args, stamped, fallback, patterns):
                 waiting
                 or " RECYCLE-WORKER " in line
                 or " WORKER IDLE " in line
+                or " WORKER DONE " in line
+                or " WORKER QUESTION " in line
+                or " TODO ANSWER " in line
                 or (args.bindings_dir / f"architect-{owner.group(1)}.json").exists()
             )
         ):
             by_owner.setdefault(owner.group(1), []).append(
-                native(line.split(" ", 1)[1]) + ". No reply needed."
+                native(line.split(" ", 1)[1])
+                + (
+                    ". Answer with orch-signal answer <id> <text>."
+                    if body.startswith("workers: WORKER QUESTION ")
+                    else ". No reply needed."
+                )
             )
     out = [
         (str(args.bindings_dir / f"architect-{owner}.json"), "\n".join(texts))
@@ -664,12 +681,52 @@ def history(base, cursor, modes, now, late=None):
                     mode, {"seq": 0, "stale": False, "since": now}
                 ).update(seq=0, reset=state["reset"])
                 seen = 0
+        if mode in ("workers", "todo") and late is not None:
+            prefixes = ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ")
+            unread = [
+                event for event in events if event["seq"] > (0 if fresh else seen)
+            ]
+            has_signals = any(
+                any(
+                    line.startswith(prefixes)
+                    for line in json.loads(event["line"]).get("events", [])
+                )
+                and now - event.get("at", now) <= OUTBOX_KEEP_SECONDS
+                for event in unread
+            )
+            if has_signals:
+                for event in unread:
+                    alert = json.loads(event["line"])
+                    lines = [
+                        line
+                        for line in alert.get("events", [])
+                        if (
+                            line.startswith(prefixes)
+                            and now - event.get("at", now) <= OUTBOX_KEEP_SECONDS
+                        )
+                        or (not fresh and not line.startswith(prefixes))
+                    ]
+                    if lines:
+                        late.append(dict(alert, events=lines))
+                cursor.setdefault(mode, {"seq": 0, "stale": False, "since": now})[
+                    "seq"
+                ] = max(event["seq"] for event in events)
+                if fresh:
+                    seen = max(event["seq"] for event in events)
         if mode not in cursor and events:
             seen = max(event["seq"] for event in events)
             cursor[mode] = {"seq": seen, "stale": False, "since": now}
         for event in events:
             if event["seq"] <= seen:
                 alert = json.loads(event["line"])
+                if mode in ("workers", "todo"):
+                    alert["events"] = [
+                        line
+                        for line in alert.get("events", [])
+                        if not line.startswith(
+                            ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ")
+                        )
+                    ]
                 if unseen_reset and any(
                     line.startswith("STATE RESET ") for line in alert.get("events", [])
                 ):

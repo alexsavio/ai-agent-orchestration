@@ -251,6 +251,11 @@ def context_facts(line):
 
 
 def worker_facts(line):
+    signal = re.match(r"WORKER (?:DONE|QUESTION) \S+ owner=\S+ id=(\S+)", line)
+    if signal:
+        item = fact("workers:signal:" + signal.group(1), line, terminal=True)
+        item["text"] = line
+        return [item]
     waiting = re.fullmatch(
         r"WORKER WAITING .+ pane=\S+ owner=\S+ \d+m session=(\S+?)(?: (REPEAT|ESCALATE|cleared))?",
         line.removesuffix(WORKER_WAIT_NOTE),
@@ -356,6 +361,11 @@ def pull_facts(line):
 
 
 def todo_facts(line):
+    answer = re.match(r"TODO ANSWER owner=\S+ id=(\S+)", line)
+    if answer:
+        item = fact("todo:answer:" + answer.group(1), line, terminal=True)
+        item["text"] = line
+        return [item]
     if line.startswith("TODO READFAIL "):
         return [
             fact("todo:readfail:" + line[len("TODO READFAIL ") :], line, clearable=True)
