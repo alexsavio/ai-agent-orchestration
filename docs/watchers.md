@@ -75,12 +75,14 @@ A session in an owner-tagged workspace that stays `done` or `idle` for more than
 `workers.wait_s` seconds (default 600) emits
 `WORKER WAITING <name> pane=<pane> owner=<workspace> <minutes>m session=<id>`.
 Architect and Coordinator role panes, and panes with an `Architect::` name or
-title, are excluded. The owning architect gets a native message through its
-binding and the existing bounded retry outbox. There is one repeat at
-`workers.wait_repeat_s` seconds after the initial alert (default 1800), then one
-native Coordinator escalation after another such interval. Each gap is at least
-60 seconds, including after laptop sleep. No further repeats. The feed
-records every stage; the user's to-do list is unchanged.
+title, are excluded. The start line goes only to
+`prod-context/coordinator-fyi.log`, with no native message to the architect.
+There is one repeat at `workers.wait_repeat_s` seconds after the initial alert
+(default 1800), also only in the fyi file, then one `ESCALATE` after another such
+interval. The escalation goes to the feed and natively to the Coordinator through
+its binding and the existing bounded retry outbox. Each gap is at least
+60 seconds, including after laptop sleep. No further repeats. The user's to-do
+list is unchanged.
 
 An observed `working` status resets the timer. Closing the session, removing its
 owner tag, or changing its owner clears its old alert immediately. Clears also
@@ -102,6 +104,6 @@ Reads have a five-second per-pane timeout and a ten-second total budget, reduced
 to reserve five seconds for the rest of the pass. Budget-skipped panes count as
 not busy.
 These text indicators are incomplete, so every waiting line retains the caveat
-`(may be waiting on its own job)`, including native alerts and escalation.
+`(may be waiting on its own job)`, including the escalation.
 
 Explicit completion, heartbeat and question commands: [worker signals](workers.md#explicit-worker-signals).

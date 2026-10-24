@@ -108,7 +108,7 @@ class WaitingTests(IsolatedTestCase):
                 )
                 self.assertEqual(
                     [path for path, _ in messages],
-                    [str(args.binding if now == 4201 else owner)],
+                    [str(args.binding)] if now == 4201 else [],
                 )
 
     def test_known_working_status_resets_during_ownership_outage(self):
@@ -156,7 +156,7 @@ class WaitingTests(IsolatedTestCase):
                     messages = inbox.native_messages(
                         args, ["time " + lines[0]], False, inbox.action_patterns()
                     )
-                    self.assertEqual([path for path, _ in messages], [str(owner)])
+                    self.assertEqual(messages, [])
 
     def test_readable_owner_change_clears_during_status_or_session_gap(self):
         for gap in ("status", "session"):
@@ -490,25 +490,7 @@ class WaitingTests(IsolatedTestCase):
             self.assertIn("ESCALATE", self.scan(193)[0])
             self.assertEqual(self.scan(99999), [])
 
-    def test_missing_owner_binding_still_queues_native_waiting_message(self):
-        line = self.start()
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            args = argparse.Namespace(
-                bindings_dir=base, binding=base / "coordinator.json"
-            )
-            messages = inbox.native_messages(
-                args,
-                ["time workers: " + line + " (start)"],
-                False,
-                inbox.action_patterns(),
-            )
-            self.assertEqual(
-                [path for path, _ in messages], [str(base / "architect-architect.json")]
-            )
-            self.assertIn(alert_policy.WORKER_WAIT_NOTE, messages[0][1])
-
-    def test_native_owner_route_and_coordinator_only_for_escalation(self):
+    def test_only_escalation_goes_native(self):
         line = self.start()
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -522,7 +504,7 @@ class WaitingTests(IsolatedTestCase):
                 messages = inbox.native_messages(
                     args, stamped, True, inbox.action_patterns()
                 )
-                self.assertEqual([path for path, _ in messages], [str(owner)])
+                self.assertEqual(messages, [])
             stamped = ["time workers: " + self.scan(4201)[0] + " (start)"]
             messages = inbox.native_messages(
                 args, stamped, False, inbox.action_patterns()
@@ -611,7 +593,7 @@ class WaitingOutboxTests(IsolatedTestCase):
         inbox.finish(args, cursor, now, inbox.action_patterns())
 
     def test_clear_cancels_failed_waiting_retries_but_preserves_other_messages(self):
-        for stage in ("", "REPEAT", "ESCALATE"):
+        for stage in ("ESCALATE",):
             with self.subTest(stage=stage), tempfile.TemporaryDirectory() as tmp:
                 base = Path(tmp)
                 args = argparse.Namespace(
@@ -625,7 +607,7 @@ class WaitingOutboxTests(IsolatedTestCase):
                     self.finish(
                         args,
                         cursor,
-                        [self.line(stage=stage), self.line(sid="s2")],
+                        [self.line(stage=stage), self.line(sid="s2", stage=stage)],
                         1000,
                     )
                 self.assertIn(inbox.OUTBOX_KEY, cursor)
@@ -654,8 +636,9 @@ class WaitingOutboxTests(IsolatedTestCase):
             )
             cursor = {}
             with patch.object(inbox, "send_line", return_value=True) as send:
-                self.finish(args, cursor, [self.line(), self.line(clear=True)], 1000)
+                escalate = self.line(stage="ESCALATE")
+                self.finish(args, cursor, [escalate, self.line(clear=True)], 1000)
                 send.assert_not_called()
-                self.finish(args, cursor, [self.line(clear=True), self.line()], 1060)
+                self.finish(args, cursor, [self.line(clear=True), escalate], 1060)
             self.assertEqual(send.call_count, 1)
             self.assertIn("session=s1", send.call_args.args[1])

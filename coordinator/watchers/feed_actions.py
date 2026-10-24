@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 ACTIONS_PATH = Path(__file__).resolve().parent / "feed-actions.regex"
+FYI_PATH = Path(__file__).resolve().parent / "feed-fyi.regex"
 PR_TEXT = re.compile(r"(pulls: \S+ \S+#\d+) owner=\S+.* (\([a-z]+\))$")
 
 
@@ -13,6 +14,11 @@ def action_patterns(path=ACTIONS_PATH):
 
 def is_action(line, patterns):
     return any(pattern.search(line) for pattern in patterns)
+
+
+def fyi_patterns(path=FYI_PATH):
+    """Python regular expressions (they use lookahead), one per line."""
+    return action_patterns(path)
 
 
 def native(line):
