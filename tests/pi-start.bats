@@ -290,3 +290,15 @@ teardown() {
   done
   [ ! -e "$HERDR_CALLS" ]
 }
+
+@test "list entries with whitespace or a glob are never expanded, and a file cannot stand in" {
+  touch "$TMP/repo/lmstudio-evil"
+  mkdir -p "$TMP/repo/lmstudio"
+  touch "$TMP/repo/lmstudio/evil"
+  export ORCH_PI_MODELS="lmstudio/a b,lmstudio/*"
+  for id in lmstudio/a b lmstudio/evil; do
+    run "$SCRIPT" w1 pane1 "$id"
+    [ "$status" -eq 2 ]
+  done
+  [ ! -e "$HERDR_CALLS" ]
+}
