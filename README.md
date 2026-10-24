@@ -27,8 +27,10 @@ The installer puts the skills, watchers, hooks and status line into `~/.claude`.
 You need macOS or Linux, [Claude Code](https://claude.com/claude-code) with the `ListAgents`, `SendMessage` and `Monitor` tools, `git`, `jq`, Python 3.11 or newer and `curl`. `gh` (logged in with `gh auth login`) is needed for the PR watchers. Codex CLI is optional.
 
 ```bash
-s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) && bash -c "${s:?empty download}" _
+s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/get.sh) && bash -c "${s:?empty download}" _
 ```
+
+Installer options go after the final `_`, for example `... _ --env herdr`. The script runs only when the download finished. It clones the repo if it is missing and runs its `install.sh`, which fast-forwards an existing clone (and refuses one with local edits). `ORCH_INSTALL_DIR` picks the clone folder; otherwise the folder is the config's `repo_path` or the default. To run the installer without `get.sh`, use the same command with `install.sh` in the URL.
 
 It clones this repo to `~/.claude/ai-agent-orchestration`, links the files into `~/.claude`, adds the hooks and status line to `~/.claude/settings.json`, and runs the env adapter, which for `herdr` installs [Herdr](https://herdr.dev) 0.9 or newer with the Radar plugin. Pick another env with `--env <name>` after the final `_`, or skip the env step with `env = "none"` under `[install]` in `~/.claude/orchestration.toml`. If it prints `PATH setup`, add the line it shows to your shell startup file and open a new shell.
 

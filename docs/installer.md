@@ -12,6 +12,10 @@ The clone and the Radar checkout are never updated over local work. With uncommi
 
 macOS or Linux, Bash 3.2 or newer; `git`, `jq`, `python3`, `curl`; `gh` for the PR watchers; `rg` (ripgrep) for the legacy scan and map. Optional: Codex CLI (architects pick Claude or Codex per task).
 
+## 🚀 The one-line entry: get.sh
+
+`get.sh` asks `install.sh --print-repo-path` for the clone folder (`ORCH_INSTALL_DIR` overrides it), clones the repo if the folder is missing, then runs that clone's `install.sh` with your arguments, which fast-forwards the clone. It stops with a message for an unsupported OS, Bash older than 3.2, missing `git` or `curl`, a folder that is not a git clone, a clone whose `origin` is another repo, and a clone with uncommitted edits. It never uses `sudo`. The documented command runs it only after curl succeeded, and the script's last line is an unclosed brace until it is complete, so a cut-off download runs nothing.
+
 ## 🔧 What the installer does
 
 1. Checks `git` and `jq` (prints the fix and stops when missing). A missing or logged-out `gh` only prints a note: the PR watchers need it.
