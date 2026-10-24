@@ -1114,6 +1114,16 @@ def collect_pulls(command, before, clock=time.monotonic):
                     "ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer"
                 )
             ]
+            # Every qualifying human review is remembered, so a later edit cannot resurface an older one.
+            visible_bot_reviews += [
+                review["id"]
+                for review in audit.commented_reviews(
+                    display_pr,
+                    os.environ.get(
+                        "ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer"
+                    ),
+                )
+            ]
             lines = {
                 line.split(" ", 1)[0]: line
                 for line in audit.pr_lines(display_pr, page_nodes, repo_settings)

@@ -458,10 +458,10 @@ def legacy_line(label, hits, kinds):
     )
 
 
-def commented_review(pr, bot):
-    """The latest human COMMENTED review with a body and no inline comments, not by the PR author or the bot."""
+def commented_reviews(pr, bot):
+    """Every human COMMENTED review with a body and no inline comments, not by the PR author or the bot."""
     owner = (pr.get("author") or {}).get("login")
-    found = [
+    return [
         review
         for review in pr["reviews"]["nodes"]
         if review.get("state") == "COMMENTED"
@@ -473,6 +473,11 @@ def commented_review(pr, bot):
             and review["author"]["login"] in (owner, bot)
         )
     ]
+
+
+def commented_review(pr, bot):
+    """The latest of them."""
+    found = commented_reviews(pr, bot)
     return found[-1] if found else None
 
 

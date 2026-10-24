@@ -1809,6 +1809,46 @@ class PullsTest(IsolatedTestCase):
         _, events = w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
         self.assertEqual(events, [])
 
+    def two_reviews(self, emptied=False):
+        return self.commented_row(
+            self.review("R1", "sleistner", "First findings"),
+            self.review("R2", "sleistner", "" if emptied else "Second findings"),
+        )
+
+    def poll(self, state, row):
+        return w.reduce_pulls(state, w.collect_pulls(self.command([row]), state))
+
+    def test_emptied_latest_review_does_not_resurface_an_older_one_after_baseline(
+        self,
+    ):
+        state, _ = self.poll(None, self.two_reviews())
+        self.assertEqual(state["prs"]["owner/product#7"]["seen_reviews"], ["R1", "R2"])
+        _, events = self.poll(state, self.two_reviews(emptied=True))
+        self.assertEqual(events, [])
+
+    def test_emptied_latest_review_does_not_resurface_an_older_one_after_migration(
+        self,
+    ):
+        state, _ = self.poll(None, self.commented_row())
+        state["prs"]["owner/product#7"].pop("seen_reviews")
+        state, events = self.poll(state, self.two_reviews())
+        self.assertEqual(events, [])
+        _, events = self.poll(state, self.two_reviews(emptied=True))
+        self.assertEqual(events, [])
+
+    def test_emptied_latest_review_does_not_resurface_an_older_one_after_update(
+        self,
+    ):
+        state, _ = self.poll(None, self.commented_row())
+        state["prs"]["owner/product#7"]["seen_reviews"] = ["B1"]
+        state, events = self.poll(state, self.two_reviews())
+        self.assertEqual(
+            events,
+            [f"COMMENTED owner/product#7 owner=wArch {PR['title']} [by sleistner]"],
+        )
+        _, events = self.poll(state, self.two_reviews(emptied=True))
+        self.assertEqual(events, [])
+
     def test_a_new_commented_review_fires_again(self):
         row = self.commented_row(self.review("R1", "sleistner", "Findings"))
         state, _ = w.reduce_pulls(None, w.collect_pulls(self.command([row]), None))
