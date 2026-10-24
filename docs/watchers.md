@@ -103,3 +103,5 @@ to reserve five seconds for the rest of the pass. Budget-skipped panes count as
 not busy.
 These text indicators are incomplete, so every waiting line retains the caveat
 `(may be waiting on its own job)`, including native alerts and escalation.
+
+Explicit completion, heartbeat and question commands: [worker signals](workers.md#explicit-worker-signals).

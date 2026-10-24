@@ -76,7 +76,7 @@ Workers, recycles and handoffs: [`docs/workers.md`](docs/workers.md).
 
 ### 📝 The to-do pane
 
-The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). Details, keys and settings: [docs/todo.md](docs/todo.md).
+The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). Items with numbered choices can be answered there: select one, press `a`, then choose a number or `t` for free text. Details, keys and settings: [docs/todo.md](docs/todo.md).
 
 ### ❓ User questions
 
@@ -112,3 +112,5 @@ If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`
 - [`docs/pr-tabs.md`](docs/pr-tabs.md): the Chrome PR tabs extension: automatic architect groups (repo fallback), install, use and troubleshooting.
 - [`env/README.md`](env/README.md): the env adapters (`herdr` and how to add one).
 - [`docs/contributing.md`](docs/contributing.md): running the tests and sending changes.
+
+Explicit completion, heartbeat and question commands: [worker signals](docs/workers.md#explicit-worker-signals).
