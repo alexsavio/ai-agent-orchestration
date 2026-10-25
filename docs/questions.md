@@ -40,9 +40,10 @@ The asker writes `~/.claude/coordinator/questions/<slug>.md`; the Coordinator sh
 2. <label>
 ```
 
-The option id is the digit `1`-`9`, consecutive from `1`; the label is the rest of that one line after `<digit>. `.
+The option id is the digit `1`-`9`, consecutive from `1`; the label is the rest of that one line after `<digit>. `. Duplicate ids are allowed: the last one wins. An empty label is allowed. The label is whitespace-normalised (leading and trailing whitespace stripped, inner runs collapsed to one space) to match the answers watcher's own collapse.
 
-- With a `## Options` section, key `1`-`9` records `ANSWER <slug>: <id> "<label>"` (the label from the file, unchanged). A digit with no option records nothing and shows a short status line.
+- With a `## Options` section, key `1`-`9` records `ANSWER <slug>: <id> "<label>"`. A digit with no option records nothing and shows a short status line.
+- In that answer line the label is everything between the first double quote after the id and the last double quote of the line, so a parser uses `^([1-9]) "(.*)"$`.
 - Key `t` records `ANSWER <slug>: <text>`.
 - Without a `## Options` section, key `1`-`9` records the digit alone.
 

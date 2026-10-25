@@ -402,3 +402,29 @@ answer_events() {
   printf '7' | "$ORCH_PYTHON3" "$ROOT/coordinator/question-pane.py" "$question"
   [ "$(cat "${question%.md}.answer")" = 7 ]
 }
+
+@test "option labels are normalised to the answers watcher's whitespace collapse" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf '# Which release?\n\n## Options\n\n1. Beta  \n2. A  B\n' >"$question"
+  printf '1' | "$ORCH_PYTHON3" "$ROOT/coordinator/question-pane.py" "$question"
+  [ "$(cat "${question%.md}.answer")" = '1 "Beta"' ]
+  rm -f "${question%.md}.answer"
+  printf '2' | "$ORCH_PYTHON3" "$ROOT/coordinator/question-pane.py" "$question"
+  [ "$(cat "${question%.md}.answer")" = '2 "A B"' ]
+}
+
+@test "a label holding double quotes round-trips through the documented quote rule" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf '# Which release?\n\n## Options\n\n1. say "hi"\n' >"$question"
+  printf '1' | "$ORCH_PYTHON3" "$ROOT/coordinator/question-pane.py" "$question"
+  answer=$(cat "${question%.md}.answer")
+  [ "$answer" = '1 "say "hi""' ]
+  [ "$("$ORCH_PYTHON3" -c 'import re, sys; print(re.match(r"^([1-9]) \"(.*)\"$", sys.argv[1]).group(2))' "$answer")" = 'say "hi"' ]
+}
+
+@test "a second heading after ## Options ends the option section" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf '# Which release?\n\n## Options\n\n1. Alpha\n\n## Notes\n\n2. Beta\n' >"$question"
+  printf '2' | "$ORCH_PYTHON3" "$ROOT/coordinator/question-pane.py" "$question"
+  [ ! -e "${question%.md}.answer" ]
+}

@@ -89,7 +89,7 @@ class Panel:
                     break
                 match = OPTION.match(line)
                 if match:
-                    found[match.group(1)] = match.group(2)
+                    found[match.group(1)] = " ".join(match.group(2).split())
             elif line.strip() == "## Options":
                 in_options = True
         return found if in_options else None
