@@ -235,6 +235,13 @@ SETTINGS = [
         "Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two",
     ),
     _g(
+        "models.codex_smart_reasoning_effort",
+        "ORCH_CODEX_SMART_REASONING_EFFORT",
+        "str",
+        "medium",
+        "Reasoning effort for Codex smart starts and resumes (passed as -c model_reasoning_effort=<value>); the routine worker tier keeps Codex's default",
+    ),
+    _g(
         "models.pi_worker",
         "ORCH_PI_WORKER_MODEL",
         "str",
