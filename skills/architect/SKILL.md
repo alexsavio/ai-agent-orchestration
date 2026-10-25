@@ -84,13 +84,11 @@ Check `test "${HERDR_ENV:-}" = 1` first. Inside Herdr, load the `herdr` skill an
 
 Before opening or creating a worker worktree, starting an agent, sending a brief, checking progress, or re-homing a Claude worker, read [references/dispatch.md](references/dispatch.md) and follow its complete command walkthrough. Always pass `--workspace`, check for an already-open path, choose the model explicitly, name the report path in every brief, and verify that a dispatch landed.
 
-**The layout is one Herdr workspace per initiative, with one worktree under it per agent:**
-
-
+**The layout is one Herdr workspace per initiative, with one worktree under it per agent** (illustration: [references/background.md](references/background.md)).
 
 Never move a worker's pane into another workspace as a tab. `pane move` closes the worker's own worktree workspace.
 
-**HARD RULE — tag every worker with its owner, in the same step that opens its workspace:** `herdr workspace report-metadata <worker-workspace-id> --source orchestrate --token owner="$HERDR_WORKSPACE_ID"`. The tree above is drawn from that tag, not from where the workspace sits. Herdr's Spaces panel always groups by git repo, so every worktree of a repo lands under that repo's first workspace whichever architect opened it. If Herdr Radar is installed (optional; `$ORCH_RADAR_PATH`), its Agents panel hangs each workspace under its `owner`, gives every group its own colour and a stripe down its left edge. An untagged worker shows up under the wrong architect. Re-tag it whenever a worker changes hands. Before reporting a dispatch done, confirm it: `herdr workspace get <worker-workspace-id>` shows `tokens.owner` equal to your workspace id.
+**HARD RULE — tag every worker with its owner, in the same step that opens its workspace:** `herdr workspace report-metadata <worker-workspace-id> --source orchestrate --token owner="$HERDR_WORKSPACE_ID"`. The tree is drawn from that tag, not from where the workspace sits. Herdr's Spaces panel always groups by git repo, so every worktree of a repo lands under that repo's first workspace whichever architect opened it. If Herdr Radar is installed (optional; `$ORCH_RADAR_PATH`), its Agents panel hangs each workspace under its `owner`, gives every group its own colour and a stripe down its left edge. An untagged worker shows up under the wrong architect. Re-tag it whenever a worker changes hands. Before reporting a dispatch done, confirm it: `herdr workspace get <worker-workspace-id>` shows `tokens.owner` equal to your workspace id.
 
 **Tag your own pane as the architect, once, when you start orchestrating:** `herdr pane report-metadata "$HERDR_PANE_ID" --source orchestrate --token role=architect`. Radar puts that pane first in its group, above any other pane in your workspace and above your workers, whatever their activity.
 
@@ -205,7 +203,7 @@ and never leave a pane spinning.
 Each round the worker polls its PR for new threads and for CI; verifies every review-bot claim against the
 code before accepting it (a bot is the most skeptical source, and is wrong often enough to matter);
 fixes what is real and proves the fix; replies with file:line evidence to what is not; replies to and
-resolves every thread either way; fixes CI, running the linter **and** the formatter; and re-requests
+resolves every thread either way; fixes CI; and re-requests
 the bot review after each push.
 
 Two things workers miss unless told: **a human reviewer's blocker often arrives in the review body,
@@ -241,23 +239,21 @@ Before you report a task complete, every line must hold:
 
 When something fails the gate, it goes back to the pane that owns the branch. You do not fix it.
 
-Report what actually happened: a survived mutation, a skipped check, a claim you could not verify.
+Report what actually happened: a survived mutation, a skipped check, a claim you could not verify, a claim that was disproved and how.
 
 
 ## Verification
 
 **A claim that affects an architectural decision must be independently verified before you act on it.** Agents and review bots state false things confidently — a missed directory in a grep becomes "this does not exist". Check it yourself, then decide.
 
-Report outcomes faithfully: if a mutation survived, say so; if a step was skipped, say so; if a claim was disproved, say which and how.
-
 ## Quota
 
-Treat smart-model quota as scarce. Prefer worker → worker → smart escalation over a smart model for every task. Balance work across providers so one subscription is not exhausted while useful capacity remains in the other. Keep your own replies and tool output lean.
+Treat smart-model quota as scarce. Balance work across providers so one subscription is not exhausted while useful capacity remains in the other. Keep your own replies and tool output lean.
 
 ## Herdr, Codex and watcher specifics
 
 - **Herdr grouping.** Herdr's Spaces panel nests a repo's linked worktrees under the *first primary workspace rooted in that repo*, not under `--workspace`, and nothing changes that: not a separate folder, not a symlink (Herdr resolves it), not a central worktrees directory. Group by architect through the `owner` tag instead (see the layout section); Radar, when installed, draws that tree in the Agents panel. Radar's sort must be `active` (`node $ORCH_RADAR_PATH/bin/agent-view.js --active`). Under Herdr's own order the rows stay in workspace order and the tree lines hang off the wrong header.
-- **Codex models.** Default worker `$ORCH_CODEX_WORKER_MODEL`; smart tier `$ORCH_CODEX_SMART_MODEL`; with one of them unset, `orch-settings` prints the set model for both, so the commands below work as written. Apply every tier change through the Model changes recycle rule, starting a fresh successor from the bounded handoff.
+- **Codex models.** Default worker `$ORCH_CODEX_WORKER_MODEL`; smart tier `$ORCH_CODEX_SMART_MODEL`; with one of them unset, `orch-settings` prints the set model for both, so the commands below work as written. Apply every tier change through the Model changes recycle rule, starting a fresh successor from the bounded handoff. Smart starts and resumes use `--model $ORCH_CODEX_SMART_MODEL -c model_reasoning_effort=medium`; carry this through briefs and recycles.
 - **Codex start.** `herdr agent start <name> --kind codex --pane <id> -- --no-daemon --model $ORCH_CODEX_WORKER_MODEL`. Without `--no-daemon` Codex exits with "Cannot use the shared background server". No sandbox flags (`-s`, `--add-dir`, `-c sandbox_…`): the Claude guard denies a start that widens the sandbox, and that denial is final. Writes outside the worktree (`.git`, `~/.claude/heavy-slots`) go through escalated commands, per the next two bullets.
 - **pi start.** `~/.claude/coordinator/pi-start.sh <name> <pane-id> <worker|smart> [extra pi args]`; never a bare `herdr agent start --kind pi`, which the Claude guard denies. The step reads `$ORCH_PI_WORKER_MODEL` or `$ORCH_PI_SMART_MODEL`, splits it into `--provider` and `--model`, and refuses (non-zero, with the reason) when the setting is empty ("pi is not configured") or DeepSeek is named in the provider or model id in a repo without `pi.deepseek = true` in its `.orchestration.local.toml`. It rejects `--provider`, `--model`, `-e`/`--extension`, `--api-key`, session flags and any `deepseek` in the extra args. Never type `pi` into a pane or send `/model` to a live pi; the guard denies both. Pick the model ids with `pi --list-models <provider>`; never invent one. pi has no native cross-session channel: follow-ups go to its pane through `herdr agent prompt`, which the Messages rule allows for a worker pane you own. A pi worker is still a visible pane in its own worktree and carries the same brief rules, machine rules and `QUESTION:` / `NEED SLOT:` convention.
 - **Codex sandbox.** Codex workers can run browsers, Playwright journeys and screenshots; weigh runtime capabilities when choosing the provider per task. Set `[sandbox_workspace_write] network_access = true` in `~/.codex/config.toml` so the sandbox reaches Docker, local ports and the internet; a worker started before that change needs a restart. Codex's runtime may kill long-running processes, so check whether it can hold a dev server open for screenshots; if it cannot, that capture step goes to a Claude worker (a named reason for Claude). `heavy-slot take` writes `~/.claude/heavy-slots`, so run it as an escalated command in the Codex sandbox. If it prints `heavy-slot: cannot write <dir> (sandbox?); run this command escalated`, re-run it escalated; do not wait for a slot. Escalated shells need `mise exec --` where the project uses mise. If a Codex run fails for sandbox reasons, route that step to Claude.
@@ -282,7 +278,3 @@ Preserve saved names `Coordinator` and `Architect::...`, worker UUIDs, and curre
 ## Supporting background
 
 Read [references/background.md](references/background.md) when you need the moved background, rationale, or layout illustration. It adds no operating permissions.
-
-## Codex model tiers
-
-The Codex smart model is `$ORCH_CODEX_SMART_MODEL` with reasoning effort `medium`. Use `--model $ORCH_CODEX_SMART_MODEL -c model_reasoning_effort=medium` for smart starts/resumes. The routine worker tier remains `$ORCH_CODEX_WORKER_MODEL`. With one Codex model set, `orch-settings` prints it for both tiers. Carry this policy through briefs and recycles; preserve session names and native messaging.
