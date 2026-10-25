@@ -343,7 +343,7 @@ usage_file() { printf '%s' "$HOME/.claude/context-usage/$1.usage"; }
 JSON
   [ "$status" -eq 0 ]
   [ "$(jq -c . "$(usage_file s1)")" = '{"model":"claude-opus-5-5","cost_usd":1.25,"seven_day_pct":42.5,"seven_day_resets_at":1893456000}' ]
-  [ "$(find "$HOME/.claude/context-usage" -type f | wc -l | tr -d " ")" = 1 ]
+  [ "$(find "$HOME/.claude/context-usage" -name ".*usage*" | wc -l | tr -d " ")" = 0 ]
 }
 
 @test "usage file leaves out rate_limits when the input has none, never writes 0" {
@@ -361,4 +361,38 @@ JSON
 JSON
   [ "$status" -eq 0 ]
   [ ! -e "$(usage_file s3)" ]
+}
+
+@test "worker sensor writes window and model metadata and removes missing metadata" {
+  sensor_home=$(mktemp -d)
+  run env HOME="$sensor_home" /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"fixture","model":{"id":"claude-haiku-5-5"},"context_window":{"context_window_size":200000,"remaining_percentage":40,"current_usage":{"input_tokens":120000}}}
+JSON
+  [ "$status" -eq 0 ]
+  [ "$(cat "$sensor_home/.claude/context-usage/fixture.window")" = 200000 ]
+  [ "$(cat "$sensor_home/.claude/context-usage/fixture.model")" = claude-haiku-5-5 ]
+  run env HOME="$sensor_home" /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"fixture","context_window":{"remaining_percentage":40}}
+JSON
+  [ "$status" -eq 0 ]
+  [ ! -e "$sensor_home/.claude/context-usage/fixture.window" ]
+  [ ! -e "$sensor_home/.claude/context-usage/fixture.model" ]
+  rm -rf "$sensor_home"
+}
+
+@test "window metadata publication preserves an already open reader" {
+  sensor_home=$(mktemp -d)
+  mkdir -p "$sensor_home/.claude/context-usage"
+  sensor="$sensor_home/.claude/context-usage/atomic.window"
+  printf '1000000\n' >"$sensor"
+  exec 9<"$sensor"
+  run env HOME="$sensor_home" /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"atomic","context_window":{"context_window_size":200000}}
+JSON
+  [ "$status" -eq 0 ]
+  IFS= read -r old_window <&9
+  exec 9<&-
+  [ "$old_window" = 1000000 ]
+  [ "$(cat "$sensor")" = 200000 ]
+  rm -rf "$sensor_home"
 }

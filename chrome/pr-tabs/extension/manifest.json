@@ -1,25 +1,31 @@
 {
   "manifest_version": 3,
-  "name": "PR tabs",
+  "name": "__MSG_extName__",
   "version": "1.0.0",
-  "description": "Groups configured GitHub PR tabs by topic, opens your open PRs, and closes tabs of PRs that merge or close.",
+  "description": "__MSG_extDescription__",
+  "default_locale": "en",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqJ9B/JcUVhiMIYCR+LRzmkDMhAYajhfAbFitnusRXBXlvJ0Ni+KfJLAPpr7lhJSwTrirj80wF8nWrAMJE37HqK4PoJRU9mcDuRgJUIkBAT4GxgBrU0vdkiBqnb/Qem6XJ1RDqTtW1KwhBXkipdTYbJXdv63yj30m52tEc5cCFEflL8fyNEoA+8nKd3cosQCH/mb6Wk91ynwTymKwqk3YLjwP7fJrTvoI4TD6CVp0uQOhAzBl3PTs0YY/wqc8bCL7ojq2wQm089gUNnqMwe/gKwLJLB76AbI7KZXVH8syt6WwOVauoIFR5PuH4I1kWS2N83KdhtYHNY/Ae/Mf3LORWQIDAQAB",
   "minimum_chrome_version": "120",
-  "permissions": [
-    "tabGroups",
-    "alarms",
-    "nativeMessaging",
-    "storage"
-  ],
-  "host_permissions": [
-    "https://github.com/*/*/pull/*"
-  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": ["tabGroups", "alarms", "nativeMessaging", "storage"],
+  "host_permissions": ["https://github.com/*/*/pull/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "action": {
-    "default_title": "PR tabs",
-    "default_popup": "popup.html"
+    "default_title": "__MSG_extName__",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
   }
 }

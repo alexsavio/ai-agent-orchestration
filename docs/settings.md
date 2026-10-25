@@ -65,6 +65,9 @@ A family left out is never started: the installer does not ask for its models, a
 | `models.pi_smart` | `ORCH_PI_SMART_MODEL` | empty | pi model for hard work as provider/model-id; empty means pi is not used on this machine |
 | `remote_control.architects` | `ORCH_REMOTE_CONTROL_ARCHITECTS` | `true` | Give architect sessions Remote Control on start and recycle |
 | `recycle.tokens` | `ORCH_RECYCLE_TOKENS` | `300000` | Tokens used at which RECYCLE fires |
+| `recycle.worker_soft_tokens` | `ORCH_WORKER_SOFT_TOKENS` | `300000` | Worker tokens at which the architect asks for a clean point |
+| `recycle.worker_hard_tokens` | `ORCH_WORKER_HARD_TOKENS` | `450000` | Worker hard limit: known window clamps to 60 percent; unknown window uses at least soft |
+| `recycle.worker_ask_timeout_s` | `ORCH_WORKER_ASK_TIMEOUT_S` | `600` | Seconds before deferring a worker re-ask until idle or done |
 | `recycle.pct` | `ORCH_RECYCLE_PCT` | `55` | Context percentage used when the token sensor is absent |
 | `recycle.park_idle` | `ORCH_PARK_IDLE` | `false` | Park architects that have no open PR, worker or watcher |
 | `install.repo_path` | `ORCH_REPO_PATH` | empty | The clone install.sh keeps up to date and links into ~/.claude; empty means ~/.claude/ai-agent-orchestration |
@@ -103,6 +106,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `pr_tabs.default_repo` | `ORCH_PR_TABS_DEFAULT_REPO` | empty | Repo name for bare PR numbers; number jumps are off when pr_tabs.repos is empty too |
 | `pr_tabs.repos` | `ORCH_PR_TABS_REPOS` | empty | Repo names in pr_tabs.org the popup can send a bare PR number to, besides default_repo; the popup shows a picker when there are two or more |
 | `pr_tabs.open_all` | `ORCH_PR_TABS_OPEN_ALL` | empty | GitHub search behind the Open all button; empty turns it off |
+| `pr_tabs.terminal_app` | `ORCH_PR_TABS_TERMINAL_APP` | empty | macOS app the popup's go to pane button brings to the front after focusing the Herdr pane; empty leaves the windows as they are |
 | `review.finalize_commands` | `ORCH_REVIEW_FINALIZE_COMMANDS` | `["/finalize-change-footprint", "/finalize-code-comments"]` | Slash commands workers run before calling a PR done or ready; empty skips this step. The global file sets it for every repo; a repo file overrides it |
 | `review.finalize_comment` | `ORCH_REVIEW_FINALIZE_COMMENT` | `true` | After the approved findings are applied and pushed, the worker posts one PR comment with every finding. The global file sets it for every repo; a repo file overrides it |
 

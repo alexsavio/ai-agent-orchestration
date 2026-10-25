@@ -74,7 +74,7 @@ When `remote_control.architects` is on (the default), start with `claude --remot
 
 The architect splits the work into tasks. It does not edit code. For each task it opens a Herdr workspace with its own git worktree, starts a worker (Claude or Codex, picked per task on the lightest allowed tier; Haiku is a Claude tier), tags the worker with `owner`, and pastes `~/.claude/worker-reports/machine-rules.md` into the brief. Edit the project-specific list at the end of that file first. Every worker runs `/finalize-change-footprint` and `/finalize-code-comments` over its complete PR diff before the PR is done, and posts the findings as one PR comment (`review.finalize_commands`, `review.finalize_comment`; a repo file overrides, `[]` opts out). The architect verifies every report, and merges only a PR you name. Details: [`skills/architect/SKILL.md`](skills/architect/SKILL.md).
 
-Workers, recycles and handoffs: [`docs/workers.md`](docs/workers.md).
+Workers get a soft recycle ask and a hard limit capped at 60% of their known model window; live heavy jobs finish before handoff. Workers, recycles and handoffs: [`docs/workers.md`](docs/workers.md).
 
 ### 📝 The to-do pane
 
@@ -117,7 +117,7 @@ PRs opened with the default `GITHUB_TOKEN` trigger no checks, so the workflow di
 - [`docs/workers.md`](docs/workers.md): workers, recycles, handoffs and owner tags.
 - [`docs/heavy-slot.md`](docs/heavy-slot.md): the shared cap on heavy jobs and how slots work.
 - [`docs/bash-guard.md`](docs/bash-guard.md): what the Bash guard denies and where it logs.
-- [`docs/pr-tabs.md`](docs/pr-tabs.md): the Chrome PR tabs extension: automatic architect groups (repo fallback), a repo picker for bare numbers (`pr_tabs.repos`, or `repo#123`), install, use and troubleshooting.
+- [`docs/pr-tabs.md`](docs/pr-tabs.md): Orch Tabs, the Chrome extension for PR tabs (en, es, de, fr, pt): automatic architect groups (repo fallback), a repo picker for bare numbers (`pr_tabs.repos`, or `repo#123`), install, use and troubleshooting.
 - [`env/README.md`](env/README.md): the env adapters (`herdr` and how to add one).
 - [`docs/contributing.md`](docs/contributing.md): running the tests and sending changes.
 
