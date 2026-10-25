@@ -18,12 +18,33 @@ Create the question's Markdown file under `~/.claude/coordinator/questions/<slug
 
 | Key | Action |
 | --- | --- |
-| `1`-`9` | Records that number as the answer. |
+| `1`-`9` | Picks that option id when the file has a `## Options` section, or records the number alone otherwise. |
 | `t` | Type an answer; Enter sends it. |
 | `d` | Dismiss: writes `answers: DISMISSED <slug>` to the feed, then closes the pane and removes the question. |
 | `r` | Remind: opens the same picker as the to-do view's Reminder (`1` 15m, `2` 1h, `3` 2h, `4` 4h, `5` tomorrow 9:00, `t` a typed `30m` or `3h`). Esc cancels it. |
 
 Answers reach the Coordinator through the shared feed Monitor as `answers: ANSWER <slug>: <text>`.
+
+## File format
+
+The asker writes `~/.claude/coordinator/questions/<slug>.md`; the Coordinator shows it unchanged:
+
+```markdown
+# <the question, one line>
+
+<optional short context, Markdown>
+
+## Options
+
+1. <label>
+2. <label>
+```
+
+The option id is the digit `1`-`9`, consecutive from `1`; the label is the rest of that one line after `<digit>. `.
+
+- With a `## Options` section, key `1`-`9` records `ANSWER <slug>: <id> "<label>"` (the label from the file, unchanged). A digit with no option records nothing and shows a short status line.
+- Key `t` records `ANSWER <slug>: <text>`.
+- Without a `## Options` section, key `1`-`9` records the digit alone.
 
 ## Remind
 

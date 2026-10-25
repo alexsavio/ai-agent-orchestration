@@ -165,7 +165,7 @@ Never, without an explicit request: **merge**, assign or reassign people beyond 
 
 - routine implementation problem → worker → smart model
 - architectural uncertainty → worker → you
-- product or requirement ambiguity that cannot be resolved from the repo or issues → you → user
+- product or requirement ambiguity that cannot be resolved from the repo or issues → you → user. To ask the user, write the question file `~/.claude/coordinator/questions/<slug>.md` in the [questions format](../../docs/questions.md), then send the Coordinator one line `QUESTION <slug> ~/.claude/coordinator/questions/<slug>.md`.
 
 A worker's failure does not go straight to the user.
 

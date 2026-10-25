@@ -378,3 +378,27 @@ time.sleep(float(sys.argv[3]))' "$HOME/.claude/coordinator/questions/.answers.lo
   [ "$status" -eq 1 ]
   [ ! -e "${question%.md}.opening" ]
 }
+
+answer_events() {
+  "$ORCH_PYTHON3" -c 'import json, sys; print("\n".join(json.loads(sys.stdin.read()).get("events", [])))'
+}
+
+@test "option keys answer with the file's own id and label; a missing option writes nothing" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf '# Which release?\n\n## Options\n\n1. Alpha\n2. Beta\n' >"$question"
+  printf '2' | "$ORCH_PYTHON3" "$ROOT/coordinator/question-pane.py" "$question"
+  [ "$(cat "${question%.md}.answer")" = '2 "Beta"' ]
+  run env ORCH_USER_QUESTIONS_DIR="$HOME/.claude/coordinator/questions" "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --preview-answers --state-dir "$TMP/state"
+  [ "$status" -eq 0 ]
+  [ "$(answer_events <<<"$output")" = 'ANSWER release: 2 "Beta"' ]
+  rm -f "${question%.md}.answer"
+  printf '5' | "$ORCH_PYTHON3" "$ROOT/coordinator/question-pane.py" "$question"
+  [ ! -e "${question%.md}.answer" ]
+}
+
+@test "a question file without an Options section still answers with the digit alone" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  printf '7' | "$ORCH_PYTHON3" "$ROOT/coordinator/question-pane.py" "$question"
+  [ "$(cat "${question%.md}.answer")" = 7 ]
+}

@@ -4,6 +4,7 @@
 import argparse
 import contextlib
 import os
+import re
 import select
 import shutil
 import subprocess
@@ -32,6 +33,7 @@ ESCAPE = "ESC"
 ESCAPE_WAIT = 0.05
 SETTLE_SECONDS = 5
 POLL_SECONDS = 0.2
+OPTION = re.compile(r"^([1-9])\. (.*)$")
 
 
 def answer_path(question):
@@ -77,6 +79,20 @@ class Panel:
         self.launcher, self.feed = launcher, Path(feed)
         self.slug = self.question.stem
         self.status, self.picker, self.done, self.pending = "", None, False, None
+
+    def options(self):
+        """The option id -> label pairs under `## Options`, or None when the file has no such section."""
+        found, in_options = {}, False
+        for line in self.question.read_text().splitlines():
+            if in_options:
+                if line.strip().startswith("#"):
+                    break
+                match = OPTION.match(line)
+                if match:
+                    found[match.group(1)] = match.group(2)
+            elif line.strip() == "## Options":
+                in_options = True
+        return found if in_options else None
 
     def show(self, status=None):
         self.status = self.status if status is None else status
@@ -176,8 +192,17 @@ class Panel:
         if self.picker:
             return self.pick(token)
         if token in tuple("123456789"):
-            atomic_write(answer_path(self.question), token)
-            self.show(f"Sent: {token}. The Coordinator will pick it up.")
+            options = self.options()
+            if options is None:
+                atomic_write(answer_path(self.question), token)
+                self.show(f"Sent: {token}. The Coordinator will pick it up.")
+                return
+            label = options.get(token)
+            if label is None:
+                self.show(f"No option {token}.")
+                return
+            atomic_write(answer_path(self.question), f'{token} "{label}"')
+            self.show(f'Sent: {token} "{label}". The Coordinator will pick it up.')
         elif token == "t":
             self.show("")
             with line_mode(sys.stdin.fileno()):
