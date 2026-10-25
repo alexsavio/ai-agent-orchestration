@@ -82,8 +82,12 @@ class Panel:
 
     def options(self):
         """The option id -> label pairs under `## Options`, or None when the file has no such section."""
+        try:
+            lines = self.question.read_text().splitlines()
+        except OSError:
+            return None
         found, in_options = {}, False
-        for line in self.question.read_text().splitlines():
+        for line in lines:
             if in_options:
                 if line.strip().startswith("#"):
                     break

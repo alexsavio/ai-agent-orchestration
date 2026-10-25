@@ -105,6 +105,21 @@ class AnswersTest(IsolatedTestCase):
             [" typed answer ", *"123456789"],
         )
 
+    def test_a_digit_keeps_the_digit_alone_answer_when_the_question_file_is_missing(
+        self,
+    ):
+        with (
+            patch.object(
+                question_pane, "read_key", side_effect=["3", KeyboardInterrupt]
+            ),
+            patch.object(question_pane.Panel, "show"),
+            patch.object(question_pane.time, "sleep"),
+            patch.object(question_pane, "atomic_write") as write,
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                question_pane.follow(Path("ship.md"))
+        self.assertEqual([call.args[1] for call in write.call_args_list], ["3"])
+
     def test_main_rejects_missing_question_before_follow(self):
         with (
             tempfile.TemporaryDirectory() as tmp,
