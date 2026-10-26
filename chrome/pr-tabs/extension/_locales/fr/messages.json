@@ -325,5 +325,58 @@
   },
   "agentWaiting": {
     "message": "en attente"
+  },
+  "openReviewsButton": {
+    "message": "Ouvrir revues"
+  },
+  "openReviewsHint": {
+    "message": "Ouvrir les PR dont ma revue est demandée"
+  },
+  "openingProgress": {
+    "message": "$OPENED$ sur $PLANNED$ ouvertes",
+    "placeholders": {
+      "opened": {
+        "content": "$1"
+      },
+      "planned": {
+        "content": "$2"
+      }
+    }
+  },
+  "pendingSearching": {
+    "message": "Recherche…"
+  },
+  "errPrTabGone": {
+    "message": "L’onglet de cette PR n’est plus ouvert."
+  },
+  "prSearchLabel": {
+    "message": "Rechercher un onglet PR"
+  },
+  "prSearchEmpty": {
+    "message": "Aucune PR correspondante"
+  },
+  "prSearchCount_one": {
+    "message": "$COUNT$ PR correspondante",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prSearchCount_other": {
+    "message": "$COUNT$ PR correspondantes",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closePrTab": {
+    "message": "Fermer l’onglet $PR$",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
   }
 }

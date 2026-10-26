@@ -325,5 +325,58 @@
   },
   "agentWaiting": {
     "message": "wartet"
+  },
+  "openReviewsButton": {
+    "message": "Reviews öffnen"
+  },
+  "openReviewsHint": {
+    "message": "PRs öffnen, für die meine Review angefordert wurde"
+  },
+  "openingProgress": {
+    "message": "$OPENED$ von $PLANNED$ geöffnet",
+    "placeholders": {
+      "opened": {
+        "content": "$1"
+      },
+      "planned": {
+        "content": "$2"
+      }
+    }
+  },
+  "pendingSearching": {
+    "message": "Suche…"
+  },
+  "errPrTabGone": {
+    "message": "Dieser PR-Tab ist nicht mehr geöffnet."
+  },
+  "prSearchLabel": {
+    "message": "PR-Tabs durchsuchen"
+  },
+  "prSearchEmpty": {
+    "message": "Keine passenden PRs"
+  },
+  "prSearchCount_one": {
+    "message": "$COUNT$ passende PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prSearchCount_other": {
+    "message": "$COUNT$ passende PRs",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closePrTab": {
+    "message": "Tab $PR$ schließen",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
   }
 }

@@ -325,5 +325,58 @@
   },
   "agentWaiting": {
     "message": "aguardando"
+  },
+  "openReviewsButton": {
+    "message": "Abrir revisões"
+  },
+  "openReviewsHint": {
+    "message": "Abrir PRs com a minha revisão solicitada"
+  },
+  "openingProgress": {
+    "message": "Abertas $OPENED$ de $PLANNED$",
+    "placeholders": {
+      "opened": {
+        "content": "$1"
+      },
+      "planned": {
+        "content": "$2"
+      }
+    }
+  },
+  "pendingSearching": {
+    "message": "Pesquisando…"
+  },
+  "errPrTabGone": {
+    "message": "A aba dessa PR não está mais aberta."
+  },
+  "prSearchLabel": {
+    "message": "Buscar abas de PR"
+  },
+  "prSearchEmpty": {
+    "message": "Nenhuma PR correspondente"
+  },
+  "prSearchCount_one": {
+    "message": "$COUNT$ PR correspondente",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prSearchCount_other": {
+    "message": "$COUNT$ PRs correspondentes",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closePrTab": {
+    "message": "Fechar aba $PR$",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
   }
 }

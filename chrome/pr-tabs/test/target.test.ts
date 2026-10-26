@@ -123,12 +123,14 @@ const SUMMARIZED: Summary = {
   prs: 4,
   groups: [
     {
+      id: "7",
       title: "Search",
       color: "blue",
       count: 2,
       prs: [
-        { key: "acme/webapp#1", label: "webapp#1", title: "Fix", head: null },
+        { tabId: 2, key: "acme/webapp#1", label: "webapp#1", title: "Fix", head: null },
         {
+          tabId: 3,
           key: "acme/webapp#2",
           label: "webapp#2",
           title: "Fork",
@@ -137,11 +139,13 @@ const SUMMARIZED: Summary = {
       ],
     },
     {
+      id: "8",
       title: "Infra",
       color: "red",
       count: 1,
       prs: [
         {
+          tabId: 4,
           key: "acme/webapp#3",
           label: "webapp#3",
           title: "",
@@ -179,14 +183,20 @@ test("the summary counts distinct PRs and lists the PRs of each group with their
   assert.deepEqual(result, SUMMARIZED);
   assert.equal(summaryText(result), "4 PRs in 2 groups");
   assert.equal(
-    summaryText({ prs: 1, groups: [{ title: "Search", count: 1, prs: [] }] }),
+    summaryText({ prs: 1, groups: [{ id: "7", title: "Search", count: 1, prs: [] }] }),
     "1 PR in 1 group",
   );
   assert.equal(summaryText({ prs: 0, groups: [] }), "No PR tabs open");
 });
 
 function row(n: number, repo: string, branch: string): PrRow {
-  return { key: `acme/webapp#${n}`, label: `webapp#${n}`, title: "", head: { repo, branch } };
+  return {
+    tabId: n,
+    key: `acme/webapp#${n}`,
+    label: `webapp#${n}`,
+    title: "",
+    head: { repo, branch },
+  };
 }
 
 test("pane lookups ask for each distinct head once, in list order, at most the cap", () => {
@@ -195,6 +205,7 @@ test("pane lookups ask for each distinct head once, in list order, at most the c
   );
   const groups = [
     {
+      id: "1",
       title: "a",
       count: 3,
       prs: [
@@ -203,7 +214,7 @@ test("pane lookups ask for each distinct head once, in list order, at most the c
         { ...row(3, "", ""), head: null },
       ],
     },
-    { title: "b", count: many.length, prs: many },
+    { id: "2", title: "b", count: many.length, prs: many },
   ];
 
   const heads = lookupHeads(groups);

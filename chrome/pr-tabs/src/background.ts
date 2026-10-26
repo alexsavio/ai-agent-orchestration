@@ -22,6 +22,7 @@ import {
   pickedRepo,
   showRepoPicker,
   MAX_PANE_LOOKUPS,
+  MAX_PRS_PER_POLL,
 } from "#/core";
 import { getMessage } from "#/i18n";
 import { errorText, messageListener } from "#/messages";
@@ -42,7 +43,10 @@ import type {
   HostRequest,
   IdTab,
   Meta,
+  MetadataRevision,
   OpenAllPlan,
+  OpenBatchAction,
+  OpeningProgress,
   OrgName,
   Owners,
   PaneLookup,
@@ -655,11 +659,15 @@ async function searchOpenPrs(rules: Rules, openKeys: Set<PrKey>): Promise<Search
 
 async function openPlanned(plan: Planned[], rules: Rules): Promise<Planned[]> {
   const opened: Planned[] = [];
+  progress = { active: true, opened: 0, planned: plan.length };
 
   for (const planned of plan) {
     if (await openPr(planned, rules)) {
+      await updateMeta((meta) => seedOpen(meta, [planned])).catch(warn);
       opened.push(planned);
     }
+
+    progress = { ...progress, opened: progress.opened + 1 };
   }
 
   return opened;
@@ -673,40 +681,115 @@ function badgeText(plan: OpenAllPlan): string {
   return `${plan.estimated ? "~" : "+"}${plan.remaining}`;
 }
 
-async function openAllOnce(): Promise<Reply<"openAll">> {
-  const rules = await loadRules();
+async function openBatchOnce(action: OpenBatchAction): Promise<Reply<"openAll">> {
+  const configured = await loadRules();
+  const rules =
+    action === "openReviews"
+      ? {
+          ...configured,
+          openAll: ["is:pr", "is:open", `org:${configured.org}`, "review-requested:@me"].join(" "),
+        }
+      : configured;
 
   if (!rules.org || !rules.openAll) {
-    return { error: getMessage("errSetOrgAndOpenAll") };
+    return { error: getMessage(action === "openReviews" ? "errSetOrg" : "errSetOrgAndOpenAll") };
   }
 
   const openKeys = new Set((await prEntries(rules)).map((entry) => entry.pr.key));
   const plan = planOpenAll(await searchOpenPrs(rules, openKeys), openKeys, rules.org);
   const opened = await openPlanned(plan.open, rules);
 
-  await updateMeta((meta) => seedOpen(meta, opened));
-  await chrome.action.setBadgeText({ text: badgeText(plan) });
+  if (action === "openAll") {
+    await chrome.action.setBadgeText({ text: badgeText(plan) });
+  }
+
   await ensureAlarm();
 
   return { opened: opened.length, remaining: plan.remaining, estimated: plan.estimated };
 }
 
-let openingAll: Promise<Reply<"openAll">> | undefined;
+let openingBatch: Promise<Reply<"openAll">> | undefined;
+let progress: OpeningProgress = { active: false, opened: 0, planned: 0 };
 
-function handleOpenAllSettled(): void {
-  openingAll = undefined;
+export function openingProgress(): OpeningProgress {
+  if (metadataFlight) {
+    return { ...progress, hydrating: true, metadataRevision };
+  }
+
+  return metadataRevision > 0 ? { ...progress, metadataRevision } : { ...progress };
+}
+
+function handleOpenBatchSettled(): void {
+  openingBatch = undefined;
+  progress = { active: false, opened: 0, planned: 0, result: progress.result };
+}
+
+function recordOpeningResult(result: Reply<"openAll">): Reply<"openAll"> {
+  progress = { ...progress, result };
+
+  return result;
+}
+
+function handleOpeningFailed(error: unknown): never {
+  recordOpeningResult({ error: errorText(error) });
+  throw error;
+}
+
+function openBatch(action: OpenBatchAction): Promise<Reply<"openAll">> {
+  if (!openingBatch) {
+    progress = { active: true, opened: 0, planned: 0 };
+    openingBatch = openBatchOnce(action)
+      .then(recordOpeningResult, handleOpeningFailed)
+      .finally(handleOpenBatchSettled);
+  }
+
+  return openingBatch;
 }
 
 export function openAll(): Promise<Reply<"openAll">> {
-  openingAll ??= openAllOnce().finally(handleOpenAllSettled);
+  return openBatch("openAll");
+}
 
-  return openingAll;
+export function openReviews(): Promise<Reply<"openReviews">> {
+  return openBatch("openReviews");
 }
 
 // Focuses the PR's open tab (window, group, tab) or opens it in its architect group, one request at
 // a time.
 export function goTo(input?: string, repo?: RepoName): Promise<Reply<"goTo">> {
   return serial(() => findOrOpen(input, repo));
+}
+
+async function focusKnownPr(key: PrKey): Promise<Reply<"focusPr">> {
+  const rules = await loadRules();
+  const entry = findOpenTab(await prEntries(rules), key, await focusedId());
+
+  if (!entry) {
+    return { error: getMessage("errPrTabGone") };
+  }
+
+  await focusTab(entry.tab);
+
+  return { focused: key };
+}
+
+export function focusPr(key: PrKey): Promise<Reply<"focusPr">> {
+  return serial(() => focusKnownPr(key));
+}
+
+async function closeKnownPr(key: PrKey, tabId: TabId): Promise<Reply<"closePr">> {
+  const rules = await loadRules();
+  const tab = await findTab(tabId);
+
+  if (!tab || parsePrUrl(tab.pendingUrl || tab.url, rules.org)?.key !== key) {
+    return { closed: 0 };
+  }
+
+  return { closed: (await removeTab(tab.id)) ? 1 : 0 };
+}
+
+export function closePr(key: PrKey, tabId: TabId): Promise<Reply<"closePr">> {
+  return serial(() => closeKnownPr(key, tabId));
 }
 
 // What the popup needs for the repo dropdown: the listed repos, the selected one, and whether to
@@ -853,7 +936,69 @@ async function groupsById(entries: PrEntry[]): Promise<Map<GroupId, TabGroup>> {
   return new Map(groups.filter(isGroup).map((group) => [group.id, group]));
 }
 
-async function summary(): Promise<Summary> {
+const metadataAttempts = new Map<PrKey, number>();
+let metadataFlight: Promise<void> | undefined;
+let metadataRevision: MetadataRevision = 0;
+
+function needsMetadata(key: PrKey, meta: Meta): boolean {
+  const recorded = meta[key];
+
+  return !recorded?.title || !recorded.headRefName;
+}
+
+function metadataBatch(entries: PrEntry[], meta: Meta): PrRef[] {
+  const byKey = new Map(entries.map((entry) => [entry.pr.key, entry.pr]));
+  const batch: PrRef[] = [];
+  const now = Date.now();
+
+  for (const key of metadataAttempts.keys()) {
+    if (!byKey.has(key)) {
+      metadataAttempts.delete(key);
+    }
+  }
+
+  for (const [key, pr] of byKey) {
+    const retryAt = metadataAttempts.get(key) ?? 0;
+
+    if (needsMetadata(key, meta) && now >= retryAt && batch.length < MAX_PRS_PER_POLL) {
+      batch.push({ owner: pr.owner, repo: pr.repo, number: pr.number });
+      metadataAttempts.set(key, now + SETTINGS_RETRY_MS);
+    }
+  }
+
+  return batch;
+}
+
+async function hydrateMetadata(): Promise<void> {
+  const rules = await loadRules();
+  const batch = metadataBatch(await prEntries(rules), await readMeta());
+
+  if (batch.length === 0) {
+    return;
+  }
+
+  try {
+    const reply = await askHost({ type: "states", prs: batch });
+    await recordOwners(reply.owners);
+    await updateMeta((meta) => recordStates(meta, reply.prs));
+    await regroup(rules, await prEntries(rules));
+  } finally {
+    metadataRevision++;
+  }
+}
+
+function handleMetadataSettled(): void {
+  metadataFlight = undefined;
+}
+
+function backfillMissingMetadata(): Promise<void> {
+  metadataFlight ??= hydrateMetadata().catch(warn).finally(handleMetadataSettled);
+
+  return metadataFlight;
+}
+
+export async function summary(): Promise<Summary> {
+  void backfillMissingMetadata();
   const entries = await prEntries(await loadRules());
 
   return summarize(entries, await groupsById(entries), await readMeta());
@@ -926,6 +1071,14 @@ function handleGoToMessage(message: RequestOf<"goTo">): Promise<Reply<"goTo">> {
   return goTo(message.input, message.repo);
 }
 
+function handleFocusPrMessage(message: RequestOf<"focusPr">): Promise<Reply<"focusPr">> {
+  return focusPr(message.key);
+}
+
+function handleClosePrMessage(message: RequestOf<"closePr">): Promise<Reply<"closePr">> {
+  return closePr(message.key, message.tabId);
+}
+
 function handleReposMessage(): Promise<RepoChoices> {
   return repoChoices();
 }
@@ -956,7 +1109,11 @@ function handleFocusPaneMessage(message: RequestOf<"focusPane">): Promise<Focuse
 
 const handleRuntimeMessage = messageListener({
   openAll: handleOpenAllMessage,
+  openReviews,
+  openingProgress,
   goTo: handleGoToMessage,
+  focusPr: handleFocusPrMessage,
+  closePr: handleClosePrMessage,
   repos: handleReposMessage,
   pickRepo: handlePickRepoMessage,
   summary: handleSummaryMessage,
@@ -977,6 +1134,7 @@ async function groupOpenTabs(rules: Rules, meta: Meta): Promise<void> {
 async function start(): Promise<void> {
   await chrome.alarms.create(ALARM, { delayInMinutes: FIRST_POLL_SECONDS / 60 });
 
+  void backfillMissingMetadata();
   const rules = await loadRules();
   const meta = await readMeta();
 

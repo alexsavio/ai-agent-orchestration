@@ -9,6 +9,7 @@ import { fakePanes } from "./fakePanes";
 import { mountPopup } from "./mountPopup";
 
 const ROW: PrRow = {
+  tabId: 7,
   key: "acme/webapp#7",
   label: "webapp#7",
   title: "Fix the thing",
@@ -37,11 +38,11 @@ test("a found pane without an agent state still enables focus", async () => {
 test("missing panes hide the button; checking keeps the loading spinner", () => {
   const missing = item({ "acme/webapp:feature": null }).wrapper;
 
-  assert.equal(missing.findComponent(Button).exists(), false);
-  assert.equal(item({}).wrapper.findComponent(Button).exists(), false);
+  assert.equal(missing.find("[data-pr-pane]").exists(), false);
+  assert.equal(item({}).wrapper.find("[data-pr-pane]").exists(), false);
   assert.equal(
     item({}, false, { ...ROW, head: null })
-      .wrapper.findComponent(Button)
+      .wrapper.find("[data-pr-pane]")
       .exists(),
     false,
   );
@@ -72,4 +73,85 @@ test("the agent state shows as a tag with an aria label; none without an agent",
       .exists(),
     false,
   );
+});
+
+test("a PR row has an Aura hover background for pointer and keyboard interaction", () => {
+  const row = item({}).wrapper.find("li");
+
+  assert.equal(row.classes().includes("hover:bg-row-hover"), true);
+  assert.equal(row.classes().includes("focus-within:bg-row-hover"), true);
+  assert.equal(row.classes().includes("-mx-popup-padding"), true);
+  assert.equal(row.classes().includes("px-popup-padding"), true);
+});
+
+test("the go-to-pane icon uses the Aura icon size inside the small button target", () => {
+  const button = item({ "acme/webapp:feature": { state: "working" } }).wrapper.findComponent(
+    Button,
+  );
+
+  assert.equal(button.props("size"), "small");
+  assert.equal(button.find(".size-pane-icon").exists(), true);
+});
+
+test("every row has a shared minimum height and pointer cursor", () => {
+  const row = item({}).wrapper.find("li");
+
+  assert.equal(row.classes().includes("min-h-pr-row"), true);
+  assert.equal(row.classes().includes("cursor-pointer"), true);
+});
+
+test("a named native row button selects its PR; terminal focus remains separate", async () => {
+  const { wrapper, panes } = item({ "acme/webapp:feature": { state: "working" } });
+  const row = wrapper.find("button[data-pr-tab]");
+
+  assert.equal(row.attributes("type"), "button");
+  assert.equal(row.attributes("aria-label"), "webapp#7 Fix the thing");
+  await row.trigger("click");
+  assert.deepEqual(wrapper.emitted("go"), [[ROW.key]]);
+  await wrapper.findComponent(Button).trigger("click");
+  assert.deepEqual(panes.focused, [ROW.head]);
+  assert.equal(wrapper.emitted("go")?.length, 1);
+});
+
+test("close is a named sibling control after the terminal and never selects the row", async () => {
+  const { wrapper, panes } = item({ "acme/webapp:feature": { state: "working" } });
+  const close = wrapper.find("button[data-pr-close]");
+  let bubbled = 0;
+  function handleBubble(): void {
+    bubbled++;
+  }
+  wrapper.find("li").element.addEventListener("click", handleBubble);
+  try {
+    assert.equal(close.attributes("aria-label"), "Close tab webapp#7");
+    assert.equal(close.attributes("title"), "Close tab webapp#7");
+    assert.equal(close.element.parentElement, wrapper.find("li").element);
+    await close.trigger("click");
+    assert.deepEqual(wrapper.emitted("close"), [[ROW.key, ROW.tabId]]);
+    assert.equal(wrapper.emitted("go"), undefined);
+    assert.equal(panes.focused.length, 0);
+    assert.equal(bubbled, 0);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("Fuse label/title highlights render marks safely and clear with the query", async () => {
+  const pr = {
+    ...ROW,
+    title: "<img> Fix",
+    highlights: { label: [[0, 5]] as const, title: [[6, 8]] as const, queryLength: 3 },
+  };
+  const { wrapper } = item({}, false, pr);
+  try {
+    assert.deepEqual(
+      wrapper.findAll("mark").map((mark) => mark.text()),
+      ["webapp", "Fix"],
+    );
+    assert.equal(wrapper.find("img").exists(), false);
+    assert.ok(wrapper.find(".truncate").text().includes("<img>"));
+    await wrapper.setProps({ pr: ROW });
+    assert.equal(wrapper.find("mark").exists(), false);
+  } finally {
+    wrapper.unmount();
+  }
 });

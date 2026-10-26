@@ -442,7 +442,7 @@ test("a restarted worker restores ownership before grouping persisted PR metadat
   world.store = {
     owners: { "acme/webapp:feature": "Finder" },
     meta: {
-      "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
+      "acme/webapp#7": { state: "OPEN", title: "Feature", headRefName: "feature" },
     },
   };
 
@@ -500,7 +500,9 @@ function watchOwnersWrite(title: string) {
   return { fresh, restore };
 }
 
-const OPEN_FEATURE: Meta = { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } };
+const OPEN_FEATURE: Meta = {
+  "acme/webapp#7": { state: "OPEN", title: "Feature", headRefName: "feature" },
+};
 
 test("a delayed persisted restore cannot overwrite fresh ownership from a check", async () => {
   world.tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
@@ -675,4 +677,83 @@ test("focusing a pane sends repo and branch; a host error rejects with its text"
   assert.equal(info.mock.calls.filter((call) => call[0] === "PR tabs focusPane send").length, 2);
   assert.equal(info.mock.calls.filter((call) => call[0] === "PR tabs focusPane reply").length, 1);
   assert.equal(warn.mock.calls[0]?.[0], "PR tabs focusPane failed");
+});
+
+test("Open reviews requires only the organization setting", async () => {
+  world.hostSettings = { ...CONFIGURED, org: "", openAll: "" };
+  const worker = await freshWorker("review-org-hint");
+
+  assert.deepEqual(await worker.openReviews(), { error: "Set pr_tabs.org in orchestration.toml" });
+  assert.deepEqual(await worker.openAll(), {
+    error: "Set pr_tabs.org and pr_tabs.open_all in orchestration.toml",
+  });
+});
+
+test("row focus reuses an existing tab and never creates a replacement after it closes", async () => {
+  const worker = await freshWorker("row-focus");
+  world.tabs = [{ id: 1, url: `${PR}/7/files`, windowId: 2, groupId: -1 }];
+  world.created = [];
+
+  assert.deepEqual(await worker.focusPr("acme/webapp#7"), { focused: "acme/webapp#7" });
+  assert.equal(world.tabs[0]?.active, true);
+  world.tabs = [];
+  assert.deepEqual(await worker.focusPr("acme/webapp#7"), {
+    error: "That PR tab is no longer open.",
+  });
+  assert.equal(world.created.length, 0);
+});
+
+test("closePr removes only the selected PR tab without opening or focusing", async () => {
+  const worker = await freshWorker("close-pr");
+  world.tabs = [
+    { id: 1, url: `${PR}/7` },
+    { id: 2, url: `${PR}/8` },
+  ];
+  world.created = [];
+  const focus = vi.spyOn(fakeChrome.windows, "update");
+  try {
+    assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 1 });
+    assert.deepEqual(ids(), [2]);
+    assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 0 });
+    assert.equal(world.created.length, 0);
+    assert.equal(focus.mock.calls.length, 0);
+  } finally {
+    focus.mockRestore();
+  }
+});
+
+test("closePr rechecks the tab id so a navigated tab is never closed", async () => {
+  const worker = await freshWorker("close-pr-navigation");
+  world.tabs = [{ id: 1, url: `${PR}/7` }];
+  const get = vi
+    .spyOn(fakeChrome.tabs, "get")
+    .mockImplementation(async () => ({ id: 1, url: `${PR}/8` }));
+  try {
+    assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 0 });
+    assert.deepEqual(ids(), [1]);
+  } finally {
+    get.mockRestore();
+  }
+});
+
+test("closePr closes the selected row's tab across duplicate groups and never substitutes", async () => {
+  const worker = await freshWorker("close-selected-row");
+  world.tabs = [
+    { id: 1, url: `${PR}/7`, windowId: 1, groupId: 10 },
+    { id: 2, url: `${PR}/7`, windowId: 2, groupId: 9 },
+  ];
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 2), { closed: 1 });
+  assert.deepEqual(ids(), [1]);
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 2), { closed: 0 });
+  assert.deepEqual(ids(), [1]);
+});
+
+test("closePr uses pending URLs for loading tabs and pending navigation away", async () => {
+  const worker = await freshWorker("close-pending-url");
+  world.tabs = [{ id: 1, url: "", pendingUrl: `${PR}/7` }];
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 1 });
+  assert.deepEqual(ids(), []);
+  world.tabs = [{ id: 2, url: `${PR}/7`, pendingUrl: "https://example.com/" }];
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 2), { closed: 0 });
+  assert.deepEqual(ids(), [2]);
 });

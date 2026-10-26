@@ -6,6 +6,7 @@ import type { AgentState, PaneLookup, PrRow } from "#/types";
 import { fakePanes } from "#test/components/fakePanes";
 
 const ROW: PrRow = {
+  tabId: 7,
   key: "acme/webapp#7",
   label: "webapp#7",
   title: "Fix",
@@ -83,4 +84,16 @@ test("the row follows a changed lookup", () => {
 
   assert.equal(pane.availability.value, "found");
   assert.equal(pane.state.value, "waiting");
+});
+
+test("cached pane matches and misses take precedence over unrelated loading", () => {
+  const found = paneOf({ "acme/webapp:feature": { state: "working" } }, true);
+  const missing = paneOf({ "acme/webapp:feature": null }, true);
+
+  assert.equal(found.availability.value, "found");
+  assert.equal(found.isGoDisabled.value, false);
+  assert.equal(found.isChecking.value, false);
+  assert.equal(missing.availability.value, "missing");
+  assert.equal(missing.isGoVisible.value, false);
+  assert.equal(missing.isChecking.value, false);
 });
