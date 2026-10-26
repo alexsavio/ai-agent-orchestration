@@ -37,6 +37,8 @@ class Setting:
         why="",
         nonempty=False,
         shared=False,
+        pattern=None,
+        pattern_doc="",
     ):
         self.key, self.env, self.kind, self.default = key, env, kind, default
         self.scope, self.doc, self.sep, self.paths = scope, doc, sep, paths
@@ -48,6 +50,7 @@ class Setting:
         )
         self.nonempty = nonempty
         self.shared = shared
+        self.pattern, self.pattern_doc = pattern, pattern_doc
 
     @property
     def table(self):
@@ -239,7 +242,9 @@ SETTINGS = [
         "ORCH_CODEX_SMART_REASONING_EFFORT",
         "str",
         "medium",
-        "Reasoning effort for Codex smart starts and resumes (passed as -c model_reasoning_effort=<value>); the routine worker tier keeps Codex's default",
+        "Reasoning effort for Codex smart starts and resumes: one lowercase word (such as low, medium or high), passed as -c model_reasoning_effort=<value>; the routine worker tier keeps Codex's default",
+        pattern=r"^[a-z]+$",
+        pattern_doc="one lowercase word, such as low, medium or high",
     ),
     _g(
         "models.pi_worker",
@@ -869,6 +874,8 @@ def validate(data, label, scope):
                 )
             if has_nul(value):
                 raise ConfigError(f"{label}: {key}: contains a NUL character")
+            if setting.pattern is not None and not re.fullmatch(setting.pattern, value):
+                raise ConfigError(f"{label}: {key}: must be {setting.pattern_doc}")
             if setting.kind == "list":
                 for item in value:
                     if (
