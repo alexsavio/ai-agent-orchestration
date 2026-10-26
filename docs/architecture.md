@@ -77,7 +77,7 @@ flowchart LR
 | Coordinator | `ORCH_COORDINATOR_MODEL` (smart tier) |
 | Architect | `ORCH_ARCHITECT_MODEL` |
 | Worker, routine | Codex at `ORCH_CODEX_WORKER_MODEL` (the default) |
-| Worker, hard | Codex at `ORCH_CODEX_SMART_MODEL`, reasoning effort `ORCH_CODEX_SMART_REASONING_EFFORT` (default `medium`) |
+| Worker, hard | Codex at `ORCH_CODEX_SMART_MODEL`, reasoning effort `medium` |
 | Worker on a local or DeepSeek model | pi at `ORCH_PI_WORKER_MODEL` (routine) or `ORCH_PI_SMART_MODEL` (hard); only when set. DeepSeek only in repos that opted in |
 | Worker where Codex cannot do the step | Claude: the lightest allowed tier that does the task well (Haiku mechanical, Sonnet implementation and review, Opus hard, Fable only for the hardest); only tiers `providers.claude` allows |
 | Reviewer | The family that did not write the code |

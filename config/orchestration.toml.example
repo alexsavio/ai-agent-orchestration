@@ -53,8 +53,6 @@ architect = "claude-opus-5-5"
 codex_worker = "<codex-worker-model>"
 # Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two
 codex_smart = "<codex-smart-model>"
-# Reasoning effort for Codex smart starts and resumes (passed as -c model_reasoning_effort=<value>); the routine worker tier keeps Codex's default
-codex_smart_reasoning_effort = "medium"
 # pi model for routine work as provider/model-id; empty means pi is not used on this machine
 pi_worker = ""
 # pi model for hard work as provider/model-id; empty means pi is not used on this machine
