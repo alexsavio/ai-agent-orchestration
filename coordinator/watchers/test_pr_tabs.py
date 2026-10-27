@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -12,6 +13,7 @@ from unittest.mock import patch
 from test_support import IsolatedTestCase
 
 import discovery
+import worker_signals
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -115,6 +117,276 @@ class PrTabsTest(IsolatedTestCase):
             )
 
         self.assertEqual(discovery.branch_owners(command, work), {})
+
+    def test_status_owners_reads_open_prs_only_and_accepts_pr_subpages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_text(
+                "https://github.com/acme/ignored/pull/1\n"
+                "## Open PRs\n"
+                "- https://github.com/Acme/WebApp/pull/12/files\n"
+                "- https://github.com/acme/docs/pull/23?plain=1\n"
+                "## Closed workers\n"
+                "https://github.com/acme/ignored/pull/2\n"
+            )
+            (status / "architect-fixes.md").write_text(
+                "## Open PRs\nhttps://github.com/acme/ignored/pull/3\n"
+            )
+            self.assertEqual(
+                discovery.status_owners({"Finder": "a"}, status),
+                {"acme/webapp#12": "a", "acme/docs#23": "a"},
+            )
+
+    def test_status_owners_accepts_markdown_and_prose_url_terminators(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            url = "https://github.com/acme/webapp/pull/12"
+            (status / "Finder.md").write_text(
+                "## Open PRs\n"
+                f"- {url} — waits\n"
+                f"| {url} | x\n"
+                f"- {url}, follow-up\n"
+                f"- {url}. Done\n"
+                f"- ({url})\n"
+                f"- `{url}`\n"
+                f"- {url}\tstill open\n"
+                f"- [#12]({url})\n"
+            )
+            self.assertEqual(
+                discovery.status_owners({"Finder": "a"}, status),
+                {"acme/webapp#12": "a"},
+            )
+
+    def test_status_owners_ignores_unreadable_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            finder = status / "Finder.md"
+            tooling = status / "Tooling.md"
+            finder.write_text("## Open PRs\nhttps://github.com/acme/webapp/pull/12\n")
+            tooling.write_text("## Open PRs\nhttps://github.com/acme/docs/pull/23\n")
+            original = Path.open
+
+            def open_file(path, *args, **kwargs):
+                if path == tooling:
+                    raise OSError("unreadable fixture")
+                return original(path, *args, **kwargs)
+
+            with patch.object(Path, "open", open_file):
+                self.assertEqual(
+                    discovery.status_owners({"Finder": "a", "Tooling": "b"}, status),
+                    {"acme/webapp#12": "a"},
+                )
+
+    def test_status_owners_propagates_directory_enumeration_failures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(Path, "iterdir", side_effect=PermissionError("denied")):
+                with self.assertRaisesRegex(discovery.Unavailable, "status directory"):
+                    discovery.status_owners({"Finder": "a"}, Path(directory))
+
+    def test_status_owners_omits_ambiguous_prs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            for label in ("Finder", "Tooling"):
+                (status / f"{label}.md").write_text(
+                    "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+                )
+            self.assertEqual(
+                discovery.status_owners({"Finder": "a", "Tooling": "b"}, status),
+                {},
+            )
+
+    def test_status_owners_keeps_duplicate_stems_for_one_workspace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            for name in ("agent-tooling-1018", "Architect::Agent::Tooling"):
+                (status / f"{name}.md").write_text(
+                    "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+                )
+            self.assertEqual(
+                discovery.status_owners(
+                    {"agent-tooling-1018": "a", "Architect::Agent::Tooling": "a"},
+                    status,
+                ),
+                {"acme/webapp#12": "a"},
+            )
+
+    def test_status_owners_accepts_case_insensitive_open_prs_heading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_text(
+                "## OPEN PRS\nhttps://github.com/acme/webapp/pull/12\n"
+            )
+            self.assertEqual(
+                discovery.status_owners({"Finder": "a"}, status),
+                {"acme/webapp#12": "a"},
+            )
+
+    def test_status_owners_ignores_missing_directory_and_non_markdown_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.txt").write_text(
+                "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+            )
+            self.assertEqual(discovery.status_owners({"Finder": "a"}, status), {})
+            self.assertEqual(
+                discovery.status_owners({"Finder": "a"}, status / "missing"), {}
+            )
+
+    def test_status_owners_lowercases_pr_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_text(
+                "## Open PRs\nhttps://github.com/Acme/WebApp/pull/12\n"
+            )
+            self.assertEqual(
+                discovery.status_owners({"Finder": "a"}, status),
+                {"acme/webapp#12": "a"},
+            )
+
+    def test_status_owners_skips_files_over_256_kib(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_bytes(
+                b"## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+                + b"x" * (256 * 1024)
+            )
+            original = Path.open
+            reads = []
+
+            class BoundedStream:
+                def __init__(self, stream):
+                    self.stream = stream
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    self.stream.close()
+
+                def read(self, size=-1):
+                    reads.append(size)
+                    return self.stream.read(size)
+
+            def open_file(path, *args, **kwargs):
+                return BoundedStream(original(path, *args, **kwargs))
+
+            with patch.object(Path, "open", open_file):
+                self.assertEqual(discovery.status_owners({"Finder": "a"}, status), {})
+            self.assertEqual(reads, [discovery.MAX_STATUS_FILE_BYTES + 1])
+
+    def test_host_merges_status_owners_without_overriding_branch_owners(self):
+        work = {
+            "workspaces": [
+                {"id": "a", "label": "Finder"},
+                {"id": "w", "owner": "a", "checkout": "/web"},
+            ]
+        }
+        branch = {"acme/webapp:feature": "Finder", "acme/webapp#12": "Branch"}
+        status = {"acme/webapp#12": "a", "acme/docs#23": "a"}
+        with (
+            patch.object(discovery, "open_work", return_value=work),
+            patch.object(discovery, "branch_owners", return_value=branch) as branches,
+            patch.object(discovery, "architect_owners", return_value={"Finder": "a"}),
+            patch.object(discovery, "status_owners", return_value=status) as statuses,
+        ):
+            self.assertEqual(
+                host.discover_owners(
+                    ROOT,
+                    {
+                        "ORCH_ENV": "herdr",
+                        "ORCH_USER_TODO_STATUS_DIR": "/fixture/status",
+                    },
+                ),
+                {
+                    "acme/webapp:feature": "Finder",
+                    "acme/webapp#12": "Branch",
+                    "acme/docs#23": "Finder",
+                },
+            )
+        self.assertEqual(branches.call_args.args[1], work)
+        self.assertEqual(
+            statuses.call_args.args, ({"Finder": "a"}, Path("/fixture/status"))
+        )
+
+    def test_host_ignores_status_file_named_after_a_worker_label(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_text(
+                "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+            )
+            (status / "Worker.md").write_text(
+                "## Open PRs\nhttps://github.com/acme/docs/pull/23\n"
+            )
+            work = {
+                "workspaces": [
+                    {"id": "a", "label": "Finder"},
+                    {"id": "w", "label": "Worker", "owner": "a"},
+                ]
+            }
+            with (
+                patch.object(discovery, "open_work", return_value=work),
+                patch.object(discovery, "branch_owners", return_value={}),
+                patch.object(
+                    discovery, "architect_owners", return_value={"Finder": "a"}
+                ),
+                patch.object(discovery, "status_directory", return_value=status),
+            ):
+                self.assertEqual(
+                    host.discover_owners(ROOT, {"ORCH_ENV": "herdr"}),
+                    {"acme/webapp#12": "Finder"},
+                )
+
+    def test_host_includes_an_architect_status_file_without_workers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Architect::Example.md").write_text(
+                "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+            )
+            work = {"workspaces": [{"id": "a", "label": "example-app"}]}
+            with (
+                patch.object(discovery, "open_work", return_value=work),
+                patch.object(discovery, "branch_owners", return_value={}),
+                patch.object(
+                    discovery,
+                    "architect_owners",
+                    return_value={"Architect::Example": "a"},
+                ),
+                patch.object(discovery, "status_directory", return_value=status),
+            ):
+                self.assertEqual(
+                    host.discover_owners(ROOT, {"ORCH_ENV": "herdr"}),
+                    {"acme/webapp#12": "example-app"},
+                )
+
+    def test_host_ignores_architect_without_a_workspace_label(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status = Path(directory)
+            (status / "Finder.md").write_text(
+                "## Open PRs\nhttps://github.com/acme/webapp/pull/12\n"
+            )
+            with (
+                patch.object(discovery, "open_work", return_value={"workspaces": []}),
+                patch.object(discovery, "branch_owners", return_value={}),
+                patch.object(
+                    discovery, "architect_owners", return_value={"Finder": "a"}
+                ),
+                patch.object(discovery, "status_directory", return_value=status),
+            ):
+                self.assertEqual(host.discover_owners(ROOT, {"ORCH_ENV": "herdr"}), {})
+
+    def test_host_preserves_last_good_ownership_when_architect_lookup_fails(self):
+        work = {"workspaces": [{"id": "a", "label": "Finder"}]}
+        with (
+            patch.object(discovery, "open_work", return_value=work),
+            patch.object(discovery, "branch_owners", return_value={}),
+            patch.object(
+                discovery,
+                "architect_owners",
+                side_effect=discovery.Unavailable("agent list timed out"),
+            ),
+        ):
+            with self.assertRaisesRegex(discovery.Unavailable, "agent list timed out"):
+                host.discover_owners(ROOT, {"ORCH_ENV": "herdr"})
 
     def test_host_cache_expires_and_missing_or_broken_adapter_falls_back(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -228,6 +500,10 @@ class PrTabsTest(IsolatedTestCase):
                 failing = False
 
                 def run(args, **kwargs):
+                    if args[1:] == ("agent", "list"):
+                        return SimpleNamespace(
+                            stdout='{"result":{"agents":[{"name":"Finder","workspace_id":"a","tokens":{"role":"architect"}}]}}'
+                        )
                     if args[3] == "symbolic-ref":
                         if failing:
                             raise subprocess.CalledProcessError(
@@ -272,7 +548,9 @@ class PrTabsTest(IsolatedTestCase):
                 "ORCH_ENV": "herdr",
             }
             reply = SimpleNamespace(
-                stdout=json.dumps({"result": {"workspaces": [], "panes": []}})
+                stdout=json.dumps(
+                    {"result": {"workspaces": [], "panes": [], "agents": []}}
+                )
             )
             with (
                 patch.dict(os.environ, environ),
@@ -283,8 +561,8 @@ class PrTabsTest(IsolatedTestCase):
                     self.assertEqual(host.ownership(), {})
                 self.assertEqual(
                     run.call_count,
-                    4,
-                    "each changed config takes a fresh shared workspace/pane snapshot",
+                    6,
+                    "each changed config takes fresh workspace, pane and architect snapshots",
                 )
             self.assertEqual(list(base.glob("owners*.json")), [base / "owners.json"])
             self.assertEqual(unrelated.read_text(), "keep")
@@ -334,6 +612,10 @@ class PrTabsTest(IsolatedTestCase):
         def run(args, **kwargs):
             self.assertLessEqual(kwargs["timeout"], 5)
             self.assertEqual(kwargs["env"]["HERDR_SOCKET_PATH"], "/fixture/socket")
+            if args[1:] == ("agent", "list"):
+                return SimpleNamespace(
+                    stdout='{"result":{"agents":[{"name":"Finder","workspace_id":"a","tokens":{"role":"architect"}}]}}'
+                )
             return SimpleNamespace(
                 stdout="refs/heads/feature"
                 if args[3] == "symbolic-ref"
@@ -375,6 +657,20 @@ class PrTabsTest(IsolatedTestCase):
                 value = json.dumps(
                     {"result": {"panes": [{"workspace_id": "w", "cwd": "/docs/sub"}]}}
                 )
+            elif args[1:] == ("agent", "list"):
+                value = json.dumps(
+                    {
+                        "result": {
+                            "agents": [
+                                {
+                                    "name": "Finder",
+                                    "workspace_id": "a",
+                                    "tokens": {"role": "architect"},
+                                }
+                            ]
+                        }
+                    }
+                )
             elif args[3] == "rev-parse":
                 value = "/docs/.git" if "--git-common-dir" in args else "/docs"
             elif args[3] == "symbolic-ref":
@@ -396,6 +692,453 @@ class PrTabsTest(IsolatedTestCase):
             )
         self.assertEqual(
             [args[1:] for args in calls if args[0] != "git"],
-            [("workspace", "list"), ("pane", "list")],
+            [("workspace", "list"), ("pane", "list"), ("agent", "list")],
         )
         self.assertEqual(before, {key: os.environ.get(key) for key in before})
+
+
+FAKE_HERDR = """#!/bin/sh
+printf '%s\\n' "$*" >>"$FAKE_HERDR_DIR/calls"
+printf '%s\\n' "${HERDR_SOCKET_PATH:-}" >>"$FAKE_HERDR_DIR/sockets"
+[ -z "$FAKE_HERDR_SLEEP" ] || sleep "$FAKE_HERDR_SLEEP"
+if [ -n "$FAKE_HERDR_FAIL" ]; then echo "$FAKE_HERDR_FAIL" >&2; exit 1; fi
+case "$1 $2" in
+  "workspace list") cat "$FAKE_HERDR_DIR/workspaces.json" ;;
+  "pane list") cat "$FAKE_HERDR_DIR/panes.json" ;;
+  "agent list") printf '%s\n' '{"result":{"agents":[]}}' ;;
+  *) echo '{"result":{}}' ;;
+esac
+"""
+
+
+class PaneJumpTest(IsolatedTestCase):
+    def setUp(self):
+        super().setUp()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.base = Path(directory.name)
+        herdr = self.base / "fake-herdr"
+        herdr.write_text(FAKE_HERDR)
+        herdr.chmod(0o755)
+        config = self.base / "config.toml"
+        config.write_text('[install]\nenv = "herdr"\n')
+        environ = {
+            "ORCH_CONFIG": str(config),
+            "ORCH_ENV": "herdr",
+            "HERDR_BIN_PATH": str(herdr),
+            "FAKE_HERDR_DIR": str(self.base),
+            "PR_TABS_LOG": str(self.base / "host.log"),
+        }
+        patcher = patch.dict(os.environ, environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        (self.base / "calls").write_text("")
+        self.web = self.checkout("web", "feature", "git@github.com:Acme/WebApp.git")
+        self.other = self.checkout("other", "main", "https://github.com/acme/webapp")
+
+    def checkout(self, name, branch, origin):
+        path = self.base / name
+        subprocess.run(
+            ["git", "init", "-q", f"--initial-branch={branch}", str(path)], check=True
+        )
+        subprocess.run(
+            ["git", "-C", str(path), "remote", "add", "origin", origin], check=True
+        )
+        return str(path)
+
+    def herdr(self, workspaces, panes):
+        rows = [
+            {
+                "workspace_id": id,
+                "tokens": {"owner": owner} if owner else {},
+                "worktree": {"checkout_path": path, "repo_root": path},
+            }
+            for id, owner, path in workspaces
+        ]
+        (self.base / "workspaces.json").write_text(
+            json.dumps({"result": {"workspaces": rows}})
+        )
+        pane_rows = [
+            dict({"workspace_id": workspace, "pane_id": pane}, **extra)
+            for workspace, pane, extra in panes
+        ]
+        (self.base / "panes.json").write_text(
+            json.dumps({"result": {"panes": pane_rows}})
+        )
+
+    def calls(self):
+        return (self.base / "calls").read_text().splitlines()
+
+    def focus_calls(self):
+        return [call for call in self.calls() if "focus" in call]
+
+    def test_lookup_reports_which_branches_have_a_pane(self):
+        self.herdr(
+            [("wA", None, self.web), ("wB", None, self.other)],
+            [("wA", "wA:p1", {"agent": "claude"}), ("wB", "wB:p1", {})],
+        )
+        reply = host.panes(
+            {
+                "prs": [
+                    {"repo": "acme/webapp", "branch": "feature"},
+                    {"repo": "ACME/WebApp", "branch": "main"},
+                    {"repo": "acme/webapp", "branch": "gone"},
+                    {"repo": "acme/docs", "branch": "feature"},
+                ]
+            }
+        )
+        self.assertEqual(
+            reply["panes"],
+            {
+                "acme/webapp:feature": {"state": None},
+                "acme/webapp:main": {"state": None},
+                "acme/webapp:gone": None,
+                "acme/docs:feature": None,
+            },
+        )
+        self.assertEqual(self.calls(), ["workspace list", "pane list"])
+
+    def test_focus_routes_worker_to_owner_architect(self):
+        self.herdr(
+            [
+                ("wOther", None, self.other),
+                ("wArch", None, self.web),
+                ("wWork", "wArch", self.web),
+            ],
+            [
+                (
+                    "wOther",
+                    "wOther:p1",
+                    {"agent": "claude", "tokens": {"role": "architect"}},
+                ),
+                ("wArch", "wArch:p0", {"agent": "claude"}),
+                (
+                    "wArch",
+                    "wArch:p1",
+                    {
+                        "agent": "claude",
+                        "agent_status": "idle",
+                        "tokens": {"role": "architect"},
+                    },
+                ),
+                ("wWork", "wWork:p1", {}),
+                ("wWork", "wWork:p2", {"agent": "claude", "agent_status": "working"}),
+            ],
+        )
+        lookup = host.panes({"prs": [{"repo": "acme/webapp", "branch": "feature"}]})
+        self.assertEqual(lookup["panes"], {"acme/webapp:feature": {"state": "working"}})
+        (self.base / "calls").write_text("")
+
+        reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+        self.assertEqual(reply, {"ok": True, "pane": "wArch:p1"})
+        self.assertEqual(
+            self.calls(), ["workspace list", "pane list", "agent focus wArch:p1"]
+        )
+
+    def test_owner_without_architect_agent_focuses_owner_workspace(self):
+        for extra in [{"agent": "claude"}, {"tokens": {"role": "architect"}}]:
+            with self.subTest(extra=extra):
+                (self.base / "calls").write_text("")
+                self.herdr(
+                    [("wArch", None, self.other), ("wWork", "wArch", self.web)],
+                    [
+                        ("wArch", "wArch:p1", extra),
+                        ("wWork", "wWork:p1", {"agent": "claude"}),
+                    ],
+                )
+                reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+                self.assertEqual(reply, {"ok": True, "pane": None})
+                self.assertEqual(
+                    self.calls(),
+                    ["workspace list", "pane list", "workspace focus wArch"],
+                )
+
+    def test_missing_owner_retains_worker_agent_focus(self):
+        for owner in [None, "closed-architect"]:
+            with self.subTest(owner=owner):
+                (self.base / "calls").write_text("")
+                self.herdr(
+                    [("wWork", owner, self.web)],
+                    [("wWork", "wWork:p1", {"agent": "claude"})],
+                )
+                reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+                self.assertEqual(reply["pane"], "wWork:p1")
+                self.assertEqual(self.focus_calls(), ["agent focus wWork:p1"])
+
+    def test_self_owned_workspace_is_not_a_worker_and_order_breaks_ties(self):
+        self.herdr(
+            [("wSelf", "wSelf", self.web), ("wLater", None, self.web)],
+            [("wSelf", "wSelf:p1", {}), ("wLater", "wLater:p1", {})],
+        )
+        reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+        self.assertEqual(reply["pane"], "wSelf:p1")
+        self.assertEqual(self.focus_calls(), ["workspace focus wSelf"])
+
+    def test_no_matching_pane_focuses_nothing(self):
+        self.herdr([("wB", None, self.other)], [("wB", "wB:p1", {"agent": "x"})])
+        with self.assertRaisesRegex(host.RequestError, "no Herdr pane"):
+            host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+        self.assertEqual(self.focus_calls(), [])
+
+    def test_herdr_missing_not_running_or_slow_is_a_clear_error(self):
+        self.herdr([], [])
+        request = {"prs": [{"repo": "acme/webapp", "branch": "feature"}]}
+        with patch.dict(os.environ, {"HERDR_BIN_PATH": str(self.base / "absent")}):
+            with self.assertRaisesRegex(host.RequestError, "^absent not found"):
+                host.panes(request)
+        with patch.dict(os.environ, {"FAKE_HERDR_FAIL": "server not running"}):
+            with self.assertRaisesRegex(
+                host.RequestError, "fake-herdr failed: server not running"
+            ):
+                host.panes(request)
+        with (
+            patch.dict(os.environ, {"FAKE_HERDR_SLEEP": "3"}),
+            patch.object(host, "HERDR_TIMEOUT_SECONDS", 0.3),
+        ):
+            started = time.monotonic()
+            with self.assertRaisesRegex(host.RequestError, "fake-herdr timed out"):
+                host.panes(request)
+            self.assertLess(time.monotonic() - started, 2)
+        with patch.dict(os.environ, {"ORCH_ENV": "none"}):
+            with self.assertRaisesRegex(host.RequestError, "install.env"):
+                host.panes(request)
+
+    def test_output_over_the_limit_is_refused(self):
+        self.herdr([("wA", None, self.web)], [("wA", "wA:p1", {})])
+        with patch.object(host, "MAX_COMMAND_BYTES", 16):
+            with self.assertRaisesRegex(host.RequestError, "output over 16 bytes"):
+                host.panes({"prs": [{"repo": "acme/webapp", "branch": "feature"}]})
+
+    def test_invalid_input_is_refused_before_herdr_runs(self):
+        good = {"repo": "acme/webapp", "branch": "feature"}
+        for bad in (
+            {"prs": []},
+            {"prs": [good] * (host.MAX_PANE_LOOKUPS + 1)},
+            {"prs": "acme/webapp:feature"},
+            {"prs": [{"repo": "acme", "branch": "feature"}]},
+            {"prs": [{"repo": "acme/web app", "branch": "feature"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "-x"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "a..b"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "a b"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "a~1"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "x.lock"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": "feature\n"}]},
+            {"prs": [{"repo": "acme/webapp", "branch": 7}]},
+        ):
+            with self.subTest(bad=bad):
+                with self.assertRaises(host.RequestError):
+                    host.panes(bad)
+        with self.assertRaises(host.RequestError):
+            host.focus_pane({"repo": "acme/webapp", "branch": "feat/../x"})
+        self.assertEqual(self.calls(), [])
+
+    def test_terminal_app_comes_forward_on_macos_only_when_set(self):
+        self.herdr([("wA", None, self.web)], [("wA", "wA:p1", {"agent": "c"})])
+        request = {"repo": "acme/webapp", "branch": "feature"}
+        opener = self.base / "open"
+        opener.write_text(
+            '#!/bin/sh\nprintf "open %s\\n" "$*" >>"$FAKE_HERDR_DIR/calls"\n'
+        )
+        opener.chmod(0o755)
+        with (
+            patch.object(host, "OPEN", str(opener)),
+            patch.object(host.sys, "platform", "darwin"),
+        ):
+            host.focus_pane(request)
+            with patch.dict(os.environ, {"ORCH_PR_TABS_TERMINAL_APP": "Ghostty"}):
+                host.focus_pane(request)
+            with patch.dict(os.environ, {"ORCH_PR_TABS_TERMINAL_APP": "-n x"}):
+                with self.assertRaisesRegex(host.RequestError, "application name"):
+                    host.focus_pane(request)
+        with (
+            patch.object(host, "OPEN", str(opener)),
+            patch.object(host.sys, "platform", "linux"),
+            patch.dict(os.environ, {"ORCH_PR_TABS_TERMINAL_APP": "Ghostty"}),
+        ):
+            host.focus_pane(request)
+        self.assertEqual(
+            [call for call in self.calls() if call.startswith("open")],
+            ["open -a Ghostty"],
+        )
+
+    def test_lookup_reports_the_agent_state_from_herdr_and_open_questions(self):
+        signals = self.base / "signals"
+        signals.mkdir()
+        cases = {
+            "working": ({"agent": "claude", "agent_status": "working"}, "working"),
+            "idle": ({"agent": "claude", "agent_status": "idle"}, "idle"),
+            "done": ({"agent": "claude", "agent_status": "done"}, "done"),
+            "blocked": ({"agent": "claude", "agent_status": "blocked"}, "waiting"),
+            "unknown": ({"agent": "claude", "agent_status": "unknown"}, None),
+            "no agent": ({"agent_status": "working"}, None),
+        }
+        for label, (pane, expected) in cases.items():
+            with self.subTest(label=label):
+                self.herdr([("wA", None, self.web)], [("wA", "wA:p1", pane)])
+                with patch.object(worker_signals, "directory", return_value=signals):
+                    reply = host.panes(
+                        {"prs": [{"repo": "acme/webapp", "branch": "feature"}]}
+                    )
+                self.assertEqual(
+                    reply["panes"], {"acme/webapp:feature": {"state": expected}}
+                )
+
+    def test_an_open_orch_signal_question_means_waiting(self):
+        signals = self.base / "signals"
+        signals.mkdir()
+        question = {
+            "kind": "question",
+            "workspace": "wA",
+            "pane": "wA:p1",
+            "deadline": 2000,
+        }
+        self.herdr(
+            [("wA", None, self.web)],
+            [("wA", "wA:p1", {"agent": "claude", "agent_status": "working"})],
+        )
+        request = {"prs": [{"repo": "acme/webapp", "branch": "feature"}]}
+
+        def state(record, now=1000, answered=False):
+            path = signals / "signal-1.json"
+            path.write_text(json.dumps(record))
+            answer = path.with_suffix(".answer")
+            if answered:
+                answer.write_text("a")
+            else:
+                answer.unlink(missing_ok=True)
+            with (
+                patch.object(worker_signals, "directory", return_value=signals),
+                patch.object(host.time, "time", return_value=now),
+            ):
+                return host.panes(request)["panes"]["acme/webapp:feature"]["state"]
+
+        self.assertEqual(state(question), "waiting")
+        self.assertEqual(state(question, answered=True), "working")
+        self.assertEqual(state(question, now=3000), "working")
+        self.assertEqual(state(dict(question, cleanup=True)), "working")
+        self.assertEqual(state(dict(question, pane="wA:p2")), "working")
+        self.assertEqual(state(dict(question, kind="done")), "working")
+
+    def test_any_git_branch_name_is_looked_up(self):
+        plus = self.checkout("plus", "feature+fix@2", "https://github.com/acme/webapp")
+        self.herdr([("wP", None, plus)], [("wP", "wP:p1", {"agent": "claude"})])
+        reply = host.panes(
+            {
+                "prs": [
+                    {"repo": "acme/webapp", "branch": "feature+fix@2"},
+                    {"repo": "acme/webapp", "branch": "other;branch"},
+                ]
+            }
+        )
+        self.assertEqual(
+            reply["panes"],
+            {
+                "acme/webapp:feature+fix@2": {"state": None},
+                "acme/webapp:other;branch": None,
+            },
+        )
+
+    def test_focus_uses_the_configured_herdr_socket(self):
+        self.herdr([("wA", None, self.web)], [("wA", "wA:p1", {"agent": "claude"})])
+        with patch.dict(os.environ, {"ORCH_HERDR_SOCKET": "/fixture/socket"}):
+            host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+        self.assertEqual(
+            (self.base / "sockets").read_text().splitlines(), ["/fixture/socket"] * 3
+        )
+        self.assertNotEqual(os.environ.get("HERDR_SOCKET_PATH"), "/fixture/socket")
+
+    def test_an_oversized_question_record_is_skipped(self):
+        signals = self.base / "signals"
+        signals.mkdir()
+        record = {
+            "kind": "question",
+            "workspace": "wA",
+            "pane": "wA:p1",
+            "deadline": 2000,
+            "question": "x" * host.MAX_REQUEST_BYTES,
+        }
+        (signals / "signal-1.json").write_text(json.dumps(record))
+        self.herdr(
+            [("wA", None, self.web)],
+            [("wA", "wA:p1", {"agent": "claude", "agent_status": "idle"})],
+        )
+        with (
+            patch.object(worker_signals, "directory", return_value=signals),
+            patch.object(host.time, "time", return_value=1000),
+        ):
+            reply = host.panes({"prs": [{"repo": "acme/webapp", "branch": "feature"}]})
+        self.assertEqual(reply["panes"], {"acme/webapp:feature": {"state": "idle"}})
+
+    def test_an_orphaned_owner_is_not_a_worker(self):
+        self.herdr(
+            [
+                ("wOld", "closed-architect", self.web),
+                ("wArch", None, self.other),
+                ("wWorker", "wArch", self.web),
+            ],
+            [
+                ("wOld", "wOld:p1", {"agent": "claude"}),
+                ("wArch", "wArch:p1", {"agent": "claude"}),
+                ("wWorker", "wWorker:p1", {"agent": "claude"}),
+            ],
+        )
+        reply = host.focus_pane({"repo": "acme/webapp", "branch": "feature"})
+        self.assertIsNone(reply["pane"])
+        self.assertEqual(self.focus_calls(), ["workspace focus wArch"])
+
+    def test_a_long_valid_branch_does_not_reject_the_lookup(self):
+        self.herdr([("wA", None, self.web)], [("wA", "wA:p1", {})])
+        long = "b" * 300
+        reply = host.panes(
+            {
+                "prs": [
+                    {"repo": "acme/webapp", "branch": long},
+                    {"repo": "acme/webapp", "branch": "feature"},
+                ]
+            }
+        )
+        self.assertEqual(
+            reply["panes"],
+            {f"acme/webapp:{long}": None, "acme/webapp:feature": {"state": None}},
+        )
+
+    def test_shared_checkouts_are_probed_once_without_clone_roots(self):
+        sub = Path(self.web) / "sub"
+        sub.mkdir()
+        rows = [{"workspace_id": id} for id in ("wA", "wB", "wC")]
+        (self.base / "workspaces.json").write_text(
+            json.dumps({"result": {"workspaces": rows}})
+        )
+        pane_rows = [
+            {"workspace_id": "wA", "pane_id": "wA:p1", "cwd": self.web},
+            {"workspace_id": "wB", "pane_id": "wB:p1", "cwd": self.web},
+            {"workspace_id": "wC", "pane_id": "wC:p1", "cwd": str(sub)},
+        ]
+        (self.base / "panes.json").write_text(
+            json.dumps({"result": {"panes": pane_rows}})
+        )
+        calls, real = [], host.bounded_command
+
+        def counting(deadline):
+            command = real(deadline)
+
+            def run(*args):
+                calls.append(args[1:] if args[0] != "git" else args[3:])
+                return command(*args)
+
+            return run
+
+        with patch.object(host, "bounded_command", counting):
+            reply = host.panes({"prs": [{"repo": "acme/webapp", "branch": "feature"}]})
+        self.assertEqual(reply["panes"], {"acme/webapp:feature": {"state": None}})
+        self.assertEqual(
+            calls,
+            [
+                ("workspace", "list"),
+                ("pane", "list"),
+                ("rev-parse", "--show-toplevel"),
+                ("rev-parse", "--show-toplevel"),
+                ("symbolic-ref", "--quiet", "HEAD"),
+                ("remote", "get-url", "origin"),
+            ],
+        )

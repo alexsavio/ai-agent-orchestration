@@ -4,9 +4,9 @@ The watchers write alerts to files. One notifier turns them into a feed at `~/.c
 
 | Watcher | Watches |
 |---|---|
-| audit | Your open PRs in the repos of the open workspaces (red CI, open threads, conflicts, missing reviewer, approved), blocked workers, stale heavy slots, git pile-ups in those clones |
-| pulls | PR events, sent straight to the owning architect |
-| context | Session token use; sends `RECYCLE` (architect, to the Coordinator) and `RECYCLE-WORKER` (worker, to the owning architect) |
+| audit | Your open PRs in the repos of the open workspaces (red CI, open threads, a review comment, conflicts, missing reviewer, approved), blocked workers, stale heavy slots, git pile-ups in those clones |
+| pulls | PR events (`APPROVED`, `RED`, `CHANGES`, `THREADS`, `COPILOT`, `COMMENTED`, `MERGED`, `CLOSED`), sent straight to the owning architect |
+| context | Session token use; sends `RECYCLE` (architect, to the Coordinator) and `RECYCLE-WORKER-SOFT` / `RECYCLE-WORKER-HARD` (worker, to the owning architect) |
 | host | Memory, swap, processes, open files, load |
 | hog | Big processes and long or big `git` processes |
 | balance | Worktree CPU and memory against the heavy-slot cap |
@@ -74,9 +74,10 @@ through the intentional-close helper, leaving the question file available to ret
 A session in an owner-tagged workspace that stays `done` or `idle` for more than
 `workers.wait_s` seconds (default 600) emits
 `WORKER WAITING <name> pane=<pane> owner=<workspace> <minutes>m session=<id>`.
-Architect and Coordinator role panes, and panes with an `Architect::` name or
-title, are excluded. The start line goes only to
-`prod-context/coordinator-fyi.log`, with no native message to the architect.
+Architect and Coordinator role panes, and panes whose name or stripped title is
+exactly an `Architect::` name (with no whitespace), are excluded. The start
+line goes only to `prod-context/coordinator-fyi.log`, with no native message to
+the architect.
 There is one repeat at `workers.wait_repeat_s` seconds after the initial alert
 (default 1800), also only in the fyi file, then one `ESCALATE` after another such
 interval. The escalation goes to the feed and natively to the Coordinator through

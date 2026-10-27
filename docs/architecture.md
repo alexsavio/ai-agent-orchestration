@@ -141,13 +141,13 @@ flowchart LR
 
 | Producer | Interval | Reports |
 |---|---|---|
-| context | 300 s | `RECYCLE`, `RECYCLE-WORKER`, `NOSENSOR` |
+| context | 300 s | `RECYCLE`, `RECYCLE-WORKER-SOFT` / `RECYCLE-WORKER-HARD`, `NOSENSOR` |
 | host | 60 s | memory, swap, processes, open files, load |
 | hog | 5 s | big processes, big or long `git` processes |
 | balance | 60 s | load, slot count, busy worktrees with a `top:` list |
 | workers | 60 s | blocked, error and disappeared agents |
 | audit | 1800 s | PR problems, stale slots, git pile-ups, `LEGACY` lines |
-| pulls | 150 s | PR events: `APPROVED`, `RED`, `CHANGES`, `THREADS`, `COPILOT`, `MERGED`, `CLOSED` |
+| pulls | 150 s | PR events: `APPROVED`, `RED`, `CHANGES`, `THREADS`, `COPILOT`, `COMMENTED`, `MERGED`, `CLOSED` |
 | todo | 60 s | newly added `## Waits on the user` items, as one `TODO` line |
 
 - The feed has a line when a condition starts, when a host metric reaches its `danger` step, when a PR event gets an owner, and when it clears, plus a periodic digest of folded lines; repeats and growth write nothing. It is mode 0600 and rotates at 1 MiB.

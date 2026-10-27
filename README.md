@@ -27,10 +27,12 @@ The installer puts the skills, watchers, hooks and status line into `~/.claude`.
 You need macOS or Linux, [Claude Code](https://claude.com/claude-code) with the `ListAgents`, `SendMessage` and `Monitor` tools, `git`, `jq`, Python 3.11 or newer and `curl`. `gh` (logged in with `gh auth login`) is needed for the PR watchers. Codex CLI is optional.
 
 ```bash
-s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) && bash -c "${s:?empty download}" _
+curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/get.sh | bash
 ```
 
-It clones this repo to `~/.claude/ai-agent-orchestration`, links the files into `~/.claude`, adds the hooks and status line to `~/.claude/settings.json`, and runs the env adapter, which for `herdr` installs [Herdr](https://herdr.dev) 0.9 or newer with the Radar plugin. Pick another env with `--env <name>` after the final `_`, or skip the env step with `env = "none"` under `[install]` in `~/.claude/orchestration.toml`. If it prints `PATH setup`, add the line it shows to your shell startup file and open a new shell.
+Installer options go after `bash -s --`, for example `... | bash -s -- --env herdr`. A cut-off or failed download runs nothing, but the pipeline exits 0 (use `set -o pipefail` in scripts for a non-zero status). The installer asks its questions on your terminal. It clones the repo if it is missing and runs its `install.sh`, which fast-forwards an existing clone (and refuses one with local edits). `ORCH_INSTALL_DIR` picks the clone folder; otherwise the folder is the config's `repo_path` or the default. To run the installer without `get.sh`, use `s=$(curl -fsSL https://raw.githubusercontent.com/combinaut/ai-agent-orchestration/main/install.sh) && bash -c "${s:?empty download}" _`; a plain `| bash` of `install.sh` has no terminal handoff and no cut-off guard.
+
+It clones this repo to `~/.claude/ai-agent-orchestration`, links the files into `~/.claude`, adds the hooks and status line to `~/.claude/settings.json`, and runs the env adapter, which for `herdr` installs [Herdr](https://herdr.dev) 0.9 or newer with the Radar plugin. Pick another env with `--env <name>` after `bash -s --`, or skip the env step with `env = "none"` under `[install]` in `~/.claude/orchestration.toml`. If it prints `PATH setup`, add the line it shows to your shell startup file and open a new shell.
 
 The installer adds a marked orchestration block to `~/.claude/CLAUDE.md`. Later runs replace the text between those markers. If you already pasted the older unmarked sections, it leaves them alone and tells you how to wrap them once with the markers from [`snippets/CLAUDE.md.snippet`](snippets/CLAUDE.md.snippet); any custom text inside the markers will be replaced on the next run.
 
@@ -71,9 +73,9 @@ When `remote_control.architects` is on (the default), start with `claude --remot
 /architect Move the acme/webapp billing page to the new API
 ```
 
-The architect splits the work into tasks. It does not edit code. For each task it opens a Herdr workspace with its own git worktree, starts a worker (Claude, Codex, pi or cursor, picked per task on the lightest allowed tier; Haiku is a Claude tier; cursor is typically Grok via the Cursor CLI), tags the worker with `owner`, and pastes `~/.claude/worker-reports/machine-rules.md` into the brief. Edit the project-specific list at the end of that file first. The architect verifies every report, and merges only a PR you name. Details: [`skills/architect/SKILL.md`](skills/architect/SKILL.md).
+The architect splits the work into tasks. It does not edit code. For each task it opens a Herdr workspace with its own git worktree, starts a worker (Claude, Codex, pi or cursor, picked per task on the lightest allowed tier; Haiku is a Claude tier; cursor is typically Grok via the Cursor CLI), tags the worker with `owner`, and pastes `~/.claude/worker-reports/machine-rules.md` into the brief. Edit the project-specific list at the end of that file first. Every worker runs `/finalize-change-footprint` and `/finalize-code-comments` over its complete PR diff before the PR is done, and posts the findings as one PR comment (`review.finalize_commands`, `review.finalize_comment`; a repo file overrides, `[]` opts out). The architect verifies every report, and merges only a PR you name. Details: [`skills/architect/SKILL.md`](skills/architect/SKILL.md).
 
-Workers, recycles and handoffs: [`docs/workers.md`](docs/workers.md).
+Workers get a soft recycle ask and a hard limit capped at 60% of their known model window; live heavy jobs finish before handoff. Workers, recycles and handoffs: [`docs/workers.md`](docs/workers.md).
 
 ### 📝 The to-do pane
 
@@ -99,6 +101,12 @@ heavy-slot list                          # names, pids, ages, stale records
 
 If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`](docs/heavy-slot.md).
 
+## 🏷️ Releases
+
+Releases are cut by [release-please](https://github.com/googleapis/release-please). Merging to `main` keeps a release PR open that bumps `version.txt` and `CHANGELOG.md` from the Conventional Commits since the last release. Merge that PR to tag the version and publish the GitHub release. The first release is 1.0.0. PR titles must be Conventional Commits (`feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`, `perf`, `build`, `revert`; optional scope; `!` for breaking).
+
+PRs opened with the default `GITHUB_TOKEN` trigger no checks, so the workflow dispatches Validate on the release PR branch. Closing and reopening the PR also works.
+
 ## 📚 Docs
 
 - [`docs/architecture.md`](docs/architecture.md): how the Coordinator, architects, workers and watchers fit together.
@@ -110,7 +118,7 @@ If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`
 - [`docs/workers.md`](docs/workers.md): workers, recycles, handoffs and owner tags.
 - [`docs/heavy-slot.md`](docs/heavy-slot.md): the shared cap on heavy jobs and how slots work.
 - [`docs/bash-guard.md`](docs/bash-guard.md): what the Bash guard denies and where it logs.
-- [`docs/pr-tabs.md`](docs/pr-tabs.md): the Chrome PR tabs extension: automatic architect groups (repo fallback), install, use and troubleshooting.
+- [`docs/pr-tabs.md`](docs/pr-tabs.md): Orch Tabs, the Chrome extension for PR tabs (en, es, de, fr, pt): automatic architect groups (repo fallback), a repo picker for bare numbers (`pr_tabs.repos`, or `repo#123`), install, use and troubleshooting.
 - [`env/README.md`](env/README.md): the env adapters (`herdr` and how to add one).
 - [`docs/contributing.md`](docs/contributing.md): running the tests and sending changes.
 

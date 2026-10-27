@@ -2,6 +2,7 @@ name: Validate
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches: [main]
 
@@ -15,20 +16,28 @@ jobs:
     permissions:
       pull-requests: read
     outputs:
-      macos: ${{ steps.scope.outputs.macos }}
+      macos: ${{ github.event_name != 'pull_request' || github.event.pull_request.changed_files >= 3000 || steps.filter.outputs.macos == 'true' || steps.filter.outputs.validate == 'true' }}
     steps:
       - uses: actions/checkout@v7
-      - id: scope
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          PR: ${{ github.event.pull_request.number }}
-        run: scripts/ci/macos-scope.sh >>"$GITHUB_OUTPUT"
+      - uses: dorny/paths-filter@v4
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          predicate-quantifier: every
+          filters: |
+            macos:
+              - '**'
+              - '!**/*.md'
+              - '!LICENSE'
+              - '!docs/**'
+              - '!.github/**'
+            validate:
+              - '.github/workflows/validate.yml'
 
   macos:
     name: Validate (macos-latest)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.macos != 'false' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.macos != 'false') }}
     runs-on: macos-latest
     timeout-minutes: 40
     steps:

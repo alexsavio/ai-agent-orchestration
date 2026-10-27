@@ -57,9 +57,9 @@ codex_smart = "<codex-smart-model>"
 pi_worker = ""
 # pi model for hard work as provider/model-id; empty means pi is not used on this machine
 pi_smart = ""
-# Cursor CLI model for routine work (for example grok-4.7-medium); empty means cursor is not used unless cursor_smart is set
+# Cursor CLI model for routine work (for example grok-4.7-medium); empty or a placeholder means cursor_smart serves it too. With cursor on, set at least one of the two
 cursor_worker = ""
-# Cursor CLI model for hard work (for example grok-4.7-high); empty means cursor is not used unless cursor_worker is set
+# Cursor CLI model for hard work (for example grok-4.7-high); empty or a placeholder means cursor_worker serves it too. With cursor on, set at least one of the two
 cursor_smart = ""
 
 [remote_control]
@@ -69,6 +69,12 @@ architects = true
 [recycle]
 # Tokens used at which RECYCLE fires
 tokens = 300000
+# Worker tokens at which the architect asks for a clean point
+worker_soft_tokens = 300000
+# Worker hard limit: known window clamps to 60 percent; unknown window uses at least soft
+worker_hard_tokens = 450000
+# Seconds before deferring a worker re-ask until idle or done
+worker_ask_timeout_s = 600
 # Context percentage used when the token sensor is absent
 pct = 55
 # Park architects that have no open PR, worker or watcher
@@ -167,7 +173,17 @@ idle_s = 7200
 [pr_tabs]
 # Organization the PR tabs extension manages; empty turns org actions off
 org = ""
-# Repo name for bare PR numbers; empty turns number jumps off
+# Repo name for bare PR numbers; number jumps are off when pr_tabs.repos is empty too
 default_repo = ""
+# Repo names in pr_tabs.org the popup can send a bare PR number to, besides default_repo; the popup shows a picker when there are two or more
+repos = []
 # GitHub search behind the Open all button; empty turns it off
 open_all = ""
+# macOS app the popup's go to pane button brings to the front after focusing the Herdr pane; empty leaves the windows as they are
+terminal_app = ""
+
+[review]
+# Slash commands workers run before calling a PR done or ready; empty skips this step. The global file sets it for every repo; a repo file overrides it
+finalize_commands = ["/finalize-change-footprint", "/finalize-code-comments"]
+# After the approved findings are applied and pushed, the worker posts one PR comment with every finding. The global file sets it for every repo; a repo file overrides it
+finalize_comment = true

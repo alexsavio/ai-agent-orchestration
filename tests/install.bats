@@ -1304,7 +1304,8 @@ PY
   install_ok
   [ "$(printf '%s\n' "$output" | grep -c '^dropped ')" = 1 ]
   contains "$output" "dropped         $cfg: pr.repos audit.git_watch_repos focus.skip_architects (repos and architects come from the open work)"
-  not_contains "$(cat "$cfg")" 'repos = '
+  not_contains "$(cat "$cfg")" 'acme/web'
+  not_contains "$(cat "$cfg")" 'git_watch_repos'
   not_contains "$(cat "$cfg")" 'skip_architects'
   not_contains "$(cat "$cfg")" 'Architect names left out'
   contains "$(cat "$cfg")" 'author = '
@@ -1579,11 +1580,8 @@ EOF
 
 @test "installer drops retired multiline topic rules once and preserves personal settings" {
   fresh_install
-  cat >>"$HOME/.claude/orchestration.toml" <<'TOML'
-topics = [
-  { name = "Old", color = "blue", repo = ["webapp"] },
-]
-TOML
+  awk '{ print } /^\[pr_tabs\]$/ { print "topics = ["; print "  { name = \"Old\", color = \"blue\", repo = [\"webapp\"] },"; print "]" }' "$HOME/.claude/orchestration.toml" >"$TMP/global.toml"
+  mv "$TMP/global.toml" "$HOME/.claude/orchestration.toml"
   install_ok
   contains "$output" 'removed pr_tabs.topics (architect grouping is automatic)'
   run grep '^topics' "$HOME/.claude/orchestration.toml"
@@ -1612,4 +1610,47 @@ TOML
   install_ok
   not_contains "$output" 'removed pr_tabs.topics'
   not_contains "$output" 'repos and architects come from the open work'
+}
+
+@test "--print-repo-path prints the configured clone folder and does nothing else" {
+  mkdir -p "$HOME/.claude"
+  printf '[install]\nrepo_path = "%s/custom-clone"\n' "$TMP" >"$HOME/.claude/orchestration.toml"
+  run /bin/bash "$SRC/install.sh" --print-repo-path
+  [ "$status" -eq 0 ]
+  [ "$output" = "$TMP/custom-clone" ]
+  [ ! -e "$HOME/.claude/.orch-links" ]
+  run env -u ORCH_REPO_PATH /bin/bash "$SRC/install.sh" --print-repo-path
+  [ "$output" = "$TMP/custom-clone" ]
+}
+
+@test "--print-repo-path defaults to ~/.claude/ai-agent-orchestration" {
+  run /bin/bash "$SRC/install.sh" --print-repo-path
+  [ "$status" -eq 0 ]
+  [ "$output" = "$HOME/.claude/ai-agent-orchestration" ]
+}
+
+@test "install links both finalize skills for Claude and the shared agents folder" {
+  fresh_install
+  for name in finalize-change-footprint finalize-code-comments; do
+    skill="$(cd "$CLONE" && pwd -P)/skills/$name"
+    [ -f "$skill/SKILL.md" ]
+    [ "$(readlink "$HOME/.claude/skills/$name")" = "$skill" ]
+    grep -qx "name: $name" "$HOME/.claude/skills/$name/SKILL.md"
+    [ "$(readlink "$HOME/.agents/skills/$name")" = "$skill" ]
+    grep -qx "name: $name" "$HOME/.agents/skills/$name/SKILL.md"
+  done
+}
+
+@test "a foreign finalize skill in the shared agents folder stays" {
+  mkdir -p "$HOME/.agents/skills/finalize-change-footprint"
+  printf 'foreign\n' >"$HOME/.agents/skills/finalize-change-footprint/SKILL.md"
+  fresh_install
+  [ ! -L "$HOME/.agents/skills/finalize-change-footprint" ]
+  [ "$(cat "$HOME/.agents/skills/finalize-change-footprint/SKILL.md")" = foreign ]
+  printf '%s\n' "$output" | grep -q "^collision  *$HOME/.agents/skills/finalize-change-footprint "
+}
+
+@test "the finalize skills carry no repo-specific names" {
+  run grep -rniE 'sparkle|combinaut|sleistner|stagehand|rubocop|mise run|\.ai/' "$ROOT/skills/finalize-change-footprint" "$ROOT/skills/finalize-code-comments"
+  [ "$status" -eq 1 ]
 }

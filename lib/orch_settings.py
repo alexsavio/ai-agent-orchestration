@@ -36,6 +36,7 @@ class Setting:
         required=(),
         why="",
         nonempty=False,
+        shared=False,
     ):
         self.key, self.env, self.kind, self.default = key, env, kind, default
         self.scope, self.doc, self.sep, self.paths = scope, doc, sep, paths
@@ -46,6 +47,7 @@ class Setting:
             why,
         )
         self.nonempty = nonempty
+        self.shared = shared
 
     @property
     def table(self):
@@ -283,6 +285,27 @@ SETTINGS = [
         "int",
         300000,
         "Tokens used at which RECYCLE fires",
+    ),
+    _g(
+        "recycle.worker_soft_tokens",
+        "ORCH_WORKER_SOFT_TOKENS",
+        "int",
+        300000,
+        "Worker tokens at which the architect asks for a clean point",
+    ),
+    _g(
+        "recycle.worker_hard_tokens",
+        "ORCH_WORKER_HARD_TOKENS",
+        "int",
+        450000,
+        "Worker hard limit: known window clamps to 60 percent; unknown window uses at least soft",
+    ),
+    _g(
+        "recycle.worker_ask_timeout_s",
+        "ORCH_WORKER_ASK_TIMEOUT_S",
+        "int",
+        600,
+        "Seconds before deferring a worker re-ask until idle or done",
     ),
     _g(
         "recycle.pct",
@@ -540,7 +563,15 @@ SETTINGS = [
         "ORCH_PR_TABS_DEFAULT_REPO",
         "str",
         "",
-        "Repo name for bare PR numbers; empty turns number jumps off",
+        "Repo name for bare PR numbers; number jumps are off when pr_tabs.repos is empty too",
+    ),
+    _g(
+        "pr_tabs.repos",
+        "ORCH_PR_TABS_REPOS",
+        "list",
+        [],
+        "Repo names in pr_tabs.org the popup can send a bare PR number to, besides default_repo; the popup shows a picker when there are two or more",
+        sep=",",
     ),
     _g(
         "pr_tabs.open_all",
@@ -548,6 +579,13 @@ SETTINGS = [
         "str",
         "",
         "GitHub search behind the Open all button; empty turns it off",
+    ),
+    _g(
+        "pr_tabs.terminal_app",
+        "ORCH_PR_TABS_TERMINAL_APP",
+        "str",
+        "",
+        "macOS app the popup's go to pane button brings to the front after focusing the Herdr pane; empty leaves the windows as they are",
     ),
     _r(
         "guard.big_repo",
@@ -568,9 +606,18 @@ SETTINGS = [
         "review.finalize_commands",
         "ORCH_REVIEW_FINALIZE_COMMANDS",
         "list",
-        [],
-        "Slash commands workers run before calling a PR done or ready; empty skips this step",
+        ["/finalize-change-footprint", "/finalize-code-comments"],
+        "Slash commands workers run before calling a PR done or ready; empty skips this step. The global file sets it for every repo; a repo file overrides it",
         sep="|",
+        shared=True,
+    ),
+    _r(
+        "review.finalize_comment",
+        "ORCH_REVIEW_FINALIZE_COMMENT",
+        "bool",
+        True,
+        "After the approved findings are applied and pushed, the worker posts one PR comment with every finding. The global file sets it for every repo; a repo file overrides it",
+        shared=True,
     ),
     _r(
         "legacy.scan",
@@ -726,6 +773,11 @@ def scoped(scope):
     return [s for s in SETTINGS if s.scope == scope]
 
 
+def listed(scope):
+    """The settings a scope's example and doc table show: its own, and the repo ones the global file also accepts."""
+    return [s for s in SETTINGS if s.scope == scope or (scope == "global" and s.shared)]
+
+
 def env_names():
     return [s.env for s in SETTINGS]
 
@@ -819,7 +871,7 @@ def validate(data, label, scope):
                 )
             if setting is None:
                 raise ConfigError(f"{label}: {key}: unknown key")
-            if setting.scope != scope:
+            if setting.scope != scope and not (setting.shared and scope == "global"):
                 where = (
                     f"a repo's {REPO_FILE} or {LOCAL_FILE}"
                     if setting.scope == "repo"
@@ -870,10 +922,10 @@ def as_env(values):
 
 def resolved_global(path, environ):
     """Every global ORCH_* setting as the scripts see it: default < the file < an exported variable."""
-    file = load_global(path)
+    file = {**load_global(path), **as_env(shared_values(path))}
     values = {
         s.env: environ.get(s.env, file.get(s.env, env_value(s, s.default)))
-        for s in scoped("global")
+        for s in listed("global")
     }
     values[BY_KEY["providers.enabled"].env] = ",".join(enabled_providers(values))
     values[BY_KEY["providers.claude"].env] = ",".join(claude_tiers(values))
@@ -913,7 +965,19 @@ def load_global(path):
     """ORCH_* values the global file sets; a missing file sets none."""
     if not Path(path).exists():
         return {}
-    return as_env(read_file(path, "global"))
+    return as_env({s: v for s, v in read_file(path, "global").items() if not s.shared})
+
+
+def shared_values(path):
+    """Shared settings the global file sets; a missing file sets none."""
+    if not Path(path).is_file():
+        return {}
+    return {s: v for s, v in read_file(path, "global").items() if s.shared}
+
+
+def global_layer(environ):
+    """The shared settings of the selected global file; they sit under every repo layer."""
+    return shared_values(config_path(environ))
 
 
 def repo_root(start):
@@ -998,7 +1062,7 @@ def committed_layer(values, label):
 def merged(layers, environ):
     """Built-in default < each layer in order < an exported variable, as ORCH_* strings."""
     result = {s.env: env_value(s, s.default) for s in scoped("repo")}
-    for layer in layers:
+    for layer in [global_layer(environ), *layers]:
         result.update(as_env(layer))
     for name in result:
         if name in environ:
@@ -1152,9 +1216,9 @@ def render(values, comments=None, header=""):
 
 def example(scope):
     """The generated part of a config example; array-of-tables settings are left to the example's own comments."""
-    lines = {s: [s.doc] for s in scoped(scope)}
+    lines = {s: [s.doc] for s in listed(scope)}
     values = {
-        s: s.default for s in scoped(scope) if s.kind != "tables" and not s.local_only
+        s: s.default for s in listed(scope) if s.kind != "tables" and not s.local_only
     }
     if scope == "global":
         header = (
@@ -1181,7 +1245,7 @@ def markdown_default(setting):
 
 def markdown_table(scope):
     rows = ["| Key | Variable | Default | Meaning |", "|---|---|---|---|"]
-    for setting in scoped(scope):
+    for setting in listed(scope):
         doc = setting.doc.replace("|", "\\|")
         rows.append(
             f"| `{setting.key}` | `{setting.env}` | {markdown_default(setting).replace('|', chr(92) + '|')} | {doc} |"
@@ -1888,7 +1952,8 @@ def main(argv):
                 )
             )
         elif command == "repo" and len(argv) == 3:
-            sys.stdout.write(shell_lines(load_repo(argv[2], {})))
+            selected = {k: v for k, v in os.environ.items() if k == "ORCH_CONFIG"}
+            sys.stdout.write(shell_lines(load_repo(argv[2], selected)))
         elif command == "migrate" and len(argv) == 5:
             print("\n".join(migrate(*argv[2:])))
         elif command == "upgrade" and len(argv) >= 3:
