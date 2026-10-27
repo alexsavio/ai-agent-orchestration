@@ -577,6 +577,16 @@ def shell_args(words):
     return command_mode, stdin_mode, check_only, operands
 
 
+def heredoc_bodies(words):
+    return [
+        words[i + 1] for i in range(len(words) - 1) if words[i] == "--guard-heredoc"
+    ]
+
+
+def echoed_text(words):
+    return " ".join(words[1:]).replace("\\n", "\n")
+
+
 def shell_programs(words):
     """Returns the code a shell runs: its -c program, else its stdin heredoc unless a script file is named."""
     name = os.path.basename(words[0]) if words else ""
@@ -584,9 +594,7 @@ def shell_programs(words):
         return [" ".join(words[1:])]
     if name not in SHELL_EXECUTABLES:
         return []
-    heredocs = [
-        words[i + 1] for i in range(1, len(words) - 1) if words[i] == "--guard-heredoc"
-    ]
+    heredocs = heredoc_bodies(words)
     command_mode, stdin_mode, _, operands = shell_args(words)
     if command_mode:
         return operands[:1]
@@ -831,9 +839,7 @@ def written_text(words, redirects):
     name = os.path.basename(words[0])
     if name not in ("cat", "tee", "echo", "printf"):
         return None, []
-    heredocs = [
-        words[i + 1] for i in range(len(words) - 1) if words[i] == "--guard-heredoc"
-    ]
+    heredocs = heredoc_bodies(words)
     args = [
         word
         for i, word in enumerate(words[1:], 1)
@@ -845,7 +851,7 @@ def written_text(words, redirects):
     if heredocs:
         return "\n".join(heredocs), targets
     if name in ("echo", "printf"):
-        return " ".join(args).replace("\\n", "\n"), targets
+        return echoed_text(words), targets
     return None, []
 
 
@@ -868,14 +874,12 @@ def stdin_program(words, where, pipeline, redirects, env):
     if len(pipeline) < 2:
         return None
     before = pipeline[-2]
-    heredocs = [
-        before[i + 1] for i in range(len(before) - 1) if before[i] == "--guard-heredoc"
-    ]
+    heredocs = heredoc_bodies(before)
     name = os.path.basename(before[0])
     if heredocs:
         return "\n".join(heredocs)
     if name in ("echo", "printf"):
-        return " ".join(before[1:]).replace("\\n", "\n")
+        return echoed_text(before)
     if name == "cat":
         keys = [
             run_key(arg, where, env) for arg in before[1:] if not arg.startswith("-")
