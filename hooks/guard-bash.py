@@ -35,9 +35,9 @@ BAD_ATTR = re.compile(
 )
 
 
-def log_failure(exc, command=None):
+def log_failure(exc, command=None, kind="fail-open"):
     try:
-        line = f"{datetime.datetime.now().astimezone().isoformat(timespec='seconds')} guard-bash fail-open: {type(exc).__name__}: {exc}"
+        line = f"{datetime.datetime.now().astimezone().isoformat(timespec='seconds')} guard-bash {kind}: {type(exc).__name__}: {exc}"
         if isinstance(command, str):
             line += f" command={command[:200]!r}"
         with (Path.home() / ".claude/hooks/guard-bash.log").open("a") as f:
@@ -564,7 +564,7 @@ def shell_args(words):
             command_mode = command_mode or "c" in word
             stdin_mode = stdin_mode or "s" in word
             check_only = check_only or (word[0] == "-" and "n" in word)
-            index += 1
+            index += 2 if word.endswith("o") else 1
         elif word.startswith("--"):
             index += 1
         else:
@@ -778,6 +778,7 @@ def guard_broad_kill(raw):
 
 
 SCRIPT_SCAN_LIMIT = 64 * 1024
+SCRIPT_SCAN_BUDGET = 512 * 1024
 SCRIPT_HEREDOC_LIMIT = 64
 SCRIPT_SHELLS = SHELL_EXECUTABLES - {"eval"}
 WRITE_OPERATORS = {">", ">>", ">|", "&>", "&>>"}
@@ -814,9 +815,7 @@ def runs_as_shell(code):
     first = code.split("\n", 1)[0]
     if not first.startswith("#!"):
         return True
-    return any(
-        os.path.basename(word) in SCRIPT_SHELLS for word in first[2:].split()[:2]
-    )
+    return any(os.path.basename(word) in SCRIPT_SHELLS for word in first[2:].split())
 
 
 def expand_literal(path, env):
@@ -831,7 +830,9 @@ def expand_literal(path, env):
 
 
 def run_key(path, where, env):
-    return os.path.normpath(os.path.join(where, expand_literal(path, env)))
+    return os.path.normpath(
+        os.path.join(where, expand_literal(path, {"PWD": where, **env}))
+    )
 
 
 def written_text(words, redirects):
@@ -884,16 +885,20 @@ def stdin_program(words, where, pipeline, redirects, env):
         keys = [
             run_key(arg, where, env) for arg in before[1:] if not arg.startswith("-")
         ]
-        return "\n".join(script_text(key) or "" for key in keys if key)
+        text = "\n".join(script_text(key) or "" for key in keys if key)
+        return text[:SCRIPT_SCAN_LIMIT]
     return None
 
 
 def runs(entries, disabled):
-    """Yields (label, code, cwd) for each piece of code the commands run: inline shell text, shell stdin and script files."""
+    """Yields (label, code, cwd, file) for each piece of code the commands run: inline shell text, shell stdin and script files."""
     env, written = {}, {}
     for words, where, pipeline, redirects in entries:
-        if words[0] in ("export", "local", "declare", "readonly"):
+        words = list(words)
+        if words[0] == "builtin":
             words = words[1:]
+        if words and words[0] in ("export", "local", "declare", "readonly"):
+            words = [word for word in words[1:] if not word.startswith("-")]
         if words and all(ASSIGNMENT.match(word) for word in words):
             for word in words:
                 name, _, value = word.partition("=")
@@ -910,13 +915,13 @@ def runs(entries, disabled):
                 written[key] = text
         if "guard_inline_shell" not in disabled:
             for text in shell_programs(words):
-                yield "an inline shell program", text, where
+                yield "an inline shell program", text, where, None
             if name in SCRIPT_SHELLS and not shell_programs(words):
                 command_mode, stdin_mode, _, operands = shell_args(words)
                 if not command_mode and (stdin_mode or not operands):
                     code = stdin_program(words, where, pipeline, redirects, env)
                     if code:
-                        yield "the stdin of a shell", code, where
+                        yield "the stdin of a shell", code, where, None
         path = script_operand(words)
         direct = name not in SCRIPT_SHELLS | {"source", "."}
         key = (
@@ -929,7 +934,7 @@ def runs(entries, disabled):
         else:
             code = None if "guard_disk_script" in disabled else script_text(key)
         if code is not None and (not direct or runs_as_shell(code)):
-            yield f"script {path}", code, where
+            yield f"script {path}", code, where, key
 
 
 def kill_words(entries, text):
@@ -938,7 +943,7 @@ def kill_words(entries, text):
         and os.path.basename(words[0]) in ("pkill", "killall")
         and evaluate_words(words, where, text, (), pipeline)
         for words, where, pipeline in (
-            (unwrap(entry[0])[0], entry[1], entry[2]) for entry in entries
+            (unwrap(list(entry[0]))[0], entry[1], entry[2]) for entry in entries
         )
     )
 
@@ -953,9 +958,16 @@ def bounded(code):
     return code[:index]
 
 
-def code_kills(code, cwd, disabled, depth):
+class ScanBudget(Exception):
+    pass
+
+
+def code_kills(code, cwd, disabled, depth, state):
     """True when code a shell runs kills broadly, directly or through code it runs in turn."""
     code = bounded(code)
+    state["left"] -= len(code)
+    if state["left"] < 0:
+        raise ScanBudget(f"more than {SCRIPT_SCAN_BUDGET} bytes of code to scan")
     if broad_kill_text(code):
         return True
     try:
@@ -963,24 +975,34 @@ def code_kills(code, cwd, disabled, depth):
     except ValueError:
         entries = [(words, cwd, [], []) for words, _ in fallback_stages(code) if words]
         return kill_words(entries, code)
-    return kill_words(entries, code) or (
-        depth < 3
-        and any(
-            code_kills(inner, where, disabled, depth + 1)
-            for _, inner, where in runs(entries, disabled)
-        )
-    )
+    if kill_words(entries, code):
+        return True
+    if depth >= 3:
+        return False
+    for _, inner, where, key in runs(entries, disabled):
+        if key:
+            if (key, depth) in state["seen"]:
+                continue
+            state["seen"].add((key, depth))
+        if code_kills(inner, where, disabled, depth + 1, state):
+            return True
+    return False
 
 
 def guard_script_kill(raw, cwd, disabled):
-    """Denies a broad kill in code a command runs: inline shell text, shell stdin, a script it writes or a script on disk."""
+    """Denies a broad kill in code a command runs: inline shell text, shell stdin, a script it writes or a script on disk.
+    An error or an exhausted budget ends only this scan; the other guards still run."""
+    state = {"left": SCRIPT_SCAN_BUDGET, "seen": set()}
     try:
-        entries = command_entries(raw, cwd)
+        for label, code, where, _ in runs(command_entries(raw, cwd), disabled):
+            if code_kills(code, where, disabled, 1, state):
+                return f"{BROAD_KILL_REASON} Found inside {label}."
     except ValueError:
-        return None
-    for label, code, where in runs(entries, disabled):
-        if code_kills(code, where, disabled, 1):
-            return f"{BROAD_KILL_REASON} Found inside {label}."
+        pass
+    except ScanBudget as exc:
+        log_failure(exc, raw, "scan-budget")
+    except Exception as exc:
+        log_failure(exc, raw, "scan-error")
     return None
 
 

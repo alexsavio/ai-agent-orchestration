@@ -1021,6 +1021,21 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         "lib.sh": "stopdev() { pkill -f vite; }\n",
         "eval": "pkill -f vite\n",
         "outer.sh": f"#!/bin/bash\n{killing}\n",
+        "exec_log.sh": "#!/bin/bash\nexec >/dev/null 2>&1\necho started\n",
+        "sudo_v.sh": "#!/bin/bash\nsudo -v\necho ok\n",
+        "exec_nested.sh": f"#!/bin/bash\nexec 2>&1\n{killing}\n",
+        "env_s.sh": "#!/usr/bin/env -S bash -e\npkill -f vite\n",
+        "d1.sh": f"bash {scripts}/d2.sh\n",
+        "d2.sh": f"bash {scripts}/d3.sh\n",
+        "d3.sh": "pkill -f vite\n",
+        "e1.sh": f"bash {scripts}/e2.sh\n",
+        "e2.sh": f"bash {scripts}/e3.sh\n",
+        "e3.sh": f"bash {scripts}/e4.sh\n",
+        "e4.sh": "pkill -f vite\n",
+        "mid.sh": "echo ok\n" * 2000 + "pkill -f vite\n",
+        "three.sh": "cat <<EOF\nx\nEOF\n" * 3 + "pkill -f vite\n",
+        "seventy.sh": "cat <<EOF\nx\nEOF\n" * 70 + "pkill -f vite\n",
+        "fan.sh": f"bash {scripts}/fan.sh\n" * 120,
     }
     for fixture, text in fixtures.items():
         (scripts / fixture).write_text(text)
@@ -1096,6 +1111,53 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("node file run through bash", f"bash {scripts}/tool.js"),
         ("sourced library that only defines a kill", f"source {scripts}/lib.sh"),
         ("file named eval run by path", "./eval"),
+        (
+            "bare exec in an inline program",
+            "bash -c 'exec 2>&1'; git push origin HEAD:main",
+        ),
+        ("bare env in an inline program", "bash -c env; git push origin HEAD:main"),
+        (
+            "bare exec piped to a shell",
+            "echo 'exec 2>&1' | bash; git push origin HEAD:main",
+        ),
+        (
+            "script with exec redirects then push",
+            f"bash {scripts}/exec_log.sh; git push origin HEAD:main",
+        ),
+        (
+            "script with sudo -v then push",
+            f"bash {scripts}/sudo_v.sh; git push origin HEAD:main",
+        ),
+        (
+            "this repo's heavy-slot then push",
+            f"{ROOT}/heavy-slot count; git push origin HEAD:main",
+        ),
+        ("exec then a nested kill script", f"bash {scripts}/exec_nested.sh"),
+        ("depth 3 run is followed", f"bash {scripts}/d1.sh"),
+        ("kill inside the scan limit", f"bash {scripts}/mid.sh"),
+        ("kill after a few heredocs", f"bash {scripts}/three.sh"),
+        ("ampersand redirect script", "echo 'pkill -f vite' &> k.sh; bash k.sh"),
+        ("printf escape script", "printf 'echo hi\\npkill -f vite' > k.sh; sh k.sh"),
+        (
+            "kill script behind two pipe stages",
+            f"echo hi | cat {scripts}/kills.sh | bash",
+        ),
+        ("option group ending in o", f"bash -euo pipefail {scripts}/kills.sh"),
+        ("option group ending in o with x", f"bash -euxo pipefail {scripts}/kills.sh"),
+        ("env -S shebang names a shell", f"{scripts}/env_s.sh"),
+        ("declare -x variable script", f"declare -x S={scripts}; bash $S/kills.sh"),
+        ("readonly variable script", f"readonly S={scripts}; bash $S/kills.sh"),
+        ("builtin source", f"builtin source {scripts}/kills.sh"),
+        (
+            "PWD names the written script",
+            "cat > r.sh <<'EOF'\npkill -f vite\nEOF\nbash \"$PWD/r.sh\"",
+        ),
+        (
+            "PWD assigned by the command",
+            f"PWD={scripts}/..; bash $PWD/scripts/kills.sh",
+        ),
+        ("plus n runs the script", f"bash +n {scripts}/kills.sh"),
+        ("PWD follows cd", f"cd {scripts} && bash ${{PWD}}/kills.sh"),
     ]:
         case(name, command, True, scripts)
     case("unparsable script then stash", f"bash {scripts}/apos.sh; git stash", True, wt)
@@ -1109,6 +1171,8 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ),
         ("eval is not a file lookup", "eval echo hi"),
         ("inline program named like a file", "bash -c kills.sh"),
+        ("kill beyond the depth limit", f"bash {scripts}/e1.sh"),
+        ("kill after many heredocs", f"bash {scripts}/seventy.sh"),
         ("inline program with a script name after it", "bash -c 'echo ok' kills.sh"),
         (
             "variable reassigned before the run",
@@ -1122,6 +1186,32 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("piped file without a kill", f"cat {scripts}/clean.sh | bash"),
     ]:
         case(name, command, False, scripts)
+    started = time.perf_counter()
+    log_path = Path.home() / ".claude/hooks/guard-bash.log"
+    log_before = ""
+    assert not guard.evaluate(f"bash {scripts}/fan.sh", repo)
+    cat_many = "cat " + f"{scripts}/big.sh " * 100 + "| bash"
+    assert not guard.evaluate(cat_many, repo)
+    assert time.perf_counter() - started < 3, "scan budget is not applied"
+    assert not log_path.exists() or "scan-budget" not in log_path.read_text()
+    for number in range(40):
+        (scripts / f"bulk{number}.sh").write_text("echo ok\n" * 7500)
+    bulk = "; ".join(f"bash {scripts}/bulk{number}.sh" for number in range(40))
+    assert not guard.evaluate(bulk, repo)
+    assert "scan-budget" in log_path.read_text()
+    log_before = log_path.read_text()
+    saved_runs = guard.runs
+
+    def failing_runs(*args, **kwargs):
+        raise RuntimeError("forced scan error")
+
+    guard.runs = failing_runs
+    try:
+        assert guard.evaluate("bash x.sh; git push origin HEAD:main", repo)
+    finally:
+        guard.runs = saved_runs
+    log_new = log_path.read_text()[len(log_before) :]
+    assert "scan-error: RuntimeError: forced scan error" in log_new, log_new
     started = time.perf_counter()
     assert not guard.evaluate(f"bash {big}", repo)
     assert not guard.evaluate(f"bash {many}", repo)
