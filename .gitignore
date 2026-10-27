@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# Local Claude Code / Cursor project state
+.claude/

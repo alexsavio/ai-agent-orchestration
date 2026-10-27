@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(rtk grep *)",
-      "Bash(scripts/ci/shellcheck.sh)",
-      "Bash(echo \"shellcheck $?\")"
-    ]
-  }
-}
