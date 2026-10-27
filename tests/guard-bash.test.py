@@ -938,6 +938,44 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         "killall puma",
     ):
         case(command, command, True)
+    scripts = root / "scripts"
+    scripts.mkdir()
+    killing = scripts / "kills.sh"
+    killing.write_text("#!/bin/bash\npkill -f vite\n")
+    killing.chmod(0o755)
+    clean_script = scripts / "clean.sh"
+    clean_script.write_text("#!/bin/bash\necho ok\n")
+    clean_script.chmod(0o755)
+    incident = (
+        "S=/private/tmp/scratch\ncat > $S/repro.sh <<'EOF'\n#!/bin/bash\n"
+        "pkill -f 'sleep 30' -u $(id -u) 2>/dev/null; true\nEOF\n"
+        "chmod +x $S/repro.sh; "
+    )
+    for name, command in [
+        ("incident heredoc script run directly", incident + "$S/repro.sh $S 2>&1"),
+        ("incident heredoc script run with bash", incident + "bash $S/repro.sh $S"),
+        ("heredoc script run with source", incident + "source $S/repro.sh"),
+        ("tee heredoc script run", "tee run.sh <<'EOF'\npkill -f vite\nEOF\nsh run.sh"),
+        ("disk script via bash", f"bash {killing}"),
+        ("disk script via path", f"{killing}"),
+        ("disk script via dot", f". {killing}"),
+        ("BSD option order after pattern", "pkill -f 'sleep 30' -u $(id -u)"),
+        ("BSD option order with literal uid", "pkill -f '^x$' -u 501"),
+    ]:
+        case(name, command, True)
+    for name, command in [
+        (
+            "notes heredoc mentioning pkill",
+            "cat > notes.md <<'EOF'\npkill -f vite\nEOF",
+        ),
+        (
+            "heredoc script written but not run",
+            "cat > a.sh <<'EOF'\npkill -f vite\nEOF\nchmod +x a.sh",
+        ),
+        ("disk script without a kill", f"bash {clean_script}"),
+        ("disk script missing", f"bash {scripts}/missing.sh"),
+    ]:
+        case(name, command)
     case("pgrep full kill", "pgrep --full rails | xargs kill", True)
     case("ps grep kill", "ps aux | grep vite | awk '{print $2}' | xargs kill", True)
     for name, command in [
@@ -1794,6 +1832,8 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("guard_attribution", "Codex trailer"),
         ("guard_memory", "shared deepen fetch"),
         ("guard_broad_kill", "substitution pgrep kill"),
+        ("guard_written_script", "incident heredoc script run directly"),
+        ("guard_disk_script", "disk script via bash"),
         ("guard_big_repo_reads", "webapp batch all objects"),
         ("guard_pi", "herdr pi start on DeepSeek"),
     ]:

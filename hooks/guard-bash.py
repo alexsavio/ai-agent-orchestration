@@ -761,6 +761,97 @@ def guard_broad_kill(raw):
     return BROAD_KILL_REASON if broad_kill_text(raw) else None
 
 
+SCRIPT_SCAN_LIMIT = 256 * 1024
+HEREDOC_FILE = re.compile(
+    r"^[^\n]*<<(-?)[ \t]*(['\"]?)([A-Za-z_]\w*)\2[^\n]*\n(.*?)\n[\t]*\3(?=\s|$)",
+    re.S | re.M,
+)
+HEREDOC_TARGET = re.compile(
+    r"(?:>>?|\btee(?:[ \t]+-\w+)*)[ \t]*(['\"]?)([^\s;&|<>()'\"]+)\1"
+)
+
+
+def heredoc_files(raw):
+    """Returns {path text: body} for each heredoc the command redirects into a file."""
+    files = {}
+    for match in HEREDOC_FILE.finditer(raw):
+        line = match[0].split("\n", 1)[0]
+        target = HEREDOC_TARGET.search(line)
+        if target:
+            body = match[4]
+            if match[1]:
+                body = "\n".join(text.lstrip("\t") for text in body.splitlines())
+            files[target[2]] = body
+    return files
+
+
+def script_operand(words):
+    """Returns the script file a shell, source or direct command word runs, else None."""
+    name = os.path.basename(words[0])
+    if name in ("source", "."):
+        return words[1] if len(words) > 1 else None
+    if name not in SHELL_EXECUTABLES - {"eval"}:
+        return words[0]
+    index = 1
+    while index < len(words):
+        word = words[index]
+        if word in SHELL_OPTION_VALUES:
+            index += 2
+        elif word == "--":
+            index += 1
+            break
+        elif re.fullmatch(r"[-+][A-Za-z]+", word) and "c" not in word:
+            index += 1
+        elif word.startswith(("-", "+")):
+            return None
+        else:
+            break
+    return words[index] if index < len(words) else None
+
+
+def script_text(path, cwd):
+    """Reads the first SCRIPT_SCAN_LIMIT bytes of a regular text file; None when unreadable."""
+    try:
+        full = Path(cwd) / os.path.expanduser(path)
+        if not full.is_file():
+            return None
+        with open(full, "rb") as handle:
+            data = handle.read(SCRIPT_SCAN_LIMIT)
+    except (OSError, ValueError):
+        return None
+    return None if b"\0" in data else data.decode("utf-8", "replace")
+
+
+def script_kills(body, cwd):
+    if broad_kill_text(body):
+        return True
+    for words, where, pipeline in commands(body, cwd):
+        words, _ = unwrap(words)
+        if words and os.path.basename(words[0]) in ("pkill", "killall"):
+            if evaluate_words(words, where, body, (), pipeline):
+                return True
+    return False
+
+
+def guard_script_kill(raw, cwd, disabled):
+    """Denies a broad kill inside a script the same command writes and runs, or runs from disk."""
+    written = heredoc_files(raw)
+    for words, where, _ in commands(raw, cwd):
+        words, _ = unwrap(words)
+        path = script_operand(words) if words else None
+        if not path:
+            continue
+        if path in written:
+            body = None if "guard_written_script" in disabled else written[path]
+        elif "/" in path and "guard_disk_script" not in disabled:
+            body = script_text(path, where)
+        else:
+            body = None
+        if body and script_kills(body, where):
+            return f"{BROAD_KILL_REASON} Found inside script {path}."
+    return None
+
+
 def guard_memory(args, cwd, opts, raw):
     if not args:
         return None
@@ -1421,7 +1512,9 @@ def evaluate(command, cwd, disabled=()):
     try:
         normalized_command = re.sub(r"\\\n[ \t]*", "", command)
         if "guard_memory" not in disabled and "guard_broad_kill" not in disabled:
-            reason = guard_broad_kill(normalized_command)
+            reason = guard_broad_kill(normalized_command) or guard_script_kill(
+                normalized_command, cwd, disabled
+            )
             if reason:
                 return reason
         for words, where, pipeline in commands(normalized_command, cwd):
