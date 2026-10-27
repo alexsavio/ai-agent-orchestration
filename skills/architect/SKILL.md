@@ -206,7 +206,9 @@ Each round the worker polls its PR for new threads and for CI; verifies every re
 code before accepting it (a bot is the most skeptical source, and is wrong often enough to matter);
 fixes what is real and proves the fix; replies with file:line evidence to what is not; replies to and
 resolves every thread either way; fixes CI, running the linter **and** the formatter; and re-requests
-the bot review after each push.
+the bot review after each push. If the bot review is a Copilot error ("Copilot encountered an error
+and was unable to review this pull request. You can try again by re-requesting a review."), do **not**
+re-request it: treat that PR as having no Copilot review.
 
 Two things workers miss unless told: **a human reviewer's blocker often arrives in the review body,
 not in a thread**, so the reviews themselves are read each round; and **merging, undrafting,

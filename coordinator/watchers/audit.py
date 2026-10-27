@@ -528,7 +528,7 @@ def pr_lines(pr, page_nodes=100, settings=None):
         r for r in pr["reviews"]["nodes"] if (r.get("author") or {}).get("login") == bot
     ]
     body = reviews[-1]["body"] if reviews else ""
-    if "Needs a closer look" in body:
+    if "Needs a closer look" in body and "Copilot encountered an error" not in body:
         summary = re.search(r"Needs a closer look\s*\n+([^\n]+)", body)
         emit("COPILOT", summary[1] if summary else "see overview")
     commented = commented_review(pr, bot)

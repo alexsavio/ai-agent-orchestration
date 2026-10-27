@@ -93,6 +93,19 @@ class AuditTests(IsolatedTestCase):
         ]
         self.assertEqual(self.lines(), [f"COPILOT {LABEL} [see overview]"])
 
+    def test_copilot_error_review_emits_nothing(self):
+        self.pr["reviews"]["nodes"] = [
+            dict(
+                author=dict(login="robot"),
+                body=(
+                    "Needs a closer look\n"
+                    "Copilot encountered an error and was unable to review this "
+                    "pull request. You can try again by re-requesting a review."
+                ),
+            )
+        ]
+        self.assertEqual(self.lines(), [])
+
     def review(self, id, login, body, state="COMMENTED"):
         return dict(id=id, author=dict(login=login), state=state, body=body)
 
