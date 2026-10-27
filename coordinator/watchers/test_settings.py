@@ -933,7 +933,9 @@ class ProvidersTest(SettingsTest):
         path = self.write("g.toml", text)
         return s.resolved_global(path, environ)
 
-    def test_the_default_is_claude_and_codex_plus_pi_or_cursor_where_a_model_is_set(self):
+    def test_the_default_is_claude_and_codex_plus_pi_or_cursor_where_a_model_is_set(
+        self,
+    ):
         self.assertEqual(self.resolve()["ORCH_PROVIDERS"], "claude,codex")
         self.assertEqual(
             self.resolve('[models]\npi_smart = "lmstudio/q"\n')["ORCH_PROVIDERS"],
