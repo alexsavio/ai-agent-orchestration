@@ -321,26 +321,53 @@ def heavy_slots_path():
 
 
 SLOT_EVENT = re.compile(
-    r"SLOT (WAIT|FAIL|KILLED|RUNLONG) [A-Za-z0-9_.-]+ pid=\S+ [ -~]*$"
+    r"(\d{1,12}) (SLOT (?:WAIT|FAIL|KILLED|RUNLONG) [A-Za-z0-9_.-]+ pid=\S+ [ -~]*)"
 )
 SLOT_EVENTS_KEPT = 100
+SLOT_EVENT_MAX_AGE = 900
+SLOT_EVENTS_SOURCE = "slot-events"
 
 
-def take_slot_events(directory=None):
-    """Claims the heavy-slot spool by rename, so a line written during the read lands in a fresh spool."""
+def take_slot_events(directory=None, now=None):
+    """Claims the heavy-slot spool by rename and returns (lines, unreadable).
+
+    Lines are without their epoch; those older than SLOT_EVENT_MAX_AGE are dropped. A line
+    appended at the instant of the rename can be lost. `unreadable` names the spool when it
+    could not be claimed or read; claims older than SLOT_EVENT_MAX_AGE are removed.
+    """
+    now = time.time() if now is None else now
     directory = Path(
         directory
         if directory is not None
         else os.environ.get("ORCH_HEAVY_SLOTS_DIR") or heavy_slots_path()
     )
+    try:
+        for old in directory.glob(".events.claim.*"):
+            if now - old.stat().st_mtime > SLOT_EVENT_MAX_AGE:
+                old.unlink()
+    except OSError:
+        pass
     claim = directory / f".events.claim.{os.getpid()}"
     try:
         os.rename(directory / ".events", claim)
+    except FileNotFoundError:
+        return [], []
+    except OSError:
+        return [], [SLOT_EVENTS_SOURCE]
+    try:
         lines = claim.read_text(errors="replace").splitlines()
+    except OSError:
+        return [], [SLOT_EVENTS_SOURCE]
+    try:
         claim.unlink()
     except OSError:
-        return []
-    return [line for line in lines if SLOT_EVENT.fullmatch(line)][-SLOT_EVENTS_KEPT:]
+        pass
+    found = (SLOT_EVENT.fullmatch(line) for line in lines)
+    return [
+        match.group(2)
+        for match in found
+        if match and now - int(match.group(1)) <= SLOT_EVENT_MAX_AGE
+    ][-SLOT_EVENTS_KEPT:], []
 
 
 def read_slots(directory=None):

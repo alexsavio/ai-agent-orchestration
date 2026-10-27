@@ -68,6 +68,8 @@ JOB_NAME=
 NOTE=-
 JOB_START=
 KILL_CODE=-
+KILL_EVENT=0
+EVENTS_MAX_BYTES=65536
 CHILD_PID=
 SLOT_FILE=
 LOCK_HELD=0
@@ -75,6 +77,7 @@ LOCK_HELD=0
 case $SLOT_MAX in ''|*[!0-9]*|0) printf 'heavy-slot: ORCH_HEAVY_SLOTS_MAX must be a positive integer\n' >&2; exit 64 ;; esac
 case $KILL_GRACE in ''|*[!0-9]*) printf 'heavy-slot: ORCH_HEAVY_SLOTS_KILL_GRACE must be a non-negative integer\n' >&2; exit 64 ;; esac
 case $LONG_RUN in ''|*[!0-9]*) printf 'heavy-slot: ORCH_HEAVY_SLOTS_LONG_RUN must be a non-negative integer\n' >&2; exit 64 ;; esac
+LONG_RUN=$((10#$LONG_RUN))
 
 usage() {
   printf 'usage: heavy-slot {count|list|take <architect>-<job> [--wait-max seconds] [--note text] -- <command> [args...]}\n       take exits 73 when the slot directory is not writable' >&2
@@ -120,28 +123,32 @@ clean_note() {
   printf '%s' "${note:--}"
 }
 
-# One printf, one write(2) on an O_APPEND file: lines of concurrent jobs never interleave.
-# A line stays under 400 bytes (name 255 + note 60 + fixed fields), below PIPE_BUF.
+# One printf is one write(2) on an O_APPEND file, so lines of concurrent jobs do not interleave.
+# The leading epoch lets the watcher drop old lines; the spool stops growing at EVENTS_MAX_BYTES.
 emit_event() {
-  local kind=$1 pid=$2 detail=$3
-  printf '%s\n' "SLOT $kind $JOB_NAME pid=$pid $detail note=$NOTE" >>"$EVENTS_FILE" 2>/dev/null || true
+  local kind=$1 pid=$2 detail=$3 size
+  size=$(wc -c 2>/dev/null <"$EVENTS_FILE") || size=0
+  [ "$((size + 0))" -le "$EVENTS_MAX_BYTES" ] || return 0
+  printf '%s\n' "$(date +%s) SLOT $kind $JOB_NAME pid=$pid $detail note=$NOTE" >>"$EVENTS_FILE" 2>/dev/null || true
 }
 
 job_elapsed() { printf '%ss' "$(( $(date +%s) - ${JOB_START:-$(date +%s)} ))"; }
 
 emit_killed() {
-  [ -n "$CHILD_PID" ] || return 0
+  [ -n "$CHILD_PID" ] && [ "$KILL_EVENT" -eq 0 ] || return 0
+  KILL_EVENT=1
   emit_event KILLED "$CHILD_PID" "code=$KILL_CODE elapsed=$(job_elapsed)"
 }
 
 watch_long() {
-  local pid=$1 end=$(( JOB_START + LONG_RUN ))
+  local pid=$1 end=$(( JOB_START + LONG_RUN )) left
   while is_pid_live "$pid"; do
-    if [ "$(date +%s)" -ge "$end" ]; then
+    left=$(( end - $(date +%s) ))
+    if [ "$left" -le 0 ]; then
       emit_event RUNLONG "$pid" "elapsed=$(job_elapsed)"
       return 0
     fi
-    sleep 1
+    sleep "$(( left < 30 ? left : 30 ))"
   done
 }
 
@@ -273,7 +280,6 @@ release_lock() {
 cleanup() {
   local status=$? slot_pid='' pid_group='' deadline
   [ "$LOCK_HELD" -eq 1 ] && release_lock
-  [ -z "$JOB_NAME" ] || rm -f "$NOTES_DIR/$JOB_NAME"
   [ -n "$SLOT_FILE" ] || return 0
   deadline=$(( $(date +%s) + 1 ))
   CLEANUP_MODE=1
@@ -282,7 +288,7 @@ cleanup() {
     if [ "$slot_pid" = "$CHILD_PID" ]; then
       pid_group=${pid_group:-$CHILD_PID}
       terminate_group "$pid_group"
-      rm -f "$SLOT_FILE"
+      rm -f "$SLOT_FILE" "$NOTES_DIR/$JOB_NAME"
     fi
     release_lock
   else
@@ -295,7 +301,6 @@ cleanup() {
 terminate_group() {
   local pgid=$1 deadline
   is_group_live "$pgid" || return 0
-  emit_killed
   kill -TERM -- "-$pgid" 2>/dev/null || true
   deadline=$(( $(date +%s) + KILL_GRACE ))
   while is_group_live "$pgid" && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done
@@ -309,6 +314,7 @@ forward_signal() {
     # Bash starts asynchronous children with SIGINT ignored. On macOS's Bash
     # 3.2, a child cannot install an INT trap when it inherited that ignored
     # disposition, so use TERM for reliable teardown of the child.
+    emit_killed
     terminate_group "$CHILD_PID"
     wait "$CHILD_PID" 2>/dev/null || true
   fi

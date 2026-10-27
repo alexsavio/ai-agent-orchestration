@@ -1975,7 +1975,7 @@ def cycle_pass(base, mode, collector, failures, budget):
                     line
                     for line in reduced_events
                     if line.startswith(
-                        ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ")
+                        ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ", "SLOT ")
                     )
                 ]
             if mode == "hog":
@@ -2345,7 +2345,8 @@ def collect(mode, before, scope="", base=None):
         return host_metrics(command)
     if mode == "balance":
         raw = balance_metrics(command, balance_limits(), before=before)
-        raw["slot_events"] = take_slot_events()
+        raw["slot_events"], failed = take_slot_events()
+        raw["unreadable"] = sorted(raw["unreadable"] + failed)
         return raw
     if mode == "prs":
         spec = importlib.util.spec_from_file_location("prs_copy", ROOT / "prs-copy.py")

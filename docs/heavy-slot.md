@@ -29,6 +29,8 @@ A slot is a file in `~/.claude/heavy-slots/` that holds the job's pid. `take` re
 | `KILLED` | A signal ended the job (exit above 128), or `take` stopped it | `SLOT KILLED acme-tests pid=41 code=143 elapsed=12s note=...` | Action line |
 | `RUNLONG` | The job ran past `heavy_slots.long_run` (once per job; 0 turns it off) | `SLOT RUNLONG acme-tests pid=41 elapsed=1800s note=...` | Action line |
 
-Only action lines reach the Coordinator's Monitor and native delivery; see [watchers](watchers.md). One `write(2)` appends each line, so jobs that end together never interleave or lose a line. The watcher claims the file by rename, so a crash between the claim and the feed write drops those lines.
+Only action lines reach the Coordinator's Monitor and native delivery; see [watchers](watchers.md).
+
+What the spool guarantees. Each line is one `write(2)` on an `O_APPEND` file with a leading epoch, so lines of jobs that end together do not interleave. A job writes at most one `KILLED` or `FAIL` line, and none when it passes; a process left over after a normal exit is cleaned up without a line. A line can still be lost: when it is written at the instant the watcher renames the file, when the watcher crashes between the claim and the feed write, when the file is over 64 KB (the job then adds nothing), or when it is older than 15 minutes at the next watcher pass (it is dropped, not replayed). If the watcher cannot claim or read the file, balance reports `BALANCE READFAIL slot-events`.
 
 The rules for workers and the Coordinator are in [Architecture](architecture.md#-heavy-slots).

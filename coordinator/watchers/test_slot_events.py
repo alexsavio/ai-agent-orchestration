@@ -1,6 +1,8 @@
+import json
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,6 +24,10 @@ FYI = [
 ]
 
 
+def stamped(lines, age=0):
+    return "".join(f"{int(time.time()) - age} {line}\n" for line in lines)
+
+
 def feed(line):
     return f"2026-10-27T12:00:00+00:00 balance: {line} (start)"
 
@@ -32,32 +38,38 @@ class SlotEventsTest(IsolatedTestCase):
 
     def test_producer_claims_valid_lines_and_trims_the_spool(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.spool(tmp, "\n".join(ACTION + ["junk", "SLOT NOPE x pid=1 a"]) + "\n")
-            self.assertEqual(watcher_platform.take_slot_events(tmp), ACTION)
+            self.spool(
+                tmp,
+                stamped(ACTION)
+                + "junk\n"
+                + stamped(["SLOT NOPE x pid=1 a"])
+                + "SLOT FAIL a-b pid=1 x\n",
+            )
+            self.assertEqual(watcher_platform.take_slot_events(tmp), (ACTION, []))
             self.assertEqual(os.listdir(tmp), [])
-            self.assertEqual(watcher_platform.take_slot_events(tmp), [])
+            self.assertEqual(watcher_platform.take_slot_events(tmp), ([], []))
 
     def test_producer_keeps_the_newest_lines_when_the_spool_is_large(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.spool(
                 tmp,
-                "".join(f"SLOT FAIL a-b pid={n} code=1 note=-\n" for n in range(150)),
+                stamped([f"SLOT FAIL a-b pid={n} code=1 note=-" for n in range(150)]),
             )
-            lines = watcher_platform.take_slot_events(tmp)
+            lines, _ = watcher_platform.take_slot_events(tmp)
             self.assertEqual(len(lines), watcher_platform.SLOT_EVENTS_KEPT)
             self.assertTrue(lines[-1].endswith("code=1 note=-"))
             self.assertIn("pid=149 ", lines[-1])
 
     def test_producer_reads_the_configured_slot_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.spool(tmp, ACTION[0] + "\n")
+            self.spool(tmp, stamped(ACTION[:1]))
             with patch.dict(os.environ, ORCH_HEAVY_SLOTS_DIR=tmp):
-                self.assertEqual(watcher_platform.take_slot_events(), [ACTION[0]])
+                self.assertEqual(watcher_platform.take_slot_events(), ([ACTION[0]], []))
 
     def test_balance_collect_adds_the_claimed_slot_lines(self):
         base = dict(free=60, load5=1.0, slots=0, heavy=0, unreadable=[], top=[])
         with tempfile.TemporaryDirectory() as tmp:
-            self.spool(tmp, ACTION[0] + "\n")
+            self.spool(tmp, stamped(ACTION[:1]))
             with (
                 patch.dict(os.environ, ORCH_HEAVY_SLOTS_DIR=tmp),
                 patch.object(w, "balance_metrics", return_value=base),
@@ -65,6 +77,83 @@ class SlotEventsTest(IsolatedTestCase):
                 raw = w.collect("balance", None)
             self.assertEqual(raw["slot_events"], [ACTION[0]])
             self.assertEqual(os.listdir(tmp), [])
+
+    def test_old_spool_lines_are_dropped_and_fresh_ones_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.spool(
+                tmp,
+                stamped(ACTION[:1], age=watcher_platform.SLOT_EVENT_MAX_AGE + 5)
+                + stamped(ACTION[1:], age=watcher_platform.SLOT_EVENT_MAX_AGE - 60),
+            )
+            self.assertEqual(watcher_platform.take_slot_events(tmp), (ACTION[1:], []))
+
+    def test_unreadable_spool_is_reported_and_leaves_the_claim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".events").mkdir()
+            self.assertEqual(
+                watcher_platform.take_slot_events(tmp),
+                ([], [watcher_platform.SLOT_EVENTS_SOURCE]),
+            )
+            self.assertEqual(
+                [p.name for p in Path(tmp).iterdir()],
+                [f".events.claim.{os.getpid()}"],
+            )
+
+    def test_spool_that_cannot_be_claimed_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.spool(tmp, stamped(ACTION))
+            with patch.object(
+                watcher_platform.os, "rename", side_effect=PermissionError
+            ):
+                self.assertEqual(
+                    watcher_platform.take_slot_events(tmp),
+                    ([], [watcher_platform.SLOT_EVENTS_SOURCE]),
+                )
+            self.assertTrue((Path(tmp) / ".events").exists())
+
+    def test_missing_spool_is_not_a_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(watcher_platform.take_slot_events(tmp), ([], []))
+            self.assertEqual(
+                watcher_platform.take_slot_events(Path(tmp) / "none"), ([], [])
+            )
+
+    def test_old_claims_are_removed_and_young_ones_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old, young = Path(tmp) / ".events.claim.1", Path(tmp) / ".events.claim.2"
+            old.write_text("x")
+            young.write_text("x")
+            aged = time.time() - watcher_platform.SLOT_EVENT_MAX_AGE - 5
+            os.utime(old, (aged, aged))
+            watcher_platform.take_slot_events(tmp)
+            self.assertFalse(old.exists())
+            self.assertTrue(young.exists())
+
+    def test_balance_reports_an_unreadable_spool_as_a_readfail(self):
+        base = dict(free=60, load5=1.0, slots=0, heavy=0, unreadable=[], top=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".events").mkdir()
+            with (
+                patch.dict(os.environ, ORCH_HEAVY_SLOTS_DIR=tmp),
+                patch.object(w, "balance_metrics", return_value=dict(base)),
+            ):
+                raw = w.collect("balance", None)
+        self.assertEqual(raw["unreadable"], [watcher_platform.SLOT_EVENTS_SOURCE])
+        state, events = None, []
+        for _ in range(w.READ_FAILURES):
+            state, events = w.reduce("balance", state, dict(raw))
+        self.assertIn("BALANCE READFAIL slot-events", events)
+
+    def test_slot_lines_survive_the_first_pass_after_a_state_reset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "balance.json").write_text("{broken")
+            raw = dict(free=60, load5=1.0, slots=0, heavy=0, unreadable=[], top=[])
+            raw["slot_events"] = ACTION + FYI
+            alert = json.loads(w.cycle(base, "balance", lambda before: raw))
+            self.assertEqual(
+                [e for e in alert["events"] if e.startswith("SLOT ")], ACTION + FYI
+            )
 
     def test_balance_reduce_emits_the_slot_lines_after_its_own(self):
         raw = dict(free=60, load5=1.0, slots=1, heavy=0, unreadable=[], top=[])
@@ -125,7 +214,7 @@ class SlotEventsTest(IsolatedTestCase):
                 check=False,
             )
             raw = dict(free=60, load5=1.0, slots=0, heavy=0, unreadable=[], top=[])
-            raw["slot_events"] = watcher_platform.take_slot_events(tmp)
+            raw["slot_events"], _ = watcher_platform.take_slot_events(tmp)
             _, events = w.reduce("balance", None, raw)
             [line] = events
             self.assertRegex(
