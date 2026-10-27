@@ -462,6 +462,7 @@ def unmask(word):
     return word.translate(UNMASK)
 
 
+@functools.lru_cache(maxsize=8)
 def shell_tokens(command):
     lex = shlex.shlex(
         mask_quoted(expand_heredocs(re.sub(r"\\\n[ \t]*", "", command))),
@@ -471,7 +472,7 @@ def shell_tokens(command):
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     lex.commenters = ""
-    return [part for token in lex for part in split_operators(token)] + [";"]
+    return tuple(part for token in lex for part in split_operators(token)) + (";",)
 
 
 def split_operators(token):
@@ -546,17 +547,9 @@ def word_substitutions(word):
 SHELL_OPTION_VALUES = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
 
 
-def shell_programs(words):
-    """Returns the code a shell runs: its -c program, else its stdin heredoc unless a script file is named."""
-    name = os.path.basename(words[0]) if words else ""
-    if name == "eval":
-        return [" ".join(words[1:])]
-    if name not in SHELL_EXECUTABLES:
-        return []
-    heredocs = [
-        words[i + 1] for i in range(1, len(words) - 1) if words[i] == "--guard-heredoc"
-    ]
-    command_mode = stdin_mode = False
+def shell_args(words):
+    """Parses a shell's options; returns (-c mode, -s mode, -n syntax check only, operands)."""
+    command_mode = stdin_mode = check_only = False
     index = 1
     while index < len(words):
         word = words[index]
@@ -570,6 +563,7 @@ def shell_programs(words):
         elif re.fullmatch(r"[-+][A-Za-z]+", word):
             command_mode = command_mode or "c" in word
             stdin_mode = stdin_mode or "s" in word
+            check_only = check_only or (word[0] == "-" and "n" in word)
             index += 1
         elif word.startswith("--"):
             index += 1
@@ -580,6 +574,20 @@ def shell_programs(words):
         for i, word in enumerate(words[index:], index)
         if word != "--guard-heredoc" and words[i - 1] != "--guard-heredoc"
     ]
+    return command_mode, stdin_mode, check_only, operands
+
+
+def shell_programs(words):
+    """Returns the code a shell runs: its -c program, else its stdin heredoc unless a script file is named."""
+    name = os.path.basename(words[0]) if words else ""
+    if name == "eval":
+        return [" ".join(words[1:])]
+    if name not in SHELL_EXECUTABLES:
+        return []
+    heredocs = [
+        words[i + 1] for i in range(1, len(words) - 1) if words[i] == "--guard-heredoc"
+    ]
+    command_mode, stdin_mode, _, operands = shell_args(words)
     if command_mode:
         return operands[:1]
     return heredocs if stdin_mode or not operands else []
@@ -761,28 +769,11 @@ def guard_broad_kill(raw):
     return BROAD_KILL_REASON if broad_kill_text(raw) else None
 
 
-SCRIPT_SCAN_LIMIT = 256 * 1024
-HEREDOC_FILE = re.compile(
-    r"^[^\n]*<<(-?)[ \t]*(['\"]?)([A-Za-z_]\w*)\2[^\n]*\n(.*?)\n[\t]*\3(?=\s|$)",
-    re.S | re.M,
-)
-HEREDOC_TARGET = re.compile(
-    r"(?:>>?|\btee(?:[ \t]+-\w+)*)[ \t]*(['\"]?)([^\s;&|<>()'\"]+)\1"
-)
-
-
-def heredoc_files(raw):
-    """Returns {path text: body} for each heredoc the command redirects into a file."""
-    files = {}
-    for match in HEREDOC_FILE.finditer(raw):
-        line = match[0].split("\n", 1)[0]
-        target = HEREDOC_TARGET.search(line)
-        if target:
-            body = match[4]
-            if match[1]:
-                body = "\n".join(text.lstrip("\t") for text in body.splitlines())
-            files[target[2]] = body
-    return files
+SCRIPT_SCAN_LIMIT = 64 * 1024
+SCRIPT_HEREDOC_LIMIT = 64
+SCRIPT_SHELLS = SHELL_EXECUTABLES - {"eval"}
+WRITE_OPERATORS = {">", ">>", ">|", "&>", "&>>"}
+ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
 
 
 def script_operand(words):
@@ -790,101 +781,202 @@ def script_operand(words):
     name = os.path.basename(words[0])
     if name in ("source", "."):
         return words[1] if len(words) > 1 else None
-    if name not in SHELL_EXECUTABLES - {"eval"}:
+    if name not in SCRIPT_SHELLS:
         return words[0]
-    index = 1
-    while index < len(words):
-        word = words[index]
-        if word in SHELL_OPTION_VALUES:
-            index += 2
-        elif word == "--":
-            index += 1
-            break
-        elif re.fullmatch(r"[-+][A-Za-z]+", word) and "c" not in word:
-            index += 1
-        elif word.startswith(("-", "+")):
-            return None
-        else:
-            break
-    return words[index] if index < len(words) else None
+    command_mode, stdin_mode, check_only, operands = shell_args(words)
+    if command_mode or stdin_mode or check_only or not operands:
+        return None
+    return operands[0]
 
 
-def script_text(path, cwd):
+def script_text(path):
     """Reads the first SCRIPT_SCAN_LIMIT bytes of a regular text file; None when unreadable."""
     try:
-        full = Path(cwd) / os.path.expanduser(path)
-        if not full.is_file():
+        if not os.path.isfile(path):
             return None
-        with open(full, "rb") as handle:
+        with open(path, "rb") as handle:
             data = handle.read(SCRIPT_SCAN_LIMIT)
     except (OSError, ValueError):
         return None
     return None if b"\0" in data else data.decode("utf-8", "replace")
 
 
-def script_kills(body, cwd, depth=0):
-    """Scans code a shell would run: broad-kill pipelines, pkill/killall words, and nested inline shells."""
-    if broad_kill_text(body):
+def runs_as_shell(code):
+    """True when a directly run file has no shebang or one that names a shell."""
+    first = code.split("\n", 1)[0]
+    if not first.startswith("#!"):
         return True
-    for words, where, pipeline in commands(body, cwd):
+    return any(
+        os.path.basename(word) in SCRIPT_SHELLS for word in first[2:].split()[:2]
+    )
+
+
+def expand_literal(path, env):
+    """Expands ~, variables the command assigned plain literals and the hook's own environment; other variables stay as written."""
+
+    def value(match):
+        name = match[1] or match[2]
+        found = env[name] if name in env else os.environ.get(name)
+        return match[0] if found is None else found
+
+    return re.sub(r"\$(?:\{(\w+)\}|(\w+))", value, os.path.expanduser(path))
+
+
+def run_key(path, where, env):
+    return os.path.normpath(os.path.join(where, expand_literal(path, env)))
+
+
+def written_text(words, redirects):
+    """Returns (text, file targets) for a command that writes text to files, else (None, [])."""
+    name = os.path.basename(words[0])
+    if name not in ("cat", "tee", "echo", "printf"):
+        return None, []
+    heredocs = [
+        words[i + 1] for i in range(len(words) - 1) if words[i] == "--guard-heredoc"
+    ]
+    args = [
+        word
+        for i, word in enumerate(words[1:], 1)
+        if word != "--guard-heredoc" and words[i - 1] != "--guard-heredoc"
+    ]
+    targets = [target for op, target in redirects if op in WRITE_OPERATORS]
+    if name == "tee":
+        targets += [arg for arg in args if not arg.startswith("-")]
+    if heredocs:
+        return "\n".join(heredocs), targets
+    if name in ("echo", "printf"):
+        return " ".join(args).replace("\\n", "\n"), targets
+    return None, []
+
+
+def command_entries(text, cwd):
+    redirects = []
+    return [
+        (words, where, pipeline, list(redirects))
+        for words, where, pipeline in commands(text, cwd, redirects)
+    ]
+
+
+def stdin_program(words, where, pipeline, redirects, env):
+    """The code a shell without a script operand reads from a here-string, a file or the pipe before it."""
+    for op, target in redirects:
+        if op == "<<<":
+            return target
+        if op == "<":
+            key = run_key(target, where, env)
+            return script_text(key) if key else None
+    if len(pipeline) < 2:
+        return None
+    before = pipeline[-2]
+    heredocs = [
+        before[i + 1] for i in range(len(before) - 1) if before[i] == "--guard-heredoc"
+    ]
+    name = os.path.basename(before[0])
+    if heredocs:
+        return "\n".join(heredocs)
+    if name in ("echo", "printf"):
+        return " ".join(before[1:]).replace("\\n", "\n")
+    if name == "cat":
+        keys = [
+            run_key(arg, where, env) for arg in before[1:] if not arg.startswith("-")
+        ]
+        return "\n".join(script_text(key) or "" for key in keys if key)
+    return None
+
+
+def runs(entries, disabled):
+    """Yields (label, code, cwd) for each piece of code the commands run: inline shell text, shell stdin and script files."""
+    env, written = {}, {}
+    for words, where, pipeline, redirects in entries:
+        if words[0] in ("export", "local", "declare", "readonly"):
+            words = words[1:]
+        if words and all(ASSIGNMENT.match(word) for word in words):
+            for word in words:
+                name, _, value = word.partition("=")
+                env[name] = None if re.search(r"[$`]", value) else value
+            continue
         words, _ = unwrap(words)
         if not words:
             continue
-        if os.path.basename(words[0]) in ("pkill", "killall") and evaluate_words(
-            words, where, body, (), pipeline
-        ):
-            return True
-        if depth < 3 and any(
-            script_kills(text, where, depth + 1) for text in shell_programs(words)
-        ):
-            return True
-    return False
+        name = os.path.basename(words[0])
+        text, targets = written_text(words, redirects)
+        for target in targets:
+            key = run_key(target, where, env)
+            if key and text is not None:
+                written[key] = text
+        if "guard_inline_shell" not in disabled:
+            for text in shell_programs(words):
+                yield "an inline shell program", text, where
+            if name in SCRIPT_SHELLS and not shell_programs(words):
+                command_mode, stdin_mode, _, operands = shell_args(words)
+                if not command_mode and (stdin_mode or not operands):
+                    code = stdin_program(words, where, pipeline, redirects, env)
+                    if code:
+                        yield "the stdin of a shell", code, where
+        path = script_operand(words)
+        direct = name not in SCRIPT_SHELLS | {"source", "."}
+        key = (
+            run_key(path, where, env) if path and (not direct or "/" in path) else None
+        )
+        if not key:
+            continue
+        if key in written:
+            code = None if "guard_written_script" in disabled else written[key]
+        else:
+            code = None if "guard_disk_script" in disabled else script_text(key)
+        if code is not None and (not direct or runs_as_shell(code)):
+            yield f"script {path}", code, where
 
 
-LITERAL_ASSIGNMENT = re.compile(
-    r"(?:^|[;&|(\n])[ \t]*(?:export[ \t]+)?([A-Za-z_]\w*)="
-    r"""([^\s;&|$`()<>'"]*|"[^"$`\\]*"|'[^']*')(?=[\s;&|)]|$)"""
-)
-
-
-def expand_literal(path, raw):
-    """Expands ~, $HOME and variables the command assigns plain literals; None when a $ remains."""
-    values = {
-        name: value.strip("'\"") for name, value in LITERAL_ASSIGNMENT.findall(raw)
-    }
-    values.setdefault("HOME", os.path.expanduser("~"))
-    path = re.sub(
-        r"\$(?:\{(\w+)\}|(\w+))",
-        lambda m: values.get(m[1] or m[2], m[0]),
-        os.path.expanduser(path),
+def kill_words(entries, text):
+    return any(
+        words
+        and os.path.basename(words[0]) in ("pkill", "killall")
+        and evaluate_words(words, where, text, (), pipeline)
+        for words, where, pipeline in (
+            (unwrap(entry[0])[0], entry[1], entry[2]) for entry in entries
+        )
     )
-    return None if "$" in path else path
+
+
+def bounded(code):
+    """Cuts code at its SCRIPT_HEREDOC_LIMIT-th heredoc operator; the heredoc matcher is quadratic on unterminated ones."""
+    index = -1
+    for _ in range(SCRIPT_HEREDOC_LIMIT + 1):
+        index = code.find("<<", index + 1)
+        if index < 0:
+            return code
+    return code[:index]
+
+
+def code_kills(code, cwd, disabled, depth):
+    """True when code a shell runs kills broadly, directly or through code it runs in turn."""
+    code = bounded(code)
+    if broad_kill_text(code):
+        return True
+    try:
+        entries = command_entries(code, cwd)
+    except ValueError:
+        entries = [(words, cwd, [], []) for words, _ in fallback_stages(code) if words]
+        return kill_words(entries, code)
+    return kill_words(entries, code) or (
+        depth < 3
+        and any(
+            code_kills(inner, where, disabled, depth + 1)
+            for _, inner, where in runs(entries, disabled)
+        )
+    )
 
 
 def guard_script_kill(raw, cwd, disabled):
-    """Denies a broad kill in inline shell text, in a script the command writes and runs, or in a script file on disk."""
-    written = heredoc_files(raw)
-    for words, where, _ in commands(raw, cwd):
-        words, _ = unwrap(words)
-        if not words:
-            continue
-        if "guard_inline_shell" not in disabled and any(
-            script_kills(text, where, 1) for text in shell_programs(words)
-        ):
-            return f"{BROAD_KILL_REASON} Found inside an inline shell program."
-        path = script_operand(words)
-        if not path:
-            continue
-        direct = os.path.basename(words[0]) not in SHELL_EXECUTABLES | {"source", "."}
-        if path in written:
-            body = None if "guard_written_script" in disabled else written[path]
-        elif (direct and "/" not in path) or "guard_disk_script" in disabled:
-            body = None
-        else:
-            full = expand_literal(path, raw)
-            body = script_text(full, where) if full else None
-        if body and script_kills(body, where, 1):
-            return f"{BROAD_KILL_REASON} Found inside script {path}."
+    """Denies a broad kill in code a command runs: inline shell text, shell stdin, a script it writes or a script on disk."""
+    try:
+        entries = command_entries(raw, cwd)
+    except ValueError:
+        return None
+    for label, code, where in runs(entries, disabled):
+        if code_kills(code, where, disabled, 1):
+            return f"{BROAD_KILL_REASON} Found inside {label}."
     return None
 
 
@@ -1024,7 +1116,17 @@ def without_redirections(words):
     return [unmask(word) for word in split_redirections(words)[0]]
 
 
-def commands(command, cwd):
+def redirections(words):
+    """Returns (operator, target) pairs for the redirections in masked words."""
+    return [
+        (words[i], unmask(words[i + 1]))
+        for i in range(len(words) - 1)
+        if REDIRECTION.fullmatch(words[i])
+    ]
+
+
+def commands(command, cwd, redirects=None):
+    """Yields (words, cwd, pipeline); redirects, when given, holds the segment's redirections at each yield."""
     segment = []
     pipeline = []
     stack = []
@@ -1033,10 +1135,13 @@ def commands(command, cwd):
     previous_status = None
     for token in shell_tokens(command):
         if is_operator(token):
+            found = redirections(segment) if redirects is not None else []
             segment = without_redirections(segment)
             if segment:
                 pipeline.append(segment[:])
                 for current in currents:
+                    if redirects is not None:
+                        redirects[:] = found
                     yield segment[:], current, pipeline[:]
                 cd_args = segment[1:]
                 while segment[0] == "cd" and cd_args[:1] in (["--"], ["-L"], ["-P"]):

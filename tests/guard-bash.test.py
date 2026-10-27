@@ -1010,6 +1010,130 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ),
     ]:
         case(name, command, False, cwd)
+    fixtures = {
+        "pipe.sh": "#!/bin/bash\npgrep -f vite | xargs kill\n",
+        "killall.sh": "#!/bin/bash\nkillall -m vite\n",
+        "killall_own.sh": "#!/bin/bash\nkillall myapp\n",
+        "apos.sh": "#!/bin/bash\necho don't\n",
+        "apos_kill.sh": "#!/bin/bash\necho don't\npkill -f vite\n",
+        "tool.js": "#!/usr/bin/env node\n// don't panic\npkill -f vite\n",
+        "env_bash.sh": "#!/usr/bin/env bash\npkill -f vite\n",
+        "lib.sh": "stopdev() { pkill -f vite; }\n",
+        "eval": "pkill -f vite\n",
+        "outer.sh": f"#!/bin/bash\n{killing}\n",
+    }
+    for fixture, text in fixtures.items():
+        (scripts / fixture).write_text(text)
+    (scripts / "bin.sh").write_bytes(b"#!/bin/bash\npkill -f vite\n\0")
+    os.mkfifo(scripts / "fifo.sh")
+    late = scripts / "late.sh"
+    late.write_text("echo ok\n" * 12000 + "pkill -f vite\n")
+    big = scripts / "big.sh"
+    big.write_text('if [ -n "$X" ]; then echo "checking $X" >&5; fi\n' * 6000)
+    many = scripts / "many.sh"
+    many.write_text("cat <<EOF\n" * 6000)
+    repro = "cat > repro.sh <<'EOF'\npkill -f vite\nEOF\n"
+    for name, command in [
+        ("unparsable script then pkill", f"bash {scripts}/apos.sh; pkill -f vite"),
+        ("unparsable script holding pkill", f"bash {scripts}/apos_kill.sh"),
+        ("heredoc script run by dot slash", repro + "chmod +x repro.sh && ./repro.sh"),
+        (
+            "heredoc script written to dot slash",
+            repro.replace("> r", "> ./r") + "bash repro.sh",
+        ),
+        (
+            "heredoc script via quoted variable",
+            f'S={scripts}\ncat > "$S"/r.sh <<\'EOF\'\npkill -f vite\nEOF\nbash "$S"/r.sh',
+        ),
+        (
+            "heredoc script via braced variable",
+            f'S={scripts}\ncat > "${{S}}/r.sh" <<\'EOF\'\npkill -f vite\nEOF\nbash "$S/r.sh"',
+        ),
+        (
+            "heredoc script via unset variable",
+            "cat > $NOPE_VAR/r.sh <<'EOF'\npkill -f vite\nEOF\nbash $NOPE_VAR/r.sh",
+        ),
+        (
+            "heredoc script run after cd",
+            f"cat > {scripts}/r.sh <<'EOF'\npkill -f vite\nEOF\ncd {scripts} && bash r.sh",
+        ),
+        (
+            "heredoc script written after cd",
+            f"cd {scripts} && cat > r.sh <<'EOF'\npkill -f vite\nEOF\nbash r.sh",
+        ),
+        (
+            "heredoc script after an earlier redirect",
+            "echo hi > log.txt && " + repro + "bash repro.sh",
+        ),
+        (
+            "tee with an option",
+            "tee --append r.sh <<'EOF'\npkill -f vite\nEOF\nbash r.sh",
+        ),
+        ("echo written script", "echo 'pkill -f vite' > k.sh && bash k.sh"),
+        ("printf written script", "printf 'pkill -f vite\\n' > k.sh; sh k.sh"),
+        ("appended echo script", "echo 'pkill -f vite' >> k.sh; bash k.sh"),
+        ("stdin from a file", f"bash < {scripts}/kills.sh"),
+        ("cat piped to a shell", f"cat {scripts}/kills.sh | bash"),
+        ("here-string to a shell", "bash <<< 'pkill -f vite'"),
+        ("echo piped to a shell", "echo 'pkill -f vite' | sh"),
+        ("script run by inline shell", f"bash -c 'bash {scripts}/kills.sh'"),
+        ("relative script run by inline shell", "sh -c './kills.sh'"),
+        ("script run by a script", f"bash {scripts}/outer.sh"),
+        ("long option before the script", f"bash --norc {scripts}/kills.sh"),
+        (
+            "another long option before the script",
+            f"bash --noprofile {scripts}/kills.sh",
+        ),
+        ("option value before the script", f"bash -o errexit {scripts}/kills.sh"),
+        ("exported variable script", f"export S={scripts}; bash $S/kills.sh"),
+        (
+            "variable reassigned after the run",
+            f"S={scripts}; bash $S/kills.sh; S=/nonexistent",
+        ),
+        ("pipeline kill in a script", f"bash {scripts}/pipe.sh"),
+        ("killall -m in a script", f"bash {scripts}/killall.sh"),
+        ("shebang names env bash", f"{scripts}/env_bash.sh"),
+        ("node file run through bash", f"bash {scripts}/tool.js"),
+        ("sourced library that only defines a kill", f"source {scripts}/lib.sh"),
+        ("file named eval run by path", "./eval"),
+    ]:
+        case(name, command, True, scripts)
+    case("unparsable script then stash", f"bash {scripts}/apos.sh; git stash", True, wt)
+    case("node file then stash", f"{scripts}/tool.js; git stash", True, wt)
+    for name, command in [
+        ("node shebang file run directly", f"{scripts}/tool.js"),
+        ("syntax check of a written script", repro + "bash -n repro.sh"),
+        (
+            "stdin shell with a positional argument",
+            "bash -s kills.sh <<'EOF'\necho hi\nEOF",
+        ),
+        ("eval is not a file lookup", "eval echo hi"),
+        ("inline program named like a file", "bash -c kills.sh"),
+        ("inline program with a script name after it", "bash -c 'echo ok' kills.sh"),
+        (
+            "variable reassigned before the run",
+            f"S=/nonexistent; bash $S/kills.sh; S={scripts}",
+        ),
+        ("binary file holding the words", f"bash {scripts}/bin.sh"),
+        ("kill after the scan limit", f"bash {scripts}/late.sh"),
+        ("FIFO as the script", f"bash {scripts}/fifo.sh"),
+        ("killall of an own process in a script", f"bash {scripts}/killall_own.sh"),
+        ("script that only echoes in a pipe", "echo ok | bash"),
+        ("piped file without a kill", f"cat {scripts}/clean.sh | bash"),
+    ]:
+        case(name, command, False, scripts)
+    started = time.perf_counter()
+    assert not guard.evaluate(f"bash {big}", repo)
+    assert not guard.evaluate(f"bash {many}", repo)
+    assert time.perf_counter() - started < 1, "script scan is slow"
+    saved_tmp = os.environ.get("TMPDIR")
+    os.environ["TMPDIR"] = str(scripts.parent)
+    try:
+        assert guard.evaluate("bash $TMPDIR/scripts/kills.sh", repo)
+    finally:
+        os.environ.pop("TMPDIR") if saved_tmp is None else os.environ.update(
+            TMPDIR=saved_tmp
+        )
     home = scripts / "home"
     home.mkdir()
     (home / "kills.sh").write_text("pkill -f vite\n")
