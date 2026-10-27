@@ -69,7 +69,7 @@ teardown() {
   printf '[providers]\nenabled = ["claude", "codex"]\n' >>"$ORCH_CONFIG"
   run "$SCRIPT" w1 p1 worker
   [ "$status" -eq 1 ]
-  [[ "$output" == *"cursor is off; add \"cursor\" to providers.enabled (ORCH_PROVIDERS)"* ]]
+  [[ "$output" == *"cursor is off; add \"cursor\" to providers.enabled (ORCH_PROVIDERS)"* ]] || false
   [ ! -e "$HERDR_CALLS" ]
 }
 
