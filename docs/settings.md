@@ -25,15 +25,16 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 
 ## 🧩 Worker families
 
-`[providers] enabled` turns worker families on and off. `claude` must be in the list: the Coordinator and the architects run on it. Left empty, it means `claude` and `codex`, plus `pi` when `models.pi_worker` or `models.pi_smart` is set. `orch-settings` prints the resolved list as `ORCH_PROVIDERS`.
+`[providers] enabled` turns worker families on and off. `claude` must be in the list: the Coordinator and the architects run on it. Left empty, it means `claude` and `codex`, plus `pi` or `cursor` when a model of that family is set. `orch-settings` prints the resolved list as `ORCH_PROVIDERS`.
 
 | Family | Model settings | Needed when on |
 |---|---|---|
 | `claude` | `models.coordinator`, `models.architect` | both |
 | `codex` | `models.codex_worker`, `models.codex_smart` | at least one; it then serves both tiers, and `orch-settings` prints it for both |
 | `pi` | `models.pi_worker`, `models.pi_smart` | neither; an empty tier is not used |
+| `cursor` | `models.cursor_worker`, `models.cursor_smart` | at least one; it then serves both tiers, and `orch-settings` prints it for both. Off until a model is set (unlike codex) |
 
-A family left out is never started: the installer does not ask for its models, architects do not pick it (a review falls back to a fresh Sonnet pane of the author's family (Opus for an Opus author), a stronger allowed tier only for credentials, security, shared config, money, installer or watchers, or a HIGH finding; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), `/review-prs` dispatches no Codex review, and `pi-start.sh` refuses. Its model settings may stay empty. On a terminal run with `providers.enabled` empty, answering `-` to both Codex model questions writes `enabled = ["claude"]` (plus `"pi"` when a pi model is set). A new family is one more entry in `PROVIDERS` in `lib/orch_settings.py`, with its model settings.
+A family left out is never started: the installer does not ask for its models, architects do not pick it (a review falls back to a fresh Sonnet pane of the author's family (Opus for an Opus author), a stronger allowed tier only for credentials, security, shared config, money, installer or watchers, or a HIGH finding; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), `/review-prs` dispatches no Codex review, and `pi-start.sh` / `cursor-start.sh` refuse. Its model settings may stay empty. On a terminal run with `providers.enabled` empty, answering `-` to both Codex model questions writes `enabled = ["claude"]` (plus `"pi"` / `"cursor"` when a model of that family is set). A new family is one more entry in `PROVIDERS` in `lib/orch_settings.py`, with its model settings.
 
 `[providers] claude` lists the Claude worker tiers the architects may start: `haiku`, `sonnet`, `opus`, `fable` (the default is all four). Only these names, at least one; anything else stops with an `ERROR:`. The architects pick Claude tiers only from the list, and `orch-settings` prints it as `ORCH_CLAUDE_TIERS`. The Coordinator and architect models are their own settings.
 
@@ -54,7 +55,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `heavy_slots.max` | `ORCH_HEAVY_SLOTS_MAX` | `4` | Most heavy jobs at once on the machine |
 | `heavy_slots.dir` | `ORCH_HEAVY_SLOTS_DIR` | empty | Slot directory; empty means ~/.claude/heavy-slots |
 | `heavy_slots.kill_grace` | `ORCH_HEAVY_SLOTS_KILL_GRACE` | `10` | Seconds a stopped job gets before it is killed |
-| `providers.enabled` | `ORCH_PROVIDERS` | empty | Worker families this machine uses (claude, codex, pi); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi when a pi model is set. A family left out is never started or asked for, and its model settings may stay empty |
+| `providers.enabled` | `ORCH_PROVIDERS` | empty | Worker families this machine uses (claude, codex, pi, cursor); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi or cursor when a model of that family is set. A family left out is never started or asked for, and its model settings may stay empty |
 | `providers.claude` | `ORCH_CLAUDE_TIERS` | `["haiku", "sonnet", "opus", "fable"]` | Claude worker tiers the architects may pick (haiku, sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings |
 | `models.coordinator` | `ORCH_COORDINATOR_MODEL` | `"claude-opus-5-5"` | Model of the Coordinator |
 | `models.architect` | `ORCH_ARCHITECT_MODEL` | `"claude-opus-5-5"` | Model of the architects |
@@ -62,6 +63,8 @@ A family left out is never started: the installer does not ask for its models, a
 | `models.codex_smart` | `ORCH_CODEX_SMART_MODEL` | `"<codex-smart-model>"` | Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two |
 | `models.pi_worker` | `ORCH_PI_WORKER_MODEL` | empty | pi model for routine work as provider/model-id; empty means pi is not used on this machine |
 | `models.pi_smart` | `ORCH_PI_SMART_MODEL` | empty | pi model for hard work as provider/model-id; empty means pi is not used on this machine |
+| `models.cursor_worker` | `ORCH_CURSOR_WORKER_MODEL` | empty | Cursor CLI model for routine work (for example `grok-4.7-medium`); empty or a placeholder means cursor_smart serves it too. With cursor on, set at least one of the two |
+| `models.cursor_smart` | `ORCH_CURSOR_SMART_MODEL` | empty | Cursor CLI model for hard work (for example `grok-4.7-high`); empty or a placeholder means cursor_worker serves it too. With cursor on, set at least one of the two |
 | `remote_control.architects` | `ORCH_REMOTE_CONTROL_ARCHITECTS` | `true` | Give architect sessions Remote Control on start and recycle |
 | `recycle.tokens` | `ORCH_RECYCLE_TOKENS` | `300000` | Tokens used at which RECYCLE fires |
 | `recycle.pct` | `ORCH_RECYCLE_PCT` | `55` | Context percentage used when the token sensor is absent |
@@ -119,6 +122,10 @@ A family left out is never started: the installer does not ask for its models, a
 ### 🥧 pi workers
 
 `models.pi_worker` and `models.pi_smart` are `provider/model-id`, for example `lmstudio/qwen/qwen3.6-35b-a3b`; pi's `--model` accepts that form (`provider/id`, the model id may itself contain slashes). Check ids with `pi --list-models <provider>`. Both default to empty, and empty means pi is not used on this machine; `install.sh` does not ask for them and the architect does not stop on them.
+
+### 🖱️ cursor workers (Grok)
+
+`models.cursor_worker` and `models.cursor_smart` are Cursor CLI model ids, for example `grok-4.7-medium` and `grok-4.7-high`. Check ids with `cursor-agent --list-models`. Both default to empty; empty means the cursor family is off. With at least one set (and `providers.enabled` empty, or `"cursor"` in the list), architects start workers with `~/.claude/coordinator/cursor-start.sh <name> <pane> <worker|smart>`, which passes `--model` and `--trust`. One filled model serves both tiers, like Codex.
 
 DeepSeek sends the code to a remote API, so it is off for every repo. A repo opts in with `[pi] deepseek = true` in its personal `.orchestration.local.toml` (the main checkout's file also applies to its linked worktrees). The key in a committed `.orchestration.toml` is ignored with a warning, because a committed file would opt in every clone. The same key in a git-tracked `.orchestration.local.toml` is ignored too, and so is it when git cannot say whether the file is tracked (a broken index or a timeout), with a warning. DeepSeek counts as named when `deepseek` appears, in any case, in the provider or in the model id (`openrouter/deepseek/…`); every other provider, LM Studio included, needs no opt-in. `coordinator/pi-start.sh` enforces this when it starts a pi worker: it refuses an empty provider, ignores an exported `ORCH_PI_DEEPSEEK` and `GIT_*` variables, and its refusal tells the session to ask the user rather than edit the file. The Bash guard denies the ways around it; `docs/bash-guard.md` lists what stays open.
 

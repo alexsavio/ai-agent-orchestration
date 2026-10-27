@@ -11,7 +11,7 @@ How the roles fit together: [`architecture.md`](architecture.md).
 
 ## Explicit worker signals
 
-`orch-signal` works for Claude, Codex and pi. Identity is the caller's
+`orch-signal` works for Claude, Codex, pi and cursor. Identity is the caller's
 `HERDR_PANE_ID`, `HERDR_WORKSPACE_ID` and the workspace's `owner` token, read
 through the env adapter. It needs no Claude session ID.
 

@@ -41,7 +41,8 @@ The first run copies [`config/orchestration.toml.example`](config/orchestration.
 | Key (prompt) | Set it to |
 |---|---|
 | `[pr] author` (`ORCH_PR_AUTHOR`) | your GitHub login (`"@me"` works); the watchers find the repos from the open workspaces |
-| `[models] codex_worker`, `codex_smart` (`ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) | a Codex model name; one is enough, it then serves both tiers. `/coordinate` and `/architect` stop while both are empty or a placeholder. No Codex? Answer `-` to both questions and the installer writes `[providers] enabled = ["claude"]` (plus `"pi"` when a pi model is set) when the list is empty, or set it yourself; it then stops asking |
+| `[models] codex_worker`, `codex_smart` (`ORCH_CODEX_WORKER_MODEL`, `ORCH_CODEX_SMART_MODEL`) | a Codex model name; one is enough, it then serves both tiers. `/coordinate` and `/architect` stop while both are empty or a placeholder. No Codex? Answer `-` to both questions and the installer writes `[providers] enabled = ["claude"]` (plus `"pi"` / `"cursor"` when a model of that family is set) when the list is empty, or set it yourself; it then stops asking |
+| `[models] cursor_worker`, `cursor_smart` (`ORCH_CURSOR_WORKER_MODEL`, `ORCH_CURSOR_SMART_MODEL`) | optional Cursor CLI models (for example `grok-4.7-medium` / `grok-4.7-high`); one is enough. Empty means the cursor family is off. List ids with `cursor-agent --list-models` |
 | `[herdr] bin`, `socket` (`ORCH_HERDR_BIN`, `ORCH_HERDR_SOCKET`) | Herdr's executable and socket; needed for the watcher services |
 
 Settings for one repo (big-repo guard, legacy scan and its rules, focus) go in that repo's `.orchestration.toml` (committed, shared), or `.orchestration.local.toml` for your own (keep it out of git). An exported `ORCH_*` variable beats both files. Restart Claude Code afterwards so it loads the hooks and skills. Every key: [`docs/settings.md`](docs/settings.md). Watcher services: [`docs/watchers.md`](docs/watchers.md).
@@ -70,7 +71,7 @@ When `remote_control.architects` is on (the default), start with `claude --remot
 /architect Move the acme/webapp billing page to the new API
 ```
 
-The architect splits the work into tasks. It does not edit code. For each task it opens a Herdr workspace with its own git worktree, starts a worker (Claude or Codex, picked per task on the lightest allowed tier; Haiku is a Claude tier), tags the worker with `owner`, and pastes `~/.claude/worker-reports/machine-rules.md` into the brief. Edit the project-specific list at the end of that file first. The architect verifies every report, and merges only a PR you name. Details: [`skills/architect/SKILL.md`](skills/architect/SKILL.md).
+The architect splits the work into tasks. It does not edit code. For each task it opens a Herdr workspace with its own git worktree, starts a worker (Claude, Codex, pi or cursor, picked per task on the lightest allowed tier; Haiku is a Claude tier; cursor is typically Grok via the Cursor CLI), tags the worker with `owner`, and pastes `~/.claude/worker-reports/machine-rules.md` into the brief. Edit the project-specific list at the end of that file first. The architect verifies every report, and merges only a PR you name. Details: [`skills/architect/SKILL.md`](skills/architect/SKILL.md).
 
 Workers, recycles and handoffs: [`docs/workers.md`](docs/workers.md).
 

@@ -529,7 +529,8 @@ ask_config_keys() {
   # The file decides, as services read it without the installer's environment.
   if [ "$codex_empty" = 2 ] && [ -z "$(unset ORCH_PROVIDERS && config_value ORCH_PROVIDERS)" ]; then
     families=claude
-    [ -z "$(unset ORCH_PI_WORKER_MODEL ORCH_PI_SMART_MODEL && config_value ORCH_PI_WORKER_MODEL)$(unset ORCH_PI_WORKER_MODEL ORCH_PI_SMART_MODEL && config_value ORCH_PI_SMART_MODEL)" ] || families=claude,pi
+    [ -z "$(unset ORCH_PI_WORKER_MODEL ORCH_PI_SMART_MODEL && config_value ORCH_PI_WORKER_MODEL)$(unset ORCH_PI_WORKER_MODEL ORCH_PI_SMART_MODEL && config_value ORCH_PI_SMART_MODEL)" ] || families=$families,pi
+    [ -z "$(unset ORCH_CURSOR_WORKER_MODEL ORCH_CURSOR_SMART_MODEL && config_value ORCH_CURSOR_WORKER_MODEL)$(unset ORCH_CURSOR_WORKER_MODEL ORCH_CURSOR_SMART_MODEL && config_value ORCH_CURSOR_SMART_MODEL)" ] || families=$families,cursor
     write_config_key ORCH_PROVIDERS "$families"
     printf -v ORCH_PROVIDERS '%s' "$families"
   fi
