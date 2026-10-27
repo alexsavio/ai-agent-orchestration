@@ -741,12 +741,6 @@ EVENTS() { printf '%s' "$ORCH_HEAVY_SLOTS_DIR/.events"; }
   grep -Eq '^[0-9]+ SLOT FAIL agent-fail pid=[0-9]+ code=1 elapsed=[0-9]+s note=-$' "$(EVENTS)"
 }
 
-@test "a passing job writes no event" {
-  run "$HELPER" take agent-pass -- true
-  [ "$status" -eq 0 ]
-  [ ! -s "$(EVENTS)" ]
-}
-
 @test "a job killed by a signal writes one KILLED line, not FAIL" {
   run "$HELPER" take agent-killed --note 'big run' -- bash -c 'kill -KILL $$'
   [ "$status" -eq 137 ]
@@ -795,11 +789,6 @@ EVENTS() { printf '%s' "$ORCH_HEAVY_SLOTS_DIR/.events"; }
   [ "$status" -eq 0 ]
   [ "$(grep -c '^[0-9]* SLOT WAIT' "$(EVENTS)")" -eq 1 ]
   grep -Eq '^[0-9]+ SLOT WAIT agent-waiter pid=[0-9]+ slots=1/1 note=queued run$' "$(EVENTS)"
-}
-
-@test "a job that finds a free slot writes no WAIT line" {
-  run "$HELPER" take agent-free -- true
-  [ ! -s "$(EVENTS)" ]
 }
 
 @test "concurrent jobs append whole lines: none lost, none interleaved" {

@@ -165,7 +165,7 @@ class SlotEventsTest(IsolatedTestCase):
         raw = dict(free=60, swap=0, procs=1, files=1, load=1.0, unreadable=[])
         raw["slot_events"] = ACTION
         _, events = w.reduce("host", None, raw)
-        self.assertEqual(events, ACTION)
+        self.assertEqual(events, [])
 
     def test_policy_keeps_each_slot_line_as_a_one_shot_alert(self):
         for line in ACTION + FYI:

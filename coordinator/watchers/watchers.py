@@ -1734,7 +1734,9 @@ def reduce(mode, before, raw):
     after = conditions(mode, raw)
     if mode in PRESSURE_SETTINGS:
         state, events = reduce_pressure(mode, before, raw, after)
-        return state, events + raw.get("slot_events", [])
+        if mode == "balance":
+            events = events + raw.get("slot_events", [])
+        return state, events
     if mode == "context":
         return reduce_context(before, after, raw)
     return reduce_hog(before, after)

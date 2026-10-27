@@ -124,7 +124,6 @@ clean_note() {
 }
 
 # One printf is one write(2) on an O_APPEND file, so lines of concurrent jobs do not interleave.
-# The leading epoch lets the watcher drop old lines; the spool stops growing at EVENTS_MAX_BYTES.
 emit_event() {
   local kind=$1 pid=$2 detail=$3 size
   size=$(wc -c 2>/dev/null <"$EVENTS_FILE") || size=0
@@ -132,7 +131,7 @@ emit_event() {
   printf '%s\n' "$(date +%s) SLOT $kind $JOB_NAME pid=$pid $detail note=$NOTE" >>"$EVENTS_FILE" 2>/dev/null || true
 }
 
-job_elapsed() { printf '%ss' "$(( $(date +%s) - ${JOB_START:-$(date +%s)} ))"; }
+job_elapsed() { printf '%ss' "$(( $(date +%s) - JOB_START ))"; }
 
 emit_killed() {
   [ -n "$CHILD_PID" ] && [ "$KILL_EVENT" -eq 0 ] || return 0
