@@ -250,8 +250,19 @@ dispatch() {
   grep -qF -- 'adds `--effort <level>` after the model' "$ROOT/skills/architect/references/dispatch.md"
   # shellcheck disable=SC2016 # The backticks are literal skill text.
   grep -qF -- 'at `--effort $ORCH_ARCHITECT_EFFORT`' "$ROOT/skills/architect/SKILL.md"
-  run grep -rn -e 'CLAUDE_CODE_EFFORT_LEVEL=' -e 'effortLevel":' "$ROOT/skills"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '(`$ORCH_WORKER_EFFORT`, `$ORCH_REVIEWER_EFFORT` for a reviewer;' "$ROOT/skills/architect/references/dispatch.md"
+  # The names appear only in the "never as ..." prose lines.
+  cd "$ROOT"
+  run bash -c "grep -rn -e CLAUDE_CODE_EFFORT_LEVEL -e effortLevel skills docs install.sh hooks lib | sed 's/never as \`CLAUDE_CODE_EFFORT_LEVEL\` or \`effortLevel\`//' | grep -e CLAUDE_CODE_EFFORT_LEVEL -e effortLevel"
   [ "$status" -eq 1 ]
+}
+
+@test "a per-dispatch effort survives a worker recycle through the handoff" {
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '- **Effort:** the `--effort` level of the first start' "$ROOT/skills/architect/references/worker-recycle.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- "is the handoff's \`Effort:\` field" "$ROOT/skills/architect/references/worker-recycle.md"
 }
 
 @test "recycle and re-home keep the first start's MCP choice; README, tier list and contributing agree" {
