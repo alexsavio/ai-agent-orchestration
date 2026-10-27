@@ -61,15 +61,23 @@ RECLAIM_DIR="$SLOT_DIR/.lock-reclaim"
 LOCK_MAX_AGE=30
 WAIT_MAX=1800
 KILL_GRACE=${ORCH_HEAVY_SLOTS_KILL_GRACE:-10}
+LONG_RUN=${ORCH_HEAVY_SLOTS_LONG_RUN:-1800}
+EVENTS_FILE="$SLOT_DIR/.events"
+NOTES_DIR="$SLOT_DIR/.notes"
+JOB_NAME=
+NOTE=-
+JOB_START=
+KILL_CODE=-
 CHILD_PID=
 SLOT_FILE=
 LOCK_HELD=0
 
 case $SLOT_MAX in ''|*[!0-9]*|0) printf 'heavy-slot: ORCH_HEAVY_SLOTS_MAX must be a positive integer\n' >&2; exit 64 ;; esac
 case $KILL_GRACE in ''|*[!0-9]*) printf 'heavy-slot: ORCH_HEAVY_SLOTS_KILL_GRACE must be a non-negative integer\n' >&2; exit 64 ;; esac
+case $LONG_RUN in ''|*[!0-9]*) printf 'heavy-slot: ORCH_HEAVY_SLOTS_LONG_RUN must be a non-negative integer\n' >&2; exit 64 ;; esac
 
 usage() {
-  printf 'usage: heavy-slot {count|list|take <architect>-<job> [--wait-max seconds] -- <command> [args...]}\n       take exits 73 when the slot directory is not writable' >&2
+  printf 'usage: heavy-slot {count|list|take <architect>-<job> [--wait-max seconds] [--note text] -- <command> [args...]}\n       take exits 73 when the slot directory is not writable' >&2
   exit 64
 }
 
@@ -101,6 +109,40 @@ probe_slot_dir() {
     cannot_write_slot_dir
     return $?
   fi
+}
+
+clean_note() {
+  local note
+  note=$(printf '%s' "$1" | LC_ALL=C tr -c '[:print:]' ' ' | LC_ALL=C tr -s ' ')
+  note=${note# }
+  note=${note% }
+  note=${note:0:60}
+  printf '%s' "${note:--}"
+}
+
+# One printf, one write(2) on an O_APPEND file: lines of concurrent jobs never interleave.
+# A line stays under 400 bytes (name 255 + note 60 + fixed fields), below PIPE_BUF.
+emit_event() {
+  local kind=$1 pid=$2 detail=$3
+  printf '%s\n' "SLOT $kind $JOB_NAME pid=$pid $detail note=$NOTE" >>"$EVENTS_FILE" 2>/dev/null || true
+}
+
+job_elapsed() { printf '%ss' "$(( $(date +%s) - ${JOB_START:-$(date +%s)} ))"; }
+
+emit_killed() {
+  [ -n "$CHILD_PID" ] || return 0
+  emit_event KILLED "$CHILD_PID" "code=$KILL_CODE elapsed=$(job_elapsed)"
+}
+
+watch_long() {
+  local pid=$1 end=$(( JOB_START + LONG_RUN ))
+  while is_pid_live "$pid"; do
+    if [ "$(date +%s)" -ge "$end" ]; then
+      emit_event RUNLONG "$pid" "elapsed=$(job_elapsed)"
+      return 0
+    fi
+    sleep 1
+  done
 }
 
 is_pid_live() {
@@ -141,7 +183,7 @@ live_count() {
 }
 
 list_slots() {
-  local file pid pgid age state
+  local file pid pgid age state note
   [ -d "$SLOT_DIR" ] || return 0
   for file in "$SLOT_DIR"/*; do
     [ -f "$file" ] || continue
@@ -149,7 +191,8 @@ list_slots() {
     age=$(file_age "$file")
     state=live
     if [ -n "$pgid" ]; then is_group_live "$pgid"; else is_pid_live "$pid"; fi || state=stale
-    printf '%s pid=%s age=%ss %s\n' "${file##*/}" "${pid:-invalid}" "$age" "$state"
+    note=$(cat "$NOTES_DIR/${file##*/}" 2>/dev/null || true)
+    printf '%s pid=%s age=%ss note=%s %s\n' "${file##*/}" "${pid:-invalid}" "$age" "${note:--}" "$state"
   done
 }
 
@@ -230,6 +273,7 @@ release_lock() {
 cleanup() {
   local status=$? slot_pid='' pid_group='' deadline
   [ "$LOCK_HELD" -eq 1 ] && release_lock
+  [ -z "$JOB_NAME" ] || rm -f "$NOTES_DIR/$JOB_NAME"
   [ -n "$SLOT_FILE" ] || return 0
   deadline=$(( $(date +%s) + 1 ))
   CLEANUP_MODE=1
@@ -251,6 +295,7 @@ cleanup() {
 terminate_group() {
   local pgid=$1 deadline
   is_group_live "$pgid" || return 0
+  emit_killed
   kill -TERM -- "-$pgid" 2>/dev/null || true
   deadline=$(( $(date +%s) + KILL_GRACE ))
   while is_group_live "$pgid" && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done
@@ -259,6 +304,7 @@ terminate_group() {
 
 forward_signal() {
   local code=$2
+  KILL_CODE=$code
   if [ -n "$CHILD_PID" ] && is_pid_live "$CHILD_PID"; then
     # Bash starts asynchronous children with SIGINT ignored. On macOS's Bash
     # 3.2, a child cannot install an INT trap when it inherited that ignored
@@ -277,9 +323,10 @@ valid_name() {
 }
 
 take_slot() {
-  local name=$1 max=$2 existing_pid='' existing_group='' count status deadline now remaining pause
+  local name=$1 max=$2 existing_pid='' existing_group='' count status deadline now remaining pause waited=0
   shift 2
   probe_slot_dir
+  JOB_NAME=$name
   SLOT_FILE="$SLOT_DIR/$name"
   deadline=$(( $(date +%s) + max ))
   while :; do
@@ -301,6 +348,8 @@ take_slot() {
       trap 'forward_signal INT 130' INT
       trap 'forward_signal TERM 143' TERM
       trap 'forward_signal HUP 129' HUP
+      mkdir -p "$NOTES_DIR" 2>/dev/null && printf '%s\n' "$NOTE" >"$NOTES_DIR/$name" 2>/dev/null
+      JOB_START=$(date +%s)
       exec 3<&0
       set -m
       ( trap - INT; exec "$@" ) <&3 3<&- &
@@ -315,11 +364,24 @@ take_slot() {
         die "cannot write $SLOT_FILE"
       fi
       release_lock
+      if [ "$LONG_RUN" -gt 0 ]; then
+        watch_long "$CHILD_PID" </dev/null >/dev/null 2>&1 &
+      fi
       wait "$CHILD_PID"
       status=$?
+      KILL_CODE=$status
+      if [ "$status" -gt 128 ]; then
+        emit_killed
+      elif [ "$status" -ne 0 ]; then
+        emit_event FAIL "$CHILD_PID" "code=$status elapsed=$(job_elapsed)"
+      fi
       exit "$status"
     fi
     release_lock
+    if [ "$waited" -eq 0 ]; then
+      waited=1
+      emit_event WAIT "$$" "slots=$count/$SLOT_MAX"
+    fi
     now=$(date +%s)
     if [ "$now" -ge "$deadline" ]; then
       printf 'NEED SLOT: %s waited %ss for one of %s heavy slots\n' "$name" "$WAIT_MAX" "$SLOT_MAX" >&2
@@ -348,11 +410,13 @@ case $1 in
     NAME=$1
     shift
     valid_name "$NAME" || die "name must be <architect>-<job> and contain no spaces or /"
-    if [ "${1:-}" = --wait-max ]; then
-      [ "$#" -ge 3 ] || usage
-      WAIT_MAX=$2
-      shift 2
-    fi
+    while :; do
+      case ${1:-} in
+        --wait-max) [ "$#" -ge 3 ] || usage; WAIT_MAX=$2; shift 2 ;;
+        --note) [ "$#" -ge 3 ] || usage; NOTE=$(clean_note "$2"); shift 2 ;;
+        *) break ;;
+      esac
+    done
     case $WAIT_MAX in ''|*[!0-9]*) die '--wait-max must be a non-negative number of seconds' ;; esac
     WAIT_MAX=$((10#$WAIT_MAX))
     [ "${1:-}" = -- ] || usage

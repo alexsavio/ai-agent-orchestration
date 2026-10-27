@@ -219,6 +219,10 @@ and free memory < 30%. The slot boundary is configured independently; changing
 `ORCH_HEAVY_SLOTS_MAX` changes both `heavy-slot` admission and the Balance
 slot boundary, but not the separate heavy-worktree CPU boundary.
 A missing heavy-slots directory counts as zero slots.
+Each pass also claims `<heavy-slots dir>/.events` (by rename, so a crash between the claim and the feed write drops those lines), keeps its last 100
+well-formed `SLOT WAIT|FAIL|KILLED|RUNLONG` lines, and emits them after the BALANCE lines as one-shot alerts.
+`SLOT KILLED` and `SLOT RUNLONG` are action lines (`feed-actions.regex`); `SLOT WAIT` and `SLOT FAIL` go to the FYI log (`feed-fyi.regex`).
+`heavy-slot` writes the file; see [heavy-slot](../../docs/heavy-slot.md).
 Slots count only files containing live positive PIDs, including permission-denied
 PID probes. Stale PIDs are excluded. Audit and balance share one positive-integer
 PID parser and one default heavy-slots path. Dotfiles and broken symlinks are

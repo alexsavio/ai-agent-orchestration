@@ -701,3 +701,136 @@ assert rows["slot:agent-parser"]["alive"]
   [ ! -e "$TMP/target" ]
   [ ! -L "$ORCH_HEAVY_SLOTS_DIR/agent-link" ]
 }
+
+EVENTS() { printf '%s' "$ORCH_HEAVY_SLOTS_DIR/.events"; }
+
+@test "list shows the note of a live job and note=- without one" {
+  "$HELPER" take agent-noted --note 'first-run.bats for PR 106' -- sleep 5 &
+  "$HELPER" take agent-plain -- sleep 5 &
+  wait_for_file "$ORCH_HEAVY_SLOTS_DIR/agent-noted"
+  wait_for_file "$ORCH_HEAVY_SLOTS_DIR/agent-plain"
+  run "$HELPER" list
+  printf '%s\n' "$output" | grep -Eq '^agent-noted pid=[0-9]+ age=[0-9]+s note=first-run.bats for PR 106 live$'
+  printf '%s\n' "$output" | grep -Eq '^agent-plain pid=[0-9]+ age=[0-9]+s note=- live$'
+}
+
+@test "the note file is removed when the job ends" {
+  run "$HELPER" take agent-noted --note hello -- true
+  [ "$status" -eq 0 ]
+  [ ! -e "$ORCH_HEAVY_SLOTS_DIR/.notes/agent-noted" ]
+}
+
+@test "note keeps one printable line of at most 60 characters" {
+  run "$HELPER" take agent-note --note "$(printf 'a\nb\tc %.0sx' 1)$(printf 'y%.0s' $(seq 1 100))" -- bash -c 'exit 2'
+  [ "$status" -eq 2 ]
+  [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
+  note=$(sed -e 's/.* note=//' "$(EVENTS)")
+  [ "${#note}" -le 60 ]
+  [[ "$note" == "a b c x"* ]]
+}
+
+@test "a failing job writes one FAIL line with name, pid, code, elapsed and note" {
+  run "$HELPER" take agent-fail --note 'unit tests' -- bash -c 'exit 3'
+  [ "$status" -eq 3 ]
+  [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
+  grep -Eq '^SLOT FAIL agent-fail pid=[0-9]+ code=3 elapsed=[0-9]+s note=unit tests$' "$(EVENTS)"
+}
+
+@test "a job without a note writes note=-" {
+  run "$HELPER" take agent-fail -- bash -c 'exit 1'
+  grep -Eq '^SLOT FAIL agent-fail pid=[0-9]+ code=1 elapsed=[0-9]+s note=-$' "$(EVENTS)"
+}
+
+@test "a passing job writes no event" {
+  run "$HELPER" take agent-pass -- true
+  [ "$status" -eq 0 ]
+  [ ! -s "$(EVENTS)" ]
+}
+
+@test "a job killed by a signal writes one KILLED line, not FAIL" {
+  run "$HELPER" take agent-killed --note 'big run' -- bash -c 'kill -KILL $$'
+  [ "$status" -eq 137 ]
+  [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
+  grep -Eq '^SLOT KILLED agent-killed pid=[0-9]+ code=137 elapsed=[0-9]+s note=big run$' "$(EVENTS)"
+}
+
+@test "stopping heavy-slot with TERM writes one KILLED line for the job" {
+  "$HELPER" take agent-stopped --note stopped -- sleep 30 &
+  pid=$!
+  wait_for_file "$ORCH_HEAVY_SLOTS_DIR/agent-stopped"
+  kill -TERM "$pid"
+  wait "$pid" || true
+  [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
+  grep -Eq '^SLOT KILLED agent-stopped pid=[0-9]+ code=143 elapsed=[0-9]+s note=stopped$' "$(EVENTS)"
+}
+
+@test "a second TERM while the job is stopping adds no second KILLED line" {
+  ORCH_HEAVY_SLOTS_KILL_GRACE=3 "$HELPER" take agent-twice -- bash -c 'trap "" TERM; sleep 30' &
+  pid=$!
+  wait_for_file "$ORCH_HEAVY_SLOTS_DIR/agent-twice"
+  kill -TERM "$pid"
+  sleep 0.5
+  kill -TERM "$pid" 2>/dev/null || true
+  wait "$pid" || true
+  [ "$(grep -c '^SLOT KILLED' "$(EVENTS)")" -eq 1 ]
+}
+
+@test "a job past the long-run threshold writes exactly one RUNLONG line" {
+  ORCH_HEAVY_SLOTS_LONG_RUN=1 run "$HELPER" take agent-long --note 'slow suite' -- sleep 4
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SLOT RUNLONG' "$(EVENTS)")" -eq 1 ]
+  grep -Eq '^SLOT RUNLONG agent-long pid=[0-9]+ elapsed=[0-9]+s note=slow suite$' "$(EVENTS)"
+  [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
+}
+
+@test "a job under the long-run threshold writes no RUNLONG line" {
+  ORCH_HEAVY_SLOTS_LONG_RUN=60 run "$HELPER" take agent-short -- sleep 1
+  [ ! -s "$(EVENTS)" ]
+}
+
+@test "long-run 0 turns RUNLONG off" {
+  ORCH_HEAVY_SLOTS_LONG_RUN=0 run "$HELPER" take agent-off -- sleep 2
+  [ ! -s "$(EVENTS)" ]
+}
+
+@test "a non-numeric long-run is refused" {
+  ORCH_HEAVY_SLOTS_LONG_RUN=soon run "$HELPER" take agent-bad -- true
+  [ "$status" -eq 64 ]
+  [[ "$output" == *ORCH_HEAVY_SLOTS_LONG_RUN* ]]
+}
+
+@test "a job that waits for a slot writes one WAIT line however long it waits" {
+  ORCH_HEAVY_SLOTS_MAX=1 "$HELPER" take agent-holder -- sleep 12 &
+  wait_for_file "$ORCH_HEAVY_SLOTS_DIR/agent-holder"
+  ORCH_HEAVY_SLOTS_MAX=1 run "$HELPER" take agent-waiter --note 'queued run' --wait-max 40 -- true
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^SLOT WAIT' "$(EVENTS)")" -eq 1 ]
+  grep -Eq '^SLOT WAIT agent-waiter pid=[0-9]+ slots=1/1 note=queued run$' "$(EVENTS)"
+}
+
+@test "a job that finds a free slot writes no WAIT line" {
+  run "$HELPER" take agent-free -- true
+  [ ! -s "$(EVENTS)" ]
+}
+
+@test "concurrent jobs append whole lines: none lost, none interleaved" {
+  note=$(printf 'n%.0s' $(seq 1 60))
+  for n in $(seq 1 40); do
+    # shellcheck disable=SC2016 # The child Bash expands $1.
+    ORCH_HEAVY_SLOTS_MAX=100 "$HELPER" take "agent-job$n" --note "$note" -- bash -c 'until [ -e "$1" ]; do sleep 0.02; done; exit 1' _ "$TMP/go" &
+  done
+  tries=0
+  while [ "$("$HELPER" count)" -lt 40 ] && [ "$tries" -lt 120 ]; do sleep 0.5; tries=$((tries + 1)); done
+  [ "$("$HELPER" count)" -eq 40 ]
+  : >"$TMP/go"
+  wait
+  [ "$(wc -l <"$(EVENTS)")" -eq 40 ]
+  [ "$(grep -Ec "^SLOT FAIL agent-job[0-9]+ pid=[0-9]+ code=1 elapsed=[0-9]+s note=$note\$" "$(EVENTS)")" -eq 40 ]
+  [ "$(sed -e 's/^SLOT FAIL \(agent-job[0-9]*\) .*/\1/' "$(EVENTS)" | sort -u | wc -l)" -eq 40 ]
+}
+
+@test "usage names --note" {
+  run "$HELPER" take
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"[--note text]"* ]]
+}

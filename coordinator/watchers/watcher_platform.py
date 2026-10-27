@@ -320,6 +320,29 @@ def heavy_slots_path():
     return Path.home() / ".claude/heavy-slots"
 
 
+SLOT_EVENT = re.compile(
+    r"SLOT (WAIT|FAIL|KILLED|RUNLONG) [A-Za-z0-9_.-]+ pid=\S+ [ -~]*$"
+)
+SLOT_EVENTS_KEPT = 100
+
+
+def take_slot_events(directory=None):
+    """Claims the heavy-slot spool by rename, so a line written during the read lands in a fresh spool."""
+    directory = Path(
+        directory
+        if directory is not None
+        else os.environ.get("ORCH_HEAVY_SLOTS_DIR") or heavy_slots_path()
+    )
+    claim = directory / f".events.claim.{os.getpid()}"
+    try:
+        os.rename(directory / ".events", claim)
+        lines = claim.read_text(errors="replace").splitlines()
+        claim.unlink()
+    except OSError:
+        return []
+    return [line for line in lines if SLOT_EVENT.fullmatch(line)][-SLOT_EVENTS_KEPT:]
+
+
 def read_slots(directory=None):
     directory = directory if directory is not None else heavy_slots_path()
     try:
