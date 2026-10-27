@@ -822,32 +822,68 @@ def script_text(path, cwd):
     return None if b"\0" in data else data.decode("utf-8", "replace")
 
 
-def script_kills(body, cwd):
+def script_kills(body, cwd, depth=0):
+    """Scans code a shell would run: broad-kill pipelines, pkill/killall words, and nested inline shells."""
     if broad_kill_text(body):
         return True
     for words, where, pipeline in commands(body, cwd):
         words, _ = unwrap(words)
-        if words and os.path.basename(words[0]) in ("pkill", "killall"):
-            if evaluate_words(words, where, body, (), pipeline):
-                return True
+        if not words:
+            continue
+        if os.path.basename(words[0]) in ("pkill", "killall") and evaluate_words(
+            words, where, body, (), pipeline
+        ):
+            return True
+        if depth < 3 and any(
+            script_kills(text, where, depth + 1) for text in shell_programs(words)
+        ):
+            return True
     return False
 
 
+LITERAL_ASSIGNMENT = re.compile(
+    r"(?:^|[;&|(\n])[ \t]*(?:export[ \t]+)?([A-Za-z_]\w*)="
+    r"""([^\s;&|$`()<>'"]*|"[^"$`\\]*"|'[^']*')(?=[\s;&|)]|$)"""
+)
+
+
+def expand_literal(path, raw):
+    """Expands ~, $HOME and variables the command assigns plain literals; None when a $ remains."""
+    values = {
+        name: value.strip("'\"") for name, value in LITERAL_ASSIGNMENT.findall(raw)
+    }
+    values.setdefault("HOME", os.path.expanduser("~"))
+    path = re.sub(
+        r"\$(?:\{(\w+)\}|(\w+))",
+        lambda m: values.get(m[1] or m[2], m[0]),
+        os.path.expanduser(path),
+    )
+    return None if "$" in path else path
+
+
 def guard_script_kill(raw, cwd, disabled):
-    """Denies a broad kill inside a script the same command writes and runs, or runs from disk."""
+    """Denies a broad kill in inline shell text, in a script the command writes and runs, or in a script file on disk."""
     written = heredoc_files(raw)
     for words, where, _ in commands(raw, cwd):
         words, _ = unwrap(words)
-        path = script_operand(words) if words else None
+        if not words:
+            continue
+        if "guard_inline_shell" not in disabled and any(
+            script_kills(text, where, 1) for text in shell_programs(words)
+        ):
+            return f"{BROAD_KILL_REASON} Found inside an inline shell program."
+        path = script_operand(words)
         if not path:
             continue
+        direct = os.path.basename(words[0]) not in SHELL_EXECUTABLES | {"source", "."}
         if path in written:
             body = None if "guard_written_script" in disabled else written[path]
-        elif "/" in path and "guard_disk_script" not in disabled:
-            body = script_text(path, where)
-        else:
+        elif (direct and "/" not in path) or "guard_disk_script" in disabled:
             body = None
-        if body and script_kills(body, where):
+        else:
+            full = expand_literal(path, raw)
+            body = script_text(full, where) if full else None
+        if body and script_kills(body, where, 1):
             return f"{BROAD_KILL_REASON} Found inside script {path}."
     return None
 

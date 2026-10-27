@@ -976,6 +976,44 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("disk script missing", f"bash {scripts}/missing.sh"),
     ]:
         case(name, command)
+    (scripts / "k.sh").write_text("pkill -f vite\n")
+    (scripts / "ok.sh").write_text("echo ok\n")
+    for name, command, cwd in [
+        ("inline bash -c pkill", "bash -c 'pkill -f vite'", repo),
+        ("inline sh -c pkill", 'sh -c "pkill -f vite"', repo),
+        ("inline eval pkill", "eval 'pkill -f vite'", repo),
+        ("heredoc to bash pkill", "bash <<'EOF'\npkill -f vite\nEOF", repo),
+        ("bash relative script", "bash k.sh", scripts),
+        ("sh relative script", "sh k.sh", scripts),
+        ("cd then bash relative script", f"cd {scripts} && bash k.sh", repo),
+        ("cd then direct script", f"cd {scripts} && ./k.sh", repo),
+        ("literal variable script", f"S={scripts}; bash $S/k.sh", repo),
+        ("braced literal variable script", f"S='{scripts}' && bash ${{S}}/k.sh", repo),
+        ("nested inline shell pkill", "bash -c \"sh -c 'pkill -f vite'\"", repo),
+    ]:
+        case(name, command, True, cwd)
+    for name, command, cwd in [
+        ("inline bash -c without kill", "bash -c 'echo ok'", repo),
+        ("relative script without kill", "bash ok.sh", scripts),
+        ("bare word is a PATH lookup", "k.sh", scripts),
+        (
+            "command substitution variable is skipped",
+            f"S=$(echo {scripts}); bash $S/k.sh",
+            repo,
+        ),
+        ("literal variable script without kill", f"S={scripts}; bash $S/ok.sh", repo),
+    ]:
+        case(name, command, False, cwd)
+    home = scripts / "home"
+    home.mkdir()
+    (home / "k.sh").write_text("pkill -f vite\n")
+    saved_home = os.environ["HOME"]
+    os.environ["HOME"] = str(home)
+    try:
+        for text in ("bash $HOME/k.sh", "bash ${HOME}/k.sh", "bash ~/k.sh"):
+            assert guard.evaluate(text, repo), text
+    finally:
+        os.environ["HOME"] = saved_home
     case("pgrep full kill", "pgrep --full rails | xargs kill", True)
     case("ps grep kill", "ps aux | grep vite | awk '{print $2}' | xargs kill", True)
     for name, command in [
@@ -1834,6 +1872,7 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("guard_broad_kill", "substitution pgrep kill"),
         ("guard_written_script", "incident heredoc script run directly"),
         ("guard_disk_script", "disk script via bash"),
+        ("guard_inline_shell", "inline bash -c pkill"),
         ("guard_big_repo_reads", "webapp batch all objects"),
         ("guard_pi", "herdr pi start on DeepSeek"),
     ]:
