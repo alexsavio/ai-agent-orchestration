@@ -59,6 +59,10 @@ A family left out is never started: the installer does not ask for its models, a
 | `providers.claude` | `ORCH_CLAUDE_TIERS` | `["haiku", "sonnet", "opus", "fable"]` | Claude worker tiers the architects may pick (haiku, sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings |
 | `models.coordinator` | `ORCH_COORDINATOR_MODEL` | `"claude-opus-5-5"` | Model of the Coordinator |
 | `models.architect` | `ORCH_ARCHITECT_MODEL` | `"claude-opus-5-5"` | Model of the architects |
+| `models.coordinator_effort` | `ORCH_COORDINATOR_EFFORT` | `"medium"` | Claude effort level of the Coordinator, passed as --effort at every start and recycle |
+| `models.architect_effort` | `ORCH_ARCHITECT_EFFORT` | `"medium"` | Claude effort level of the architects, passed as --effort at every start and recycle |
+| `models.worker_effort` | `ORCH_WORKER_EFFORT` | `"medium"` | Claude effort level of Claude workers (the architect may pick another level per dispatch), passed as --effort at every start and recycle |
+| `models.reviewer_effort` | `ORCH_REVIEWER_EFFORT` | `"high"` | Claude effort level of Claude reviewers, passed as --effort at every start and recycle |
 | `models.codex_worker` | `ORCH_CODEX_WORKER_MODEL` | `"<codex-worker-model>"` | Codex model for routine work; empty or a placeholder means codex_smart serves it too. With codex on, set at least one of the two |
 | `models.codex_smart` | `ORCH_CODEX_SMART_MODEL` | `"<codex-smart-model>"` | Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two |
 | `models.pi_worker` | `ORCH_PI_WORKER_MODEL` | empty | pi model for routine work as provider/model-id; empty means pi is not used on this machine |

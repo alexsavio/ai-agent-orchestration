@@ -716,6 +716,8 @@ class PullsSettingsTest(SettingsTest):
 
 
 def example_value(setting):
+    if setting.choices and setting.kind == "str":
+        return setting.choices[0]
     if setting.choices:
         return list(setting.required) or setting.choices[:1]
     return {
@@ -997,6 +999,40 @@ class ProvidersTest(SettingsTest):
         )
         with self.assertRaisesRegex(s.ConfigError, 'unknown entry ""'):
             self.resolve(ORCH_PROVIDERS="claude,")
+
+    def test_an_unknown_effort_level_is_an_error(self):
+        for role in ("coordinator", "architect", "worker", "reviewer"):
+            with self.subTest(role):
+                self.assertIn(
+                    f'models.{role}_effort: unknown value "turbo"; known: low, medium, high, xhigh, max',
+                    self.error(f'[models]\n{role}_effort = "turbo"\n'),
+                )
+
+    def test_every_known_effort_level_is_accepted(self):
+        for level in s.EFFORT_LEVELS:
+            for role in ("coordinator", "architect", "worker", "reviewer"):
+                with self.subTest(role=role, level=level):
+                    path = self.write(
+                        "e.toml", f'[models]\n{role}_effort = "{level}"\n'
+                    )
+                    self.assertEqual(
+                        s.read_file(path, "global")[s.BY_KEY[f"models.{role}_effort"]],
+                        level,
+                    )
+
+    def test_the_effort_defaults_are_medium_except_the_reviewer(self):
+        self.assertEqual(
+            {
+                role: s.BY_KEY[f"models.{role}_effort"].default
+                for role in ("coordinator", "architect", "worker", "reviewer")
+            },
+            {
+                "coordinator": "medium",
+                "architect": "medium",
+                "worker": "medium",
+                "reviewer": "high",
+            },
+        )
 
     def test_one_codex_model_is_enough_and_serves_both_tiers(self):
         for worker, smart in (
