@@ -1040,6 +1040,8 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     }
     for fixture, text in fixtures.items():
         (scripts / fixture).write_text(text)
+    (scripts / "dash").mkdir()
+    (scripts / "dash" / "-").write_text("pkill -f vite\n")
     (scripts / "bin.sh").write_bytes(b"#!/bin/bash\npkill -f vite\n\0")
     os.mkfifo(scripts / "fifo.sh")
     late = scripts / "late.sh"
@@ -1120,6 +1122,50 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         (
             "printf conversion not modelled scans each argument",
             "printf '%a %s\\n' 1 'pkill -f vite' > k.sh; bash k.sh",
+        ),
+        (
+            "tee file after a file",
+            "tee out.txt -guard.sh <<'EOF'\npkill -f vite\nEOF\nbash ./-guard.sh",
+        ),
+        (
+            "tee file named -",
+            "tee - <<'EOF'\npkill -f vite\nEOF\nbash ./-",
+        ),
+        (
+            "tee file named --",
+            "tee -- -- <<'EOF'\npkill -f vite\nEOF\nbash ./--",
+        ),
+        (
+            "cat dash file after a file piped to a shell",
+            "cat /dev/null -dash.sh | sh",
+        ),
+        (
+            "source after the option terminator",
+            "source -- -dash.sh",
+        ),
+        (
+            "dot after the option terminator",
+            ". -- -dash.sh",
+        ),
+        (
+            "echo written script read by cat into a shell",
+            "echo 'pkill -f vite' > w.sh; cat w.sh | bash",
+        ),
+        (
+            "echo written script as shell stdin",
+            "echo 'pkill -f vite' > w.sh; bash < w.sh",
+        ),
+        (
+            "tee written dash script read by cat",
+            "tee -- -w.sh <<'EOF'\npkill -f vite\nEOF\ncat -- -w.sh | sh",
+        ),
+        (
+            "wrapped cat piped to a shell",
+            "command cat ./-dash.sh | sh",
+        ),
+        (
+            "sudo cat piped to a shell",
+            "sudo cat ./-dash.sh | sh",
         ),
         ("echo written script", "echo 'pkill -f vite' > k.sh && bash k.sh"),
         ("printf written script", "printf 'pkill -f vite\\n' > k.sh; sh k.sh"),
@@ -1222,6 +1268,27 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("killall of an own process in a script", f"bash {scripts}/killall_own.sh"),
         ("script that only echoes in a pipe", "echo ok | bash"),
         ("piped file without a kill", f"cat {scripts}/clean.sh | bash"),
+        (
+            "tee file after a file, never run",
+            "tee out.txt -notes.md <<'EOF'\npkill -f vite\nEOF",
+        ),
+        (
+            "cat of a missing dash file",
+            "cat -- -clean.sh | sh",
+        ),
+        ("wrapper alone piped to a shell", "command | sh"),
+        (
+            "cat of standard input",
+            "cd dash && cat - | sh",
+        ),
+        (
+            "written clean script read by cat",
+            "echo hi > w.sh; cat w.sh | bash",
+        ),
+        (
+            "pipe into tee after the option terminator",
+            "git log --oneline | tee -- log.txt",
+        ),
         (
             "printf %s of a harmless line, run",
             "printf '%s\\n' 'echo hi' > k.sh; bash k.sh",

@@ -925,7 +925,8 @@ def script_operand(words):
     """Returns the script file a shell, source or direct command word runs, else None."""
     name = os.path.basename(words[0])
     if name in ("source", "."):
-        return words[1] if len(words) > 1 else None
+        args = words[2:] if words[1:2] == ["--"] else words[1:]
+        return args[0] if args else None
     if name not in SCRIPT_SHELLS:
         return words[0]
     command_mode, stdin_mode, check_only, operands = shell_args(words)
@@ -971,6 +972,16 @@ def run_key(path, where, env):
     )
 
 
+def file_operands(args):
+    """File operands of tee or cat; options end at --, - or the first other word, as BSD getopt reads them."""
+    for index, arg in enumerate(args):
+        if arg == "--":
+            return args[index + 1 :]
+        if arg == "-" or not arg.startswith("-"):
+            return args[index:]
+    return []
+
+
 def written_text(words, redirects):
     """Returns (text, file targets) for a command that writes text to files, else (None, [])."""
     name = os.path.basename(words[0])
@@ -984,9 +995,7 @@ def written_text(words, redirects):
     ]
     targets = [target for op, target in redirects if op in WRITE_OPERATORS]
     if name == "tee":
-        end = args.index("--") if "--" in args else len(args)
-        targets += [arg for arg in args[:end] if not arg.startswith("-")]
-        targets += args[end + 1 :]
+        targets += file_operands(args)
     if heredocs:
         return "\n".join(heredocs), targets
     if name in ("echo", "printf"):
@@ -1002,17 +1011,22 @@ def command_entries(text, cwd):
     ]
 
 
-def stdin_program(words, where, pipeline, redirects, env):
+def written_or_disk_text(key, written):
+    return written[key] if key in written else script_text(key) or ""
+
+
+def stdin_program(words, where, pipeline, redirects, env, written):
     """The code a shell without a script operand reads from a here-string, a file or the pipe before it."""
     for op, target in redirects:
         if op == "<<<":
             return target
         if op == "<":
-            key = run_key(target, where, env)
-            return script_text(key)
+            return written_or_disk_text(run_key(target, where, env), written)
     if len(pipeline) < 2:
         return None
-    before = pipeline[-2]
+    before = unwrap(list(pipeline[-2]))[0]
+    if not before:
+        return None
     heredocs = heredoc_bodies(before)
     name = os.path.basename(before[0])
     if heredocs:
@@ -1021,14 +1035,10 @@ def stdin_program(words, where, pipeline, redirects, env):
         return echoed_text(before)
     if name == "cat":
         parts, size = [], 0
-        operands = before[1:]
-        end = operands.index("--") if "--" in operands else len(operands)
-        for arg in [a for a in operands[:end] if not a.startswith("-")] + operands[
-            end + 1 :
-        ]:
+        for arg in [a for a in file_operands(before[1:]) if a != "-"]:
             key = run_key(arg, where, env)
             if size < SCRIPT_SCAN_LIMIT:
-                parts.append(script_text(key) or "")
+                parts.append(written_or_disk_text(key, written))
                 size += len(parts[-1]) + 1
         return "\n".join(parts)[:SCRIPT_SCAN_LIMIT]
     return None
@@ -1061,7 +1071,14 @@ def runs(entries, disabled):
             if name in SCRIPT_SHELLS and not shell_programs(words):
                 command_mode, stdin_mode, _, operands = shell_args(words)
                 if not command_mode and (stdin_mode or not operands):
-                    code = stdin_program(words, where, pipeline, redirects, env)
+                    code = stdin_program(
+                        words,
+                        where,
+                        pipeline,
+                        redirects,
+                        env,
+                        {} if "guard_written_script" in disabled else written,
+                    )
                     if code:
                         yield "the stdin of a shell", code, where, None
         path = script_operand(words)
