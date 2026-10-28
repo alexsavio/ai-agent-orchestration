@@ -27,7 +27,7 @@ BIG_REPO_REASON = (
     "No git grep in a configured big repo. Use rg scoped to the directories you need."
 )
 BIG_REPO_BATCH_REASON = "No whole-tree cat-file batch read in a configured big repo. Use rg scoped to the directories you need."
-PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
+PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart|provider/model-id from ORCH_PI_MODELS>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
 CODEX_REASON = "A raw codex start may not carry --dangerously-bypass-hook-trust, --dangerously-bypass-approvals-and-sandbox, --yolo, --full-auto, --approve-for-me, -a/--ask-for-approval, -s/--sandbox, --add-dir, -p/--profile, --disable hooks, -c/--config keys starting sandbox, approval, permissions, default_permissions, profiles or hooks, or a $ or backtick in its agent arguments; start a bypassed Codex worker with ~/.claude/coordinator/codex-start.sh <name> <pane> <worker|smart>."
 CODEX_FLAGS = (
     "--dangerously-bypass-hook-trust",
