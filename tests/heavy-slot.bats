@@ -806,7 +806,7 @@ assert_nothing_left_behind() {
   assert_nothing_left_behind agent-wstop-term '2[78]'
 }
 
-# twice_signal <TERM|HUP>: send the signal twice to a take whose job ignores both; on Bash 3.2 the second one used to skip cleanup.
+# twice_signal <TERM|HUP>: send the signal twice to a take whose job ignores both; the second must not skip cleanup (Bash 3.2 runs it after the first exit).
 twice_signal() {
   local name=agent-twice-$1
   # shellcheck disable=SC2016 # The child Bash expands nothing here.
