@@ -21,7 +21,7 @@ if [ -n "$session_id" ] && [ -n "$tokens" ]; then
 fi
 
 # Usage sensor: model id, session cost and the 7-day limit, only the fields the input has (never a 0 for a missing one).
-# cost.total_cost_usd is cumulative and resets only on /clear. Written atomically: temp file in the same dir, then mv.
+# cost.total_cost_usd is cumulative within a session id; /clear starts a new id. Written atomically: temp file in the same dir, then mv.
 if [ -n "$session_id" ]; then
   usage=$(echo "$input" | jq -c '{model: .model.id, cost_usd: .cost.total_cost_usd, seven_day_pct: .rate_limits.seven_day.used_percentage, seven_day_resets_at: .rate_limits.seven_day.resets_at} | with_entries(select(.value != null))' 2>/dev/null)
   if [ -n "$usage" ] && [ "$usage" != "{}" ]; then

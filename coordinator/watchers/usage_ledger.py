@@ -29,11 +29,11 @@ class NoAgent(Exception):
     """The pane has no agent: herdr answers agent_not_found."""
 
 
-def herdr(*argv, deadline=None):
+def herdr(*argv, deadline):
     binary = (
         os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
     )
-    left = LOOKUP_TIMEOUT_S if deadline is None else deadline - time.monotonic()
+    left = deadline - time.monotonic()
     done = subprocess.run(
         [binary, *argv],
         capture_output=True,
@@ -73,7 +73,7 @@ def usage_of(session):
     return data if isinstance(data, dict) else {}
 
 
-def record(pane, now, deadline=None):
+def record(pane, now, deadline):
     """The ledger row for `pane`, or None when it has no agent."""
     agent = herdr("agent", "get", pane, deadline=deadline).get("agent") or {}
     session = (agent.get("agent_session") or {}).get("value")
