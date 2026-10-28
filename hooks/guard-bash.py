@@ -570,26 +570,30 @@ SHELL_SINGLE_DASH_FLAGS = {
 def shell_args(words):
     """Parses a shell's options; returns (-c mode, -s mode, -n syntax check only, operands)."""
     command_mode = stdin_mode = check_only = False
+    letter_options = os.path.basename(words[0]) in ("zsh", "ksh")
     index = 1
     while index < len(words):
         word = words[index]
         if word == "--guard-heredoc":
             index += 2
-        elif word in SHELL_OPTION_VALUES:
+        elif word in (("-o", "+o") if letter_options else SHELL_OPTION_VALUES):
             index += 2
         elif word == "--":
             index += 1
             break
-        elif word in SHELL_SINGLE_DASH_FLAGS:
+        elif word in SHELL_SINGLE_DASH_FLAGS and not letter_options:
             index += 1
         elif re.fullmatch(r"[-+][A-Za-z]+", word):
-            command_mode = command_mode or "c" in word
-            stdin_mode = stdin_mode or "s" in word
-            check_only = check_only or (word[0] == "-" and "n" in word)
-            if os.path.basename(words[0]) in ("zsh", "ksh"):
-                index += 1 + (word[-1] in "oO")
+            letters = word[1:]
+            if letter_options:
+                letters, o, name = letters.partition("o")
+                values = bool(o and not name)
             else:
-                index += 1 + sum(c in "oO" for c in word[1:])
+                values = sum(c in "oO" for c in letters)
+            command_mode = command_mode or "c" in letters
+            stdin_mode = stdin_mode or "s" in letters
+            check_only = check_only or (word[0] == "-" and "n" in letters)
+            index += 1 + values
         elif word.startswith("--"):
             index += 1
         else:
