@@ -71,6 +71,7 @@ KILL_CODE=-
 KILL_EVENT=0
 EVENTS_MAX_BYTES=65536
 CHILD_PID=
+WATCH_PID=
 SLOT_FILE=
 LOCK_HELD=0
 
@@ -141,14 +142,30 @@ emit_killed() {
 
 watch_long() {
   local pid=$1 end=$(( JOB_START + LONG_RUN )) left
+  trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM
   while is_pid_live "$pid"; do
     left=$(( end - $(date +%s) ))
     if [ "$left" -le 0 ]; then
       emit_event RUNLONG "$pid" "elapsed=$(job_elapsed)"
       return 0
     fi
-    sleep "$(( left < 30 ? left : 30 ))"
+    sleep "$(( left < 30 ? left : 30 ))" &
+    wait $!
   done
+}
+
+# Killing the watcher alone leaves its foreground sleep behind, so the watcher runs the sleep in the
+# background and its TERM trap kills it.
+start_watch() {
+  watch_long "$1" </dev/null >/dev/null 2>&1 &
+  WATCH_PID=$!
+}
+
+stop_watch() {
+  [ -n "$WATCH_PID" ] || return 0
+  kill "$WATCH_PID" 2>/dev/null || true
+  wait "$WATCH_PID" 2>/dev/null || true
+  WATCH_PID=''
 }
 
 is_pid_live() {
@@ -278,6 +295,7 @@ release_lock() {
 
 cleanup() {
   local status=$? slot_pid='' pid_group='' deadline
+  stop_watch
   [ "$LOCK_HELD" -eq 1 ] && release_lock
   [ -n "$SLOT_FILE" ] || return 0
   deadline=$(( $(date +%s) + 1 ))
@@ -370,10 +388,11 @@ take_slot() {
       fi
       release_lock
       if [ "$LONG_RUN" -gt 0 ]; then
-        watch_long "$CHILD_PID" </dev/null >/dev/null 2>&1 &
+        start_watch "$CHILD_PID"
       fi
       wait "$CHILD_PID"
       status=$?
+      stop_watch
       KILL_CODE=$status
       if [ "$status" -gt 128 ]; then
         emit_killed
