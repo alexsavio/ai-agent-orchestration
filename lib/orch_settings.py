@@ -2002,13 +2002,15 @@ def main(argv):
                     )
                 )
             )
+        elif command == "check" and len(argv) == 2:
+            check_resolved_env(os.environ)
         elif command == "names" and len(argv) == 2:
             print(" ".join(env_names()))
         else:
             print(
                 "usage: orch_settings.py global <file> | print [<file>] | repo <dir> | migrate <env> <toml> <snippet-dir> "
                 "| upgrade [--watched <global-file>] <repo-file>... [--clones <dir>...] | set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | providers [<file>] | fill-models [<file>] "
-                "| example global|repo | table global|repo | names",
+                "| example global|repo | table global|repo | check | names",
                 file=sys.stderr,
             )
             return 2

@@ -62,6 +62,12 @@ orch_read_settings() {
   eval "$out"
 }
 
+# orch_check_env: fail with the Python error when an exported value violates a patterned setting.
+orch_check_env() {
+  orch_python >/dev/null || exit 2
+  "$ORCH_LOADER_PYTHON" -I "$(orch_settings_module)" check || exit 2
+}
+
 # Loads the global config file; a variable already set in the environment wins over the file.
 orch_load_config() {
   local cfg
@@ -72,6 +78,7 @@ orch_load_config() {
   if [ ! -f "$cfg" ]; then
     [ -n "${ORCH_CONFIG:-}" ] || [ ! -f "$HOME/.claude/orchestration.env" ] ||
       orch_die "$cfg is missing and $HOME/.claude/orchestration.env is not read any more. Run install.sh to convert it."
+    orch_check_env
     return 0
   fi
   orch_read_settings global "$cfg"

@@ -94,6 +94,22 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   printf '%s\n' "$output" | grep -qxF "ORCH_CODEX_SMART_REASONING_EFFORT=high"
 }
 
+@test "an exported bad reasoning effort fails the shell loader with no config file" {
+  unset ORCH_CONFIG
+  export ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"
+  run load_settings global
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "an exported good reasoning effort passes the shell loader with no config file" {
+  unset ORCH_CONFIG
+  export ORCH_CODEX_SMART_REASONING_EFFORT="high"
+  run load_settings global
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF "ORCH_CODEX_SMART_REASONING_EFFORT=high"
+}
+
 @test "a variable set but not exported also wins over the file" {
   printf '[heavy_slots]\nmax = 2\ndir = "/from/file"\n' >"$ORCH_CONFIG"
 
