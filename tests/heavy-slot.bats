@@ -813,6 +813,14 @@ assert_nothing_left_behind() {
   assert_nothing_left_behind agent-wstop-fired 30
 }
 
+@test "stopping the long-run watcher prints nothing of its own" {
+  for n in $(seq 1 40); do
+    run "$HELPER" take agent-quiet -- true
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
 @test "a job under the long-run threshold writes no RUNLONG line" {
   ORCH_HEAVY_SLOTS_LONG_RUN=60 run "$HELPER" take agent-short -- sleep 1
   [ ! -s "$(EVENTS)" ]

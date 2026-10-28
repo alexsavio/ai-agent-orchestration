@@ -158,15 +158,15 @@ watch_long() {
 # Killing the watcher alone leaves its foreground sleep behind, so the watcher runs the sleep in the
 # background and its TERM trap kills it. After RUNLONG the watcher keeps running until the job ends or
 # stop_watch kills it, so stop_watch never signals a reaped pid.
+# The watcher is started from a subshell, so it is not a child of this shell: bash 5.2 can print
+# "wait_for: No record of process" into the job's stderr when a child dies during a command substitution.
 start_watch() {
-  watch_long "$1" </dev/null >/dev/null 2>&1 &
-  WATCH_PID=$!
+  WATCH_PID=$( (watch_long "$1" </dev/null >/dev/null 2>&1 & echo $!) )
 }
 
 stop_watch() {
   [ -n "$WATCH_PID" ] || return 0
   kill "$WATCH_PID" 2>/dev/null || true
-  wait "$WATCH_PID" 2>/dev/null || true
   WATCH_PID=''
 }
 
