@@ -27,6 +27,7 @@ CLEANUP_SECONDS = 2
 DONE_EVENTS_MAX = 200
 DONE_EVENTS_KEEP_SECONDS = 3600
 ID = re.compile(r"signal-[a-f0-9]{32}\Z")
+IDENTITY_KEYS = ("pane", "workspace", "owner")
 
 
 def directory():
@@ -58,7 +59,27 @@ def answer_path(identifier):
     return question_path(identifier).with_suffix(".answer")
 
 
-def identity():
+def worktree_of(path):
+    try:
+        result = subprocess.run(
+            ["git", "-C", path, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("GIT_")
+            },
+        )
+    except TimeoutError:
+        raise
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return os.path.realpath(result.stdout.strip()) if result.returncode == 0 else None
+
+
+def identity(recover=False):
     from watchers import command
 
     pane, workspace = (
@@ -68,12 +89,69 @@ def identity():
     if not pane or not workspace:
         raise ValueError("HERDR_PANE_ID and HERDR_WORKSPACE_ID are required")
     work = discovery.open_work(command)
-    if not any(
-        row["pane"] == pane and row["workspace"] == workspace for row in work["panes"]
-    ):
-        raise ValueError("caller pane does not belong to its workspace")
+    panes = work["panes"]
+    recovered_from = None
+    if not any(row["pane"] == pane and row["workspace"] == workspace for row in panes):
+        claimed_pane = next((row for row in panes if row["pane"] == pane), None)
+        if claimed_pane is None and recover:
+            cwd, worktree = os.getcwd(), worktree_of(os.getcwd())
+            candidates = [
+                row
+                for row in panes
+                if row.get("agent")
+                and worktree
+                and row.get("cwd")
+                and worktree_of(row["cwd"]) == worktree
+            ]
+            shared_root = any(
+                row.get("repo_root") and os.path.realpath(row["repo_root"]) == worktree
+                for row in work["workspaces"]
+            )
+            if (
+                len(candidates) == 1
+                and candidates[0].get("agent") == "codex"
+                and not shared_root
+            ):
+                recovered_from, pane, workspace = (
+                    pane,
+                    candidates[0]["pane"],
+                    candidates[0]["workspace"],
+                )
+                print(
+                    f"orch-signal: recovered stale pane {recovered_from!r} as {pane!r}",
+                    file=sys.stderr,
+                )
+            else:
+                root_detail = (
+                    "; worktree is a workspace repo_root" if shared_root else ""
+                )
+                raise ValueError(
+                    "caller pane does not belong to its workspace "
+                    f"(pane={pane!r}, workspace={workspace!r}, "
+                    f"socket={os.environ.get('HERDR_SOCKET_PATH', '<default>')!r}, "
+                    f"panes={len(panes)}, cwd={cwd!r}, worktree={worktree!r}, "
+                    f"worktree_matches={len(candidates)}{root_detail})"
+                )
+        else:
+            location = (
+                f"pane={pane!r} is in workspace={claimed_pane['workspace']!r}, "
+                f"not workspace={workspace!r}"
+                if claimed_pane
+                else f"pane={pane!r} is not live; expected workspace={workspace!r}"
+            )
+            raise ValueError(
+                "caller pane does not belong to its workspace "
+                f"({location}; recovery={'disabled' if not recover else 'unavailable'}; "
+                f"socket={os.environ.get('HERDR_SOCKET_PATH', '<default>')!r}, "
+                f"panes={len(panes)})"
+            )
     row = next((row for row in work["workspaces"] if row["id"] == workspace), {})
-    return dict(pane=pane, workspace=workspace, owner=row.get("owner"))
+    return dict(
+        pane=pane,
+        workspace=workspace,
+        owner=row.get("owner"),
+        **({"recovered_from": recovered_from} if recovered_from else {}),
+    )
 
 
 def worker_identity(ident):
@@ -87,7 +165,7 @@ def record_signal(ident, kind, new_job=False, **fields):
     with answers_lock():
         path, now = pane_path(ident["pane"]), time.time()
         old = read(path)
-        same = old and all(old.get(key) == ident[key] for key in ident)
+        same = old and all(old.get(key) == ident[key] for key in IDENTITY_KEYS)
         if same and not new_job:
             if old["kind"] == "done":
                 if kind != "done":
@@ -407,8 +485,13 @@ def event_line(record):
         else ("question", "options")
     )
     line = f"WORKER {record['kind'].upper()} {record['pane']} owner={record['owner']} id={record['id']} workspace={record['workspace']}"
-    return line + "".join(
+    line += "".join(
         f" {key}=" + " ".join(str(record.get(key, "")).split()) for key in fields
+    )
+    return line + (
+        f" recovered_from={record['recovered_from']}"
+        if record.get("recovered_from")
+        else ""
     )
 
 
@@ -455,7 +538,7 @@ def main():
                 try:
                     with runtime.deadline(args.timeout, "orch-signal ask", soft=True):
                         record = new_question(
-                            identity(),
+                            identity(recover=True),
                             args.question,
                             args.options,
                             args.timeout,
@@ -495,7 +578,7 @@ def main():
         else:
             fields = vars(args).copy()
             fields.pop("action")
-            record_signal(identity(), args.action, **fields)
+            record_signal(identity(recover=True), args.action, **fields)
         return 0
     except (OSError, ValueError, discovery.Unavailable) as error:
         print(f"orch-signal: {error}", file=sys.stderr)

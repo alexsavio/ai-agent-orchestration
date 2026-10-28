@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "vitest";
+import { afterEach, test, vi } from "vitest";
 import type * as Background from "#/background";
 import { MAX_PANE_LOOKUPS } from "#/core";
 import type { HostRequest, Meta } from "#/types";
@@ -26,6 +26,7 @@ const {
 const realNow = Date.now;
 
 afterEach(() => {
+  vi.restoreAllMocks();
   Date.now = realNow;
   world.hostSettings = CONFIGURED;
 });
@@ -441,7 +442,7 @@ test("a restarted worker restores ownership before grouping persisted PR metadat
   world.store = {
     owners: { "acme/webapp:feature": "Finder" },
     meta: {
-      "acme/webapp#7": { state: "OPEN", headRefName: "feature" },
+      "acme/webapp#7": { state: "OPEN", title: "Feature", headRefName: "feature" },
     },
   };
 
@@ -499,7 +500,9 @@ function watchOwnersWrite(title: string) {
   return { fresh, restore };
 }
 
-const OPEN_FEATURE: Meta = { "acme/webapp#7": { state: "OPEN", headRefName: "feature" } };
+const OPEN_FEATURE: Meta = {
+  "acme/webapp#7": { state: "OPEN", title: "Feature", headRefName: "feature" },
+};
 
 test("a delayed persisted restore cannot overwrite fresh ownership from a check", async () => {
   world.tabs = [{ id: 1, url: `${PR}/7`, windowId: 1, groupId: -1 }];
@@ -652,6 +655,8 @@ test("a pane lookup is one host request for at most the cap; none for no heads",
 
 test("focusing a pane sends repo and branch; a host error rejects with its text", async () => {
   const sent: HostRequest[] = [];
+  const info = vi.spyOn(console, "info");
+  const warn = vi.spyOn(console, "warn");
 
   world.nativeHandler = async (message) => {
     sent.push(message);
@@ -668,4 +673,199 @@ test("focusing a pane sends repo and branch; a host error rejects with its text"
   });
 
   await assert.rejects(focusPane({ repo: "acme/webapp", branch: "x" }), /no Herdr pane/);
+
+  assert.equal(info.mock.calls.filter((call) => call[0] === "PR tabs focusPane send").length, 2);
+  assert.equal(info.mock.calls.filter((call) => call[0] === "PR tabs focusPane reply").length, 1);
+  assert.equal(warn.mock.calls[0]?.[0], "PR tabs focusPane failed");
+});
+
+test("Open reviews requires only the organization setting", async () => {
+  world.hostSettings = { ...CONFIGURED, org: "", openAll: "" };
+  const worker = await freshWorker("review-org-hint");
+
+  assert.deepEqual(await worker.openReviews(), { error: "Set pr_tabs.org in orchestration.toml" });
+  assert.deepEqual(await worker.openAll(), {
+    error: "Set pr_tabs.org and pr_tabs.open_all in orchestration.toml",
+  });
+});
+
+test("row focus reuses an existing tab and never creates a replacement after it closes", async () => {
+  const worker = await freshWorker("row-focus");
+  world.tabs = [{ id: 1, url: `${PR}/7/files`, windowId: 2, groupId: -1 }];
+  world.created = [];
+
+  assert.deepEqual(await worker.focusPr("acme/webapp#7"), { focused: "acme/webapp#7" });
+  assert.equal(world.tabs[0]?.active, true);
+  world.tabs = [];
+  assert.deepEqual(await worker.focusPr("acme/webapp#7"), {
+    error: "That PR tab is no longer open.",
+  });
+  assert.equal(world.created.length, 0);
+});
+
+test("closePr removes only the selected PR tab without opening or focusing", async () => {
+  const worker = await freshWorker("close-pr");
+  world.tabs = [
+    { id: 1, url: `${PR}/7` },
+    { id: 2, url: `${PR}/8` },
+  ];
+  world.created = [];
+  const focus = vi.spyOn(fakeChrome.windows, "update");
+  try {
+    assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 1 });
+    assert.deepEqual(ids(), [2]);
+    assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 0 });
+    assert.equal(world.created.length, 0);
+    assert.equal(focus.mock.calls.length, 0);
+  } finally {
+    focus.mockRestore();
+  }
+});
+
+test("closePr rechecks the tab id so a navigated tab is never closed", async () => {
+  const worker = await freshWorker("close-pr-navigation");
+  world.tabs = [{ id: 1, url: `${PR}/7` }];
+  const get = vi
+    .spyOn(fakeChrome.tabs, "get")
+    .mockImplementation(async () => ({ id: 1, url: `${PR}/8` }));
+  try {
+    assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 0 });
+    assert.deepEqual(ids(), [1]);
+  } finally {
+    get.mockRestore();
+  }
+});
+
+test("closePr closes the selected row's tab across duplicate groups and never substitutes", async () => {
+  const worker = await freshWorker("close-selected-row");
+  world.tabs = [
+    { id: 1, url: `${PR}/7`, windowId: 1, groupId: 10 },
+    { id: 2, url: `${PR}/7`, windowId: 2, groupId: 9 },
+  ];
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 2), { closed: 1 });
+  assert.deepEqual(ids(), [1]);
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 2), { closed: 0 });
+  assert.deepEqual(ids(), [1]);
+});
+
+test("closePr uses pending URLs for loading tabs and pending navigation away", async () => {
+  const worker = await freshWorker("close-pending-url");
+  world.tabs = [{ id: 1, url: "", pendingUrl: `${PR}/7` }];
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 1), { closed: 1 });
+  assert.deepEqual(ids(), []);
+  world.tabs = [{ id: 2, url: `${PR}/7`, pendingUrl: "https://example.com/" }];
+  assert.deepEqual(await worker.closePr("acme/webapp#7", 2), { closed: 0 });
+  assert.deepEqual(ids(), [2]);
+});
+
+test("goTo opens every item of a pasted list in order, each once, in the one picked repo", async () => {
+  const multi = await multiRepoWorker("list-open");
+
+  world.tabs = [
+    { id: 1, url: "https://github.com/acme/api/pull/5/files", windowId: 1, groupId: -1 },
+  ];
+
+  const reply = await multi.goTo("7, 5 8\nhttps://github.com/acme/webapp/pull/9 7 docs#3", "api");
+
+  assert.deepEqual(reply, { focused: "acme/docs#3" });
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.url),
+    [
+      "https://github.com/acme/api/pull/5/files",
+      "https://github.com/acme/api/pull/7",
+      "https://github.com/acme/api/pull/8",
+      "https://github.com/acme/webapp/pull/9",
+      "https://github.com/acme/docs/pull/3",
+    ],
+  );
+});
+
+test("goTo opens the valid items of a list and names the ones that failed", async () => {
+  const multi = await multiRepoWorker("list-partial");
+
+  assert.deepEqual(await multi.goTo("7 12a foo other#1 8"), {
+    error: "Couldn't open: 12a, foo, other#1",
+    tabsOpened: 2,
+  });
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.url),
+    ["https://github.com/acme/webapp/pull/7", "https://github.com/acme/webapp/pull/8"],
+  );
+});
+
+test("goTo opens nothing for a list above the cap", async () => {
+  const multi = await multiRepoWorker("list-cap");
+  const over = Array.from({ length: 21 }, (_, index) => index + 1).join(", ");
+  const atCap = Array.from({ length: 20 }, (_, index) => index + 1).join(", ");
+
+  assert.deepEqual(await multi.goTo(over), { error: "Too many PRs. Paste at most 20 at a time." });
+  assert.deepEqual(world.tabs, []);
+  assert.deepEqual(await multi.goTo(atCap), { focused: "acme/webapp#20" });
+  assert.equal(world.tabs.length, 20);
+});
+
+test("a one-item list behaves as a single goTo", async () => {
+  const multi = await multiRepoWorker("list-single");
+
+  assert.deepEqual(await multi.goTo("other#1,"), { error: "Not a acme PR number or URL" });
+  assert.deepEqual(await multi.goTo(" 7 "), { opened: "acme/webapp#7" });
+});
+
+test("a list names the missing setting instead of listing every item as failed", async () => {
+  world.hostSettings = { ...CONFIGURED, org: "" };
+
+  const noOrg = await freshWorker("list-missing-org");
+
+  assert.deepEqual(await noOrg.goTo("7 8"), { error: "Set pr_tabs.org in orchestration.toml" });
+});
+
+test("a list opens its new tabs in the background and a failed item does not stop the rest", async () => {
+  const multi = await multiRepoWorker("list-quiet");
+
+  world.tabs = [{ id: 1, url: `${PR}/5`, windowId: 2, groupId: -1, active: false }];
+
+  assert.deepEqual(await multi.goTo("5 foo 8"), { error: "Couldn't open: foo", tabsOpened: 1 });
+  assert.equal(tabWithId(1).active, false, "an open PR is not focused while an item failed");
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.active),
+    [false, false],
+  );
+  assert.equal(world.tabs.length, 2);
+});
+
+test("a list focuses its last PR once every item opened", async () => {
+  const multi = await multiRepoWorker("list-focus-last");
+
+  assert.deepEqual(await multi.goTo("7 8"), { focused: "acme/webapp#8" });
+  assert.equal(world.tabs.length, 2);
+  assert.equal(world.tabs[1]?.active, true);
+});
+
+test("a list with a URL still opens when bare numbers have no repo to go to", async () => {
+  world.tabs = [];
+  world.store = {};
+  world.hostSettings = { ...CONFIGURED, defaultRepo: "", repos: [] };
+
+  const noRepo = await freshWorker("list-no-repo");
+
+  assert.deepEqual(await noRepo.goTo(`7 ${PR}/8`), { error: "Couldn't open: 7", tabsOpened: 1 });
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.url),
+    [`${PR}/8`],
+  );
+  assert.deepEqual(await noRepo.goTo("7 9"), {
+    error: "Set pr_tabs.default_repo in orchestration.toml",
+  });
+});
+
+test("a list whose closing focus rejects reports the error and the tabs it opened", async () => {
+  const multi = await multiRepoWorker("list-focus-rejects");
+
+  vi.spyOn(chrome.windows, "update").mockRejectedValue(new Error("window gone"));
+
+  const reply = await multi.goTo("7 8");
+
+  assert.ok("error" in reply && reply.error.includes("window gone"));
+  assert.equal("tabsOpened" in reply && reply.tabsOpened, 2);
+  assert.equal(world.tabs.length, 2);
 });

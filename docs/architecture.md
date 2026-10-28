@@ -162,9 +162,9 @@ Details, keys, delivery guarantees and thresholds: [`coordinator/watchers/README
 Many sessions share one machine, and running out of open file handles has crashed it. Details and commands: [`docs/heavy-slot.md`](heavy-slot.md).
 
 - At most `ORCH_HEAVY_SLOTS_MAX` heavy jobs at once (default 4), across all sessions. Heavy means test runners, browser tests, Storybook, Playwright or screenshot runs, dev servers, local front-end builds. One test file run by one worker is not heavy.
-- Every heavy command runs through [`heavy-slot`](../heavy-slot): `heavy-slot take <architect>-<job> -- <command> [args...]`. It admits the job atomically, so two jobs cannot both take the last slot.
+- Every heavy command runs through [`heavy-slot`](../heavy-slot): `heavy-slot take <architect>-<job> [--note <what the job is>] -- <command> [args...]`. It admits the job atomically, so two jobs cannot both take the last slot.
 - A slot is a file `~/.claude/heavy-slots/<owner>-<job>` holding the pid of the child. The helper writes it and removes it on completion or a handled signal. A slot is a file, never a directory.
-- `heavy-slot count` and `heavy-slot list` show live slots, with names, pids, ages and stale records.
+- `heavy-slot count` and `heavy-slot list` show live slots, with names, pids, ages, notes and stale records.
 - When the cap is full, `take` waits up to 1800 seconds and then prints `NEED SLOT`. The worker ends its turn with a plain `NEED SLOT: …` line and stops; `SLOT: go` from the architect means run now. A worker never opens an interactive question box.
 - A worker takes its slot itself. It does not wait for the architect.
 - Stale slot files raise `STALESLOT`, directories raise `SLOTDIR`, from the audit. Too many slots or busy worktrees raise `BALANCE`.

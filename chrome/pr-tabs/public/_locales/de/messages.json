@@ -30,12 +30,21 @@
     "message": "Keine Repositories verfügbar"
   },
   "openAllButton": {
+    "message": "Alle öffnen"
+  },
+  "openAllHint": {
     "message": "Alle meine offenen PRs öffnen"
   },
   "checkNowButton": {
+    "message": "Gemergte schließen"
+  },
+  "checkNowHint": {
     "message": "Gemergte PRs schließen"
   },
   "closeDuplicatesButton": {
+    "message": "Duplikate schließen"
+  },
+  "closeDuplicatesHint": {
     "message": "Doppelte Tabs schließen"
   },
   "groupsLabel": {
@@ -262,6 +271,22 @@
       }
     }
   },
+  "errCouldntOpen": {
+    "message": "Konnte nicht geöffnet werden: $ITEMS$",
+    "placeholders": {
+      "items": {
+        "content": "$1"
+      }
+    }
+  },
+  "errTooManyPrs": {
+    "message": "Zu viele PRs. Füge höchstens $MAX$ auf einmal ein.",
+    "placeholders": {
+      "max": {
+        "content": "$1"
+      }
+    }
+  },
   "errNoAnswer": {
     "message": "Keine Antwort vom Orch-Tabs-Service-Worker. Lade die Erweiterung unter chrome://extensions neu."
   },
@@ -316,5 +341,58 @@
   },
   "agentWaiting": {
     "message": "wartet"
+  },
+  "openReviewsButton": {
+    "message": "Reviews öffnen"
+  },
+  "openReviewsHint": {
+    "message": "PRs öffnen, für die meine Review angefordert wurde"
+  },
+  "openingProgress": {
+    "message": "$OPENED$ von $PLANNED$ geöffnet",
+    "placeholders": {
+      "opened": {
+        "content": "$1"
+      },
+      "planned": {
+        "content": "$2"
+      }
+    }
+  },
+  "pendingSearching": {
+    "message": "Suche…"
+  },
+  "errPrTabGone": {
+    "message": "Dieser PR-Tab ist nicht mehr geöffnet."
+  },
+  "prSearchLabel": {
+    "message": "PR-Tabs durchsuchen"
+  },
+  "prSearchEmpty": {
+    "message": "Keine passenden PRs"
+  },
+  "prSearchCount_one": {
+    "message": "$COUNT$ passende PR",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prSearchCount_other": {
+    "message": "$COUNT$ passende PRs",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closePrTab": {
+    "message": "Tab $PR$ schließen",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
   }
 }

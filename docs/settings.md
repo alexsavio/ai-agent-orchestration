@@ -55,6 +55,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `heavy_slots.max` | `ORCH_HEAVY_SLOTS_MAX` | `4` | Most heavy jobs at once on the machine |
 | `heavy_slots.dir` | `ORCH_HEAVY_SLOTS_DIR` | empty | Slot directory; empty means ~/.claude/heavy-slots |
 | `heavy_slots.kill_grace` | `ORCH_HEAVY_SLOTS_KILL_GRACE` | `10` | Seconds a stopped job gets before it is killed |
+| `heavy_slots.long_run` | `ORCH_HEAVY_SLOTS_LONG_RUN` | `1800` | Seconds a heavy job runs before one RUNLONG line reaches the feed; 0 turns it off |
 | `providers.enabled` | `ORCH_PROVIDERS` | empty | Worker families this machine uses (claude, codex, pi); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi when a pi model is set. A family left out is never started or asked for, and its model settings may stay empty |
 | `providers.claude` | `ORCH_CLAUDE_TIERS` | `["haiku", "sonnet", "opus", "fable"]` | Claude worker tiers the architects may pick (haiku, sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings |
 | `models.coordinator` | `ORCH_COORDINATOR_MODEL` | `"claude-opus-5-5"` | Model of the Coordinator |
