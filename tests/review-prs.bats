@@ -275,7 +275,7 @@ dispatch() {
 
 @test "the reviewer start denies the file-edit tools and the template pins the findings table" {
   # shellcheck disable=SC2016 # The backticks are literal skill text.
-  grep -qF -- 'a Claude reviewer start ends with `--disallowedTools Edit Write NotebookEdit`' "$ROOT/skills/architect/references/dispatch.md"
+  grep -qF -- 'a Claude reviewer start ends with `--disallowedTools "Edit(./**)" NotebookEdit`' "$ROOT/skills/architect/references/dispatch.md"
   grep -qF -- 'Brief the reviewer with [references/reviewer.md](references/reviewer.md)' "$ROOT/skills/architect/SKILL.md"
   grep -qF -- '| claim | file:line opened | verdict | evidence | rung | fix the author can apply |' "$ROOT/skills/architect/references/reviewer.md"
 }

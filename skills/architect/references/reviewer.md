@@ -31,4 +31,4 @@ Below rung 4, write `unproven`, never `safe`.
 
 ## Tool block
 
-Start the reviewer with `--disallowedTools Edit Write NotebookEdit` (see [dispatch.md](dispatch.md)). Bash can still write files, so this is a tripwire, not a sandbox: it stops an accidental edit, not a determined one. Check `git status` in the reviewed worktree after the review.
+Start the reviewer in the reviewed worktree with `--disallowedTools "Edit(./**)" NotebookEdit` (see [dispatch.md](dispatch.md)). The path is relative to the pane's directory, and an `Edit(...)` rule covers the Write tool too, so the reviewer cannot change the tree it reviews through the file tools, yet still writes its report to the path outside it. A bare `Edit Write NotebookEdit` would also remove the Write tool the report needs. Bash can still write files, so this is a tripwire, not a sandbox: it stops an accidental edit, not a determined one. Check `git status` in the reviewed worktree after the review.
