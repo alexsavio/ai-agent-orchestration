@@ -136,23 +136,25 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
 }
 
-@test "a bad Claude effort fails the shell loader with no config file, exported or not; a level and empty pass" {
-  unset ORCH_CONFIG
-  for name in ORCH_COORDINATOR_EFFORT ORCH_ARCHITECT_EFFORT ORCH_WORKER_EFFORT ORCH_REVIEWER_EFFORT; do
-    for bad in "high xhigh" High; do
-      # shellcheck disable=SC2016 # The child shell expands these.
-      run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; export "$2=$3"; orch_load_config' _ "$ROOT" "$name" "$bad"
-      [ "$status" -eq 2 ]
-      printf '%s\n' "$output" | grep -qF "($name): unknown value"
-      # shellcheck disable=SC2016 # The child shell expands these.
-      run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; printf -v "$2" %s "$3"; orch_load_config' _ "$ROOT" "$name" "$bad"
-      [ "$status" -eq 2 ]
-      printf '%s\n' "$output" | grep -qF "($name): unknown value"
-    done
-    for good in xhigh ""; do
-      # shellcheck disable=SC2016 # The child shell expands these.
-      run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; export "$2=$3"; orch_load_config' _ "$ROOT" "$name" "$good"
-      [ "$status" -eq 0 ]
+@test "a bad Claude effort fails the shell loader with or without a config file, exported or not; a level and empty pass" {
+  for config in file none; do
+    if [ "$config" = file ]; then every_value global >"$ORCH_CONFIG"; else unset ORCH_CONFIG; fi
+    for name in ORCH_COORDINATOR_EFFORT ORCH_ARCHITECT_EFFORT ORCH_WORKER_EFFORT ORCH_REVIEWER_EFFORT; do
+      for bad in "high xhigh" High; do
+        # shellcheck disable=SC2016 # The child shell expands these.
+        run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; export "$2=$3"; orch_load_config' _ "$ROOT" "$name" "$bad"
+        [ "$status" -eq 2 ] || { echo "$config exported $name=$bad: $status"; false; }
+        printf '%s\n' "$output" | grep -qF "($name): unknown value"
+        # shellcheck disable=SC2016 # The child shell expands these.
+        run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; printf -v "$2" %s "$3"; orch_load_config' _ "$ROOT" "$name" "$bad"
+        [ "$status" -eq 2 ] || { echo "$config unexported $name=$bad: $status"; false; }
+        printf '%s\n' "$output" | grep -qF "($name): unknown value"
+      done
+      for good in xhigh ""; do
+        # shellcheck disable=SC2016 # The child shell expands these.
+        run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; export "$2=$3"; orch_load_config' _ "$ROOT" "$name" "$good"
+        [ "$status" -eq 0 ] || { echo "$config good $name=$good: $status"; false; }
+      done
     done
   done
 }

@@ -66,7 +66,7 @@ orch_read_settings() {
   eval "$out"
 }
 
-# orch_check_env: fail with the Python error when an exported value violates a patterned setting.
+# orch_check_env: fail with the Python error when a set value violates its setting's pattern or choices.
 orch_check_env() {
   orch_python >/dev/null || exit 2
   # shellcheck disable=SC2086 # One name per word.
