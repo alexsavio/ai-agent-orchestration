@@ -54,7 +54,7 @@ Before starting your Coordinator session, read [references/startup.md](reference
 - The user to-do list is generated from every status file at `~/.claude/coordinator/user-todo.md`; do not hand-maintain it. Architects own their `## Waits on the user` items and each target is a session name or GitHub URL.
 - The user's to-do view (`user-todo-view.py`) has Ignore and Reminder buttons; Enter focuses the selected item's architect. Ignore writes a `todo: TODO IGNORED <architect>: <text>` feed line: the user is not taking that item, so tell that architect to drop that wait item; the item returns only if its text changes.
 - The to-do pane opens at Coordinator start (`~/.claude/coordinator/todo-pane.sh`, see startup); nobody opens it by hand.
-- Every user question gets a question pane through `ask-user-question <slug> <file>`; architects relay their user questions through the Coordinator, which owns those panes and their answers.
+- Every user question gets a question pane through `ask-user-question <slug> <file>`; architects relay their user questions through the Coordinator, which owns those panes and their answers. The Coordinator opens the asker's question file unchanged — never rewords the question or its options — and relays the answer line to the asker verbatim as `<slug>: <id> "<label>"`.
 - "pause X" from the user: add a line `Paused: <reason>` to `~/.claude/coordinator/status/<X>.md`; "unpause X": remove it. The focus check skips a paused architect.
 - Do not broadcast to parked or idle architects. Put broadcast rules in `~/.claude/coordinator/notes.md`; architects read it at the start of their next real turn and on recycle.
 

@@ -186,6 +186,13 @@ SETTINGS = [
         "Seconds a stopped job gets before it is killed",
     ),
     _g(
+        "heavy_slots.long_run",
+        "ORCH_HEAVY_SLOTS_LONG_RUN",
+        "int",
+        1800,
+        "Seconds a heavy job runs before one RUNLONG line reaches the feed; 0 turns it off",
+    ),
+    _g(
         "providers.enabled",
         "ORCH_PROVIDERS",
         "list",
