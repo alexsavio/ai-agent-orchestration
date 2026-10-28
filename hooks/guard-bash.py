@@ -679,14 +679,17 @@ def heredoc_bodies(words):
     ]
 
 
-ECHO_OPTIONS = re.compile(r"-[neE]+$")
+ECHO_OPTIONS = re.compile(r"-[neE]*$")
 ESCAPE = re.compile(
     r"\\(0[0-7]{0,3}|[1-7][0-7]{0,2}|x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8}|.)",
     re.S,
 )
 ESCAPED = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n"}
-ESCAPED |= {"r": "\r", "t": "\t", "v": "\v", "\\": "\\"}
-PRINTF_CONVERSION = re.compile(r"%([-+ #0]*)(\*|\d+)?(\.\*|\.\d*)?([a-zA-Z%])")
+ESCAPED |= {"r": "\r", "t": "\t", "v": "\v", "\\": "\\", '"': '"', "'": "'", "?": "?"}
+PRINTF_CONVERSION = re.compile(
+    r"%(\d+\$)?([-+ #0]*)(\*|\d+)?(\.\*|\.\d*)?[hlLjqtz]*([a-zA-Z%])"
+)
+INTEGER = re.compile(r"\s*([-+]?)(0[xX][0-9a-fA-F]+|\d+)")
 
 
 def unescape(text):
@@ -704,45 +707,49 @@ def unescape(text):
     return ESCAPE.sub(escape, text)
 
 
-def printf_value(flags, width, precision, conversion, arg):
+def printf_value(flags, precision, conversion, arg):
     if conversion in "diuxXo":
-        try:
-            number = int(arg, 0)
-        except ValueError:
+        integer = INTEGER.match(arg)
+        if integer:
+            base = 16 if integer[2][1:2] in "xX" else 10
+            number = int(integer[1] + integer[2], base)
+        else:
             number = ord(arg[1]) if arg[:1] in "'\"" and len(arg) > 1 else 0
-        spec = "d" if conversion in "iu" else conversion
-        value = number
-    else:
-        spec = "s"
-        value = {"b": unescape, "q": shlex.quote, "c": lambda arg: arg[:1]}.get(
-            conversion, str
-        )(arg)
-    return ("%" + flags + width + precision + spec) % value
+        return ("%" + flags + ("d" if conversion in "iu" else conversion)) % number
+    value = {"b": unescape, "q": shlex.quote, "c": lambda arg: arg[:1]}.get(
+        conversion, str
+    )(arg)
+    return ("%" + flags + precision + "s") % value
 
 
 def printf_text(format_, args):
     """Returns the text printf writes for a format and its arguments, and the arguments left over when a conversion is not modelled."""
-    out, used, modelled = [], 0, True
+    out, used, modelled, size = [], 0, True, 0
     while True:
-        start, position = used, 0
+        start, position, first = used, 0, len(out)
         for match in PRINTF_CONVERSION.finditer(format_):
-            flags, width, precision, conversion = match.groups(default="")
+            place, flags, width, precision, conversion = match.groups(default="")
             out.append(unescape(format_[position : match.start()]))
             position = match.end()
             if conversion == "%":
                 out.append("%")
                 continue
+            if place:
+                used = max(int(place[:-1]) - 1, 0)
             used += (width == "*") + (precision == ".*")
             arg = args[used] if used < len(args) else ""
             used += 1
             try:
                 if "*" in width + precision or conversion not in "sbcdiuxXoq":
                     raise ValueError(conversion)
-                out.append(printf_value(flags, width, precision, conversion, arg))
+                out.append(printf_value(flags, precision, conversion, arg))
             except (ValueError, TypeError):
                 modelled = False
                 out.append(arg)
         out.append(unescape(format_[position:]))
+        size += sum(map(len, out[first:]))
+        if size > SCRIPT_SCAN_LIMIT:
+            return "".join(out)[:SCRIPT_SCAN_LIMIT], False
         if used >= len(args) or used == start:
             return "".join(out), modelled
 
@@ -1055,9 +1062,14 @@ def written_text(words, redirects):
         for i, word in enumerate(words[1:], 1)
         if word != "--guard-heredoc" and words[i - 1] != "--guard-heredoc"
     ]
-    targets = [target for op, target in redirects if op in WRITE_OPERATORS]
+    targets = [
+        (target, op.endswith(">>")) for op, target in redirects if op in WRITE_OPERATORS
+    ]
     if name == "tee":
-        targets += file_operands(args)
+        files = file_operands(args)
+        options = args[: len(args) - len(files)]
+        append = any(re.fullmatch(r"-[a-z]*a[a-z]*|--append", arg) for arg in options)
+        targets += [(file, append) for file in files]
     if heredocs:
         return "\n".join(heredocs), targets
     if name in ("echo", "printf"):
@@ -1125,8 +1137,10 @@ def runs(entries, disabled):
             continue
         name = os.path.basename(words[0])
         text, targets = written_text(words, redirects)
-        for target in targets:
-            written[run_key(target, where, env)] = text
+        for target, append in targets:
+            key = run_key(target, where, env)
+            before = written_or_disk_text(key, written) if append else ""
+            written[key] = before + "\n" + text if before else text
         if "guard_inline_shell" not in disabled:
             for text in shell_programs(words):
                 yield "an inline shell program", text, where, None

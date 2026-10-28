@@ -1096,6 +1096,105 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "tee -- -guard.sh <<'EOF'\nkill -9 -1\nEOF\nsh -- -guard.sh",
         ),
         ("printf %s written script", "printf '%s' 'pkill -f vite' > k.sh; bash k.sh"),
+        ("echo after a lone dash", "echo - 'pkill -f vite' | sh"),
+        (
+            "printf format reuse past the scan budget",
+            "printf '"
+            + "#" * 4000
+            + "%s\\n' "
+            + "a " * 150
+            + "| sh; echo 'pkill -f vite' | sh",
+        ),
+        (
+            "printf reused format, kill argument past the cut",
+            "printf '"
+            + " " * 4000
+            + "%s\\n' "
+            + "a " * 99
+            + "'pkill -f vite' "
+            + "a " * 50
+            + "| sh",
+        ),
+        ("printf argument position 2", "printf 'kill -9 %2$s\\n' x -1 | sh"),
+        (
+            "printf arguments swapped by position",
+            "printf '%2$s %1$s\\n' -1 'kill -9' | sh",
+        ),
+        (
+            "printf one argument repeated past the cut",
+            "printf '" + "%1$s" * 100 + "' " + "a" * 60000 + " | sh; bash kills.sh",
+        ),
+        ("printf %d with a leading blank", "printf 'kill -9 %d\\n' ' -1' | sh"),
+        ("printf single quote escape", "printf \"p\\'\\'kill -f vite\\n\" | sh"),
+        (
+            "tee --append to a script on disk",
+            "tee --append kills.sh <<'EOF'\necho done\nEOF\nbash kills.sh",
+        ),
+        (
+            "tee combined option append",
+            "tee -ia kills.sh <<'EOF'\necho done\nEOF\nbash kills.sh",
+        ),
+        (
+            "append of a kill to a clean script",
+            "echo 'pkill -f vite' >> clean.sh; bash clean.sh",
+        ),
+        ("printf length modifier", "printf 'kill -9 %ld\\n' -1 | sh"),
+        ("printf argument position", "printf '%1$s' 'pkill -f vite' | sh"),
+        ("printf %d with leading zeros", "printf 'kill -9 %d\\n' -01 | sh"),
+        ("printf %d with a decimal point", "printf 'kill -9 %d\\n' -1.0 | sh"),
+        (
+            "printf quote escape in the format",
+            "env printf 'p\\\"\\\"kill -f vite\\n' | sh",
+        ),
+        (
+            "printf width past the scan budget",
+            "printf 'pkill -f vite\\n%600000s' x | sh",
+        ),
+        (
+            "printf precision past the scan budget",
+            "printf 'pkill -f vite\\n%.600000d' 1 | sh",
+        ),
+        (
+            "printf width too big to build",
+            "printf '%9223372036854775807s' x; bash kills.sh",
+        ),
+        ("append to a script on disk", "echo 'echo done' >> kills.sh; bash kills.sh"),
+        ("append then shell stdin", "echo 'echo done' >> kills.sh; sh < kills.sh"),
+        (
+            "tee append to a script on disk",
+            "tee -a kills.sh <<'EOF'\necho done\nEOF\nbash kills.sh",
+        ),
+        (
+            "append after a written kill",
+            "echo 'pkill -f vite' > w.sh; echo 'echo done' >> w.sh; bash w.sh",
+        ),
+        (
+            "printf width argument before the kill line",
+            "printf '%*s\\nkill -9 %s\\n' 1 x -1 | sh",
+        ),
+        (
+            "printf argument position on its own line",
+            "printf '%1$s\\n' 'pkill -f vite' | sh",
+        ),
+        ("printf %d with a hex number", "printf 'kill -9 %d\\n' -0x1 | sh"),
+        (
+            "wrapper alone piped to a shell, then a script",
+            "command | sh; bash kills.sh",
+        ),
+        ("printf by path", "/usr/bin/printf '%s' 'pkill -f vite' | sh"),
+        ("echo -E piped to a shell", "echo -E 'pkill -f vite' | sh"),
+        (
+            "printf octal escape without a leading zero",
+            "printf '\\160kill -f vite\\n' | sh",
+        ),
+        ("printf octal newline", "printf 'echo hi\\12pkill -f vite\\n' | sh"),
+        ("printf one-digit hex newline", "printf 'echo hi\\xapkill -f vite\\n' | sh"),
+        ("printf flag on %s", "printf '%-s' 'pkill -f vite' | sh"),
+        ("printf width argument taken in place", "printf 'kill -9 %*s\\n' 0 -1 | sh"),
+        (
+            "printf format without conversions and an argument",
+            "printf 'pkill -f vite\\n' x | sh",
+        ),
         (
             "printf format with the kill operand as an argument",
             "printf 'kill -9 %s\\n' -1 > k.sh; bash k.sh",
@@ -1310,6 +1409,12 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "printf '%s\\n' 'echo hi' > k.sh; bash k.sh",
         ),
         ("echo -e of a kill, never run", "echo -e 'pkill -f vite' > notes.md"),
+        ("overwrite of a script on disk", "echo 'echo hi' > kills.sh; bash kills.sh"),
+        ("echo a lone dash", "echo - hi | sh"),
+        (
+            "printf width and precision",
+            "printf '%-10s|%5d|%.2s\\n' a 3 xyz > table.txt",
+        ),
         (
             "tee after the option terminator, never run",
             "tee -- -notes.md <<'EOF'\npkill -f vite\nEOF",
