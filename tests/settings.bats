@@ -110,6 +110,38 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   printf '%s\n' "$output" | grep -qxF "ORCH_CODEX_SMART_REASONING_EFFORT=high"
 }
 
+@test "an unexported bad reasoning effort fails the shell loader" {
+  every_value global >"$ORCH_CONFIG"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"; orch_load_config' _ "$ROOT"
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "an unexported bad reasoning effort fails the shell loader with no config file" {
+  unset ORCH_CONFIG
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"; orch_load_config' _ "$ROOT"
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "an unexported good reasoning effort still wins over the file" {
+  every_value global >"$ORCH_CONFIG"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high"; orch_load_config; echo "$ORCH_CODEX_SMART_REASONING_EFFORT"' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "high" ]
+}
+
+@test "the loader leaves an unexported reasoning effort unexported in the caller" {
+  every_value global >"$ORCH_CONFIG"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high"; orch_load_config; declare -p ORCH_CODEX_SMART_REASONING_EFFORT' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != "declare -x "* ]]
+}
+
 @test "a variable set but not exported also wins over the file" {
   printf '[heavy_slots]\nmax = 2\ndir = "/from/file"\n' >"$ORCH_CONFIG"
 

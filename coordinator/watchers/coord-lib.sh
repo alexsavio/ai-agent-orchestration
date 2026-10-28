@@ -58,14 +58,22 @@ orch_set_default() {
 orch_read_settings() {
   local out
   orch_python >/dev/null || exit 2
-  out=$("$ORCH_LOADER_PYTHON" -I "$(orch_settings_module)" "$@") || exit 2
+  # shellcheck disable=SC2086 # One name per word.
+  out=$(
+    for name in $ORCH_SETTINGS; do [ -z "${!name+x}" ] || export "${name?}"; done
+    "$ORCH_LOADER_PYTHON" -I "$(orch_settings_module)" "$@"
+  ) || exit 2
   eval "$out"
 }
 
 # orch_check_env: fail with the Python error when an exported value violates a patterned setting.
 orch_check_env() {
   orch_python >/dev/null || exit 2
-  "$ORCH_LOADER_PYTHON" -I "$(orch_settings_module)" check || exit 2
+  # shellcheck disable=SC2086 # One name per word.
+  (
+    for name in $ORCH_SETTINGS; do [ -z "${!name+x}" ] || export "${name?}"; done
+    "$ORCH_LOADER_PYTHON" -I "$(orch_settings_module)" check
+  ) || exit 2
 }
 
 # Loads the global config file; a variable already set in the environment wins over the file.
