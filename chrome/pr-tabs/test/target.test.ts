@@ -26,6 +26,8 @@ import {
   tabUpdateMatters,
   parsePrUrl,
   parseTarget,
+  splitTargets,
+  hasBareNumber,
   summarize,
 } from "#/core";
 import { duplicateText, summaryText } from "#/texts";
@@ -123,12 +125,14 @@ const SUMMARIZED: Summary = {
   prs: 4,
   groups: [
     {
+      id: "7",
       title: "Search",
       color: "blue",
       count: 2,
       prs: [
-        { key: "acme/webapp#1", label: "webapp#1", title: "Fix", head: null },
+        { tabId: 2, key: "acme/webapp#1", label: "webapp#1", title: "Fix", head: null },
         {
+          tabId: 3,
           key: "acme/webapp#2",
           label: "webapp#2",
           title: "Fork",
@@ -137,11 +141,13 @@ const SUMMARIZED: Summary = {
       ],
     },
     {
+      id: "8",
       title: "Infra",
       color: "red",
       count: 1,
       prs: [
         {
+          tabId: 4,
           key: "acme/webapp#3",
           label: "webapp#3",
           title: "",
@@ -179,14 +185,20 @@ test("the summary counts distinct PRs and lists the PRs of each group with their
   assert.deepEqual(result, SUMMARIZED);
   assert.equal(summaryText(result), "4 PRs in 2 groups");
   assert.equal(
-    summaryText({ prs: 1, groups: [{ title: "Search", count: 1, prs: [] }] }),
+    summaryText({ prs: 1, groups: [{ id: "7", title: "Search", count: 1, prs: [] }] }),
     "1 PR in 1 group",
   );
   assert.equal(summaryText({ prs: 0, groups: [] }), "No PR tabs open");
 });
 
 function row(n: number, repo: string, branch: string): PrRow {
-  return { key: `acme/webapp#${n}`, label: `webapp#${n}`, title: "", head: { repo, branch } };
+  return {
+    tabId: n,
+    key: `acme/webapp#${n}`,
+    label: `webapp#${n}`,
+    title: "",
+    head: { repo, branch },
+  };
 }
 
 test("pane lookups ask for each distinct head once, in list order, at most the cap", () => {
@@ -195,6 +207,7 @@ test("pane lookups ask for each distinct head once, in list order, at most the c
   );
   const groups = [
     {
+      id: "1",
       title: "a",
       count: 3,
       prs: [
@@ -203,7 +216,7 @@ test("pane lookups ask for each distinct head once, in list order, at most the c
         { ...row(3, "", ""), head: null },
       ],
     },
-    { title: "b", count: many.length, prs: many },
+    { id: "2", title: "b", count: many.length, prs: many },
   ];
 
   const heads = lookupHeads(groups);
@@ -365,4 +378,35 @@ test("<repo>#<number> is accepted for listed repos only", () => {
 
   assert.equal(parseTarget("api#1", rules), null);
   assert.equal(parseTarget("api#1", { ...multi, org: "" }), null);
+});
+
+test("a pasted list splits on commas, whitespace and new lines, mixed", () => {
+  assert.deepEqual(splitTargets("33048, 33023,32461\n25069\t 31105  ,\r\n30032"), [
+    "33048",
+    "33023",
+    "32461",
+    "25069",
+    "31105",
+    "30032",
+  ]);
+  assert.deepEqual(splitTargets(" 7 "), ["7"]);
+  assert.deepEqual(splitTargets(""), []);
+  assert.deepEqual(splitTargets(undefined), []);
+  assert.deepEqual(splitTargets(" , ,\n"), []);
+});
+
+test("a list keeps URLs and junk as items and counts a repeat once", () => {
+  assert.deepEqual(splitTargets("7 https://github.com/acme/webapp/pull/8,foo 7, api#9 foo"), [
+    "7",
+    "https://github.com/acme/webapp/pull/8",
+    "foo",
+    "api#9",
+  ]);
+});
+
+test("a list needs the repo pick when any item is a bare number", () => {
+  assert.equal(hasBareNumber("76"), true);
+  assert.equal(hasBareNumber("https://github.com/acme/webapp/pull/1, 76"), true);
+  assert.equal(hasBareNumber("#76, api#2"), false);
+  assert.equal(hasBareNumber(""), false);
 });

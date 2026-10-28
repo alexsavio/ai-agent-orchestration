@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { useStatus } from "#/composables/useStatus";
 import { useSummary } from "#/composables/useSummary";
-import type { GroupSummary } from "#/types";
+import type { Ask, GroupSummary } from "#/types";
 import type { FakeReplies } from "#test/types";
 import { fakeAsk } from "./fakeAsk";
 
-const groups: GroupSummary[] = [{ title: "Finder", color: "yellow", count: 2, prs: [] }];
+const groups: GroupSummary[] = [{ id: "1", title: "Finder", color: "yellow", count: 2, prs: [] }];
 
 test("refresh shows the PR count and lists the groups", async () => {
   const status = useStatus();
@@ -33,3 +33,55 @@ test("a failed refresh shows the error and keeps the groups it had", async () =>
   assert.equal(status.isStatusError.value, true);
   assert.deepEqual(summary.groups.value, groups);
 });
+
+test("a final refresh queues behind an active progress refresh without overlap", async () => {
+  const held = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<void>();
+  const base = fakeAsk({ summary: { prs: 2, groups } });
+  let active = 0;
+  let maximum = 0;
+  const ask: Ask = async (message) => {
+    maximum = Math.max(maximum, ++active);
+    started.resolve();
+    await held.promise;
+    active--;
+
+    return base.ask(message);
+  };
+  const summary = useSummary(ask, useStatus());
+  const first = summary.refresh();
+  await started.promise;
+  const final = summary.refresh();
+  await new Promise((resolve) => setImmediate(resolve));
+  held.resolve();
+  await Promise.all([first, final]);
+
+  assert.equal(maximum, 1);
+  assert.equal(base.sent.length, 2);
+});
+
+for (const reply of [{ prs: 2, groups }, { error: "stale summary error" }]) {
+  test(`a pending summary preserves a newer batch error: ${JSON.stringify(reply)}`, async () => {
+    const held = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const base = fakeAsk({ summary: reply });
+    const ask: Ask = async (message) => {
+      started.resolve();
+      await held.promise;
+
+      return base.ask(message);
+    };
+    const status = useStatus();
+    const summary = useSummary(ask, status);
+    status.info("Opening…");
+    const pending = summary.refresh();
+    await started.promise;
+    const queued = summary.refresh();
+    status.error("batch failed");
+    held.resolve();
+    await Promise.all([pending, queued]);
+
+    assert.equal(status.statusText.value, "batch failed");
+    assert.equal(status.isStatusError.value, true);
+  });
+}

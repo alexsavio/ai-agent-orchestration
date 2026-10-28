@@ -1583,11 +1583,75 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "double-quoted substitution in a commit message",
             'git commit -m "docs: $(pi --provider deepseek) is denied"',
         ),
+        (
+            "nested shell running a bypassed codex start",
+            'bash -c "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --dangerously-bypass-hook-trust"',
+        ),
         ("double-quoted backticks running pi", 'echo "`pi --provider deepseek`"'),
         (
             "nested shell running herdr pi start",
             "bash -c \"sh -c 'herdr agent start w --kind pi --pane w1:p2'\"",
         ),
+    ]:
+        case(name, command, True)
+    for name, command in [
+        (
+            f"herdr codex start with {flag}",
+            f"herdr agent start w --kind codex --pane w1:p2 -- --no-daemon {flag} --model m",
+        )
+        for flag in [
+            "--dangerously-bypass-hook-trust",
+            "-s danger-full-access",
+            "-sdanger-full-access",
+            "--sandbox danger-full-access",
+            "--sandbox=danger-full-access",
+            "--add-dir /",
+            "--add-dir=/",
+            "-c sandbox_mode=danger-full-access",
+            "-csandbox_mode=danger-full-access",
+            "--config sandbox_permissions=[]",
+            "--config=sandbox_mode=x",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--yolo",
+            "--profile u -c profiles.u.sandbox_mode=x",
+            "$F",
+            "$(echo --yolo)",
+            "`echo --yolo`",
+            "'${X:---yolo}'",
+            "$'\\x2d-yolo'",
+            "-c$'sandbox_mode=x'",
+            '-c \'hooks.state={"/w/.codex/hooks.json:pre_tool_use:0:0"={trusted_hash="sha256:x"}}\'',
+            "-c features.hooks=false",
+            "-c ' features . hooks=false'",
+            "-c default_permissions=x",
+            "--disable hooks",
+            "--disable=hooks",
+            "--profile u",
+            "--profile=u",
+            "-p u",
+            "-pu",
+            "-c 'profiles.u={sandbox_mode=\"danger-full-access\"}'",
+            "-c ' profiles.u={approval_policy=\"never\"}'",
+            "-c=profiles.u={sandbox_mode=1}",
+            "--config=' profiles.u={sandbox_mode=1}'",
+            "-c 'profiles.u.approval_policy=\"never\"'",
+            "-c ' profiles . \"u\" . sandbox_mode=x'",
+            "-c sandbox_workspace_write.network_access=true",
+            "--config=profiles.u.sandbox_mode=x",
+            "--full-auto",
+            "--approve-for-me",
+            "-a never",
+            "-anever",
+            "--ask-for-approval never",
+            "--ask-for-approval=never",
+            "-c ' sandbox_mode=x'",
+            "-c ' \"sandbox_mode\"=x'",
+            "-c approval_policy=never",
+            "-c permissions.p.x=1",
+            "-c=sandbox_mode=x",
+            "--config ' approval_policy=never'",
+            "--config=' sandbox_mode=x'",
+        ]
     ]:
         case(name, command, True)
     for name, command in [
@@ -1597,6 +1661,11 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "herdr codex start",
             "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --model m",
         ),
+        (
+            "herdr codex start with a project doc setting",
+            "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --model m -c project_doc_max_bytes=0",
+        ),
+        ("codex launcher", "~/.claude/coordinator/codex-start.sh w w1:p2 worker"),
         ("herdr agent list", "herdr agent list"),
         (
             "herdr prompt to a pi worker",
@@ -1842,6 +1911,11 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         entry,
     ), entry
     print("Fail-open log:", entry.strip())
+    for command in [
+        "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --yolo",
+        'bash -c "herdr agent start w --kind codex --pane w1:p2 -- --no-daemon --yolo"',
+    ]:
+        assert "codex-start.sh" in guard.evaluate(command, repo), command
     start = time.perf_counter()
     guard.evaluate("pgrep -f vite | xargs " + "-pp " * 40 + "ki", repo)
     assert time.perf_counter() - start < 2, "xargs option scan is not linear"

@@ -13,7 +13,14 @@ How the roles fit together: [`architecture.md`](architecture.md).
 
 `orch-signal` works for Claude, Codex and pi. Identity is the caller's
 `HERDR_PANE_ID`, `HERDR_WORKSPACE_ID` and the workspace's `owner` token, read
-through the env adapter. It needs no Claude session ID.
+through the env adapter. It needs no Claude session ID. A shared Codex
+app-server daemon can retain a dead pane environment for later tool shells.
+When that stale pane ID is absent from Herdr, `orch-signal` recovers only a
+single live Codex pane whose Git worktree matches the shell's current directory;
+a present pane in another workspace is still refused. Identity failures name the
+claimed pane, workspace, Herdr socket and pane count.
+Recovery applies only to worker `heartbeat`, `done` and `ask` signals, never to
+the architect-facing `answer` or `list` commands.
 
 ```bash
 orch-signal heartbeat --new-job  # first command in every dispatched job
@@ -45,8 +52,10 @@ An owner may answer or escalate a question. Escalation uses the existing questio
 directory, answers lock, reminders and Q panel; the answers watcher forwards the
 user's answer to the blocked worker. If the asker has died, the bridge discards
 the answer and emits one `ANSWERS READFAIL answer discarded:` notice instead. If opening the panel fails, a due reminder
-retries. Plain `QUESTION:` is the fallback when the command fails or times out;
-`NEED SLOT:` is unchanged. No picker opens in the worker pane.
+retries. If `orch-signal` fails, a worker must finish with `DONE: <report path>`
+or ask with `QUESTION: <text>` so its owner can recover the result; plain
+`QUESTION:` is also the fallback when `ask` times out. `NEED SLOT:` is
+unchanged. No picker opens in the worker pane.
 
 | Resource | Bound |
 |---|---|

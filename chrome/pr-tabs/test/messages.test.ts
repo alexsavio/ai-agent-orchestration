@@ -84,20 +84,22 @@ test("two silent answers name the stale service worker", async () => {
   assert.deepEqual(await ask(async () => undefined, { type: "summary" }), { error: noAnswer() });
 });
 
-test("Open all is sent once, so a lost answer cannot open a second batch", async () => {
-  let calls = 0;
-  const answer = await ask(
-    async () => {
-      calls++;
+for (const type of ["openAll", "openReviews"] as const) {
+  test(`${type} is sent once, so a lost answer cannot open a second batch`, async () => {
+    let calls = 0;
+    const answer = await ask(
+      async () => {
+        calls++;
 
-      return undefined;
-    },
-    { type: "openAll" },
-  );
+        return undefined;
+      },
+      { type },
+    );
 
-  assert.equal(calls, 1);
-  assert.deepEqual(answer, { error: noAnswer() });
-});
+    assert.equal(calls, 1);
+    assert.deepEqual(answer, { error: noAnswer() });
+  });
+}
 
 test("Check now is sent once, so a lost answer cannot poll and close tabs twice", async () => {
   let calls = 0;
@@ -139,4 +141,31 @@ test("an error reads as its message, anything else as text", () => {
   assert.equal(errorText(new Error("gh: not logged in")), "gh: not logged in");
   assert.equal(errorText({ message: "" }), "[object Object]");
   assert.equal(errorText("timeout"), "timeout");
+});
+
+test("focusPr is sent once when an answer is lost", async () => {
+  let calls = 0;
+  const result = await ask(
+    async () => {
+      calls++;
+
+      return undefined;
+    },
+    { type: "focusPr", key: "acme/webapp#7" },
+  );
+  assert.equal(calls, 1);
+  assert.deepEqual(result, { error: noAnswer() });
+});
+
+test("closePr is never retried after a lost answer", async () => {
+  let calls = 0;
+  await ask(
+    async () => {
+      calls++;
+
+      return undefined;
+    },
+    { type: "closePr", key: "acme/webapp#7", tabId: 7 },
+  );
+  assert.equal(calls, 1);
 });
