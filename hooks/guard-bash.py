@@ -622,7 +622,7 @@ def echoed_text(words):
 
 
 def shell_programs(words):
-    """Returns the code a shell runs: its -c program, else its stdin heredoc unless a script file is named."""
+    """Returns the code a shell runs: its -c program, else its stdin heredoc unless a script file is named; for ksh, also an operand it cannot open as a file."""
     name = os.path.basename(words[0]) if words else ""
     if name == "eval":
         return [" ".join(words[1:])]
