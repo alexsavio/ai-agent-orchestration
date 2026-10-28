@@ -31,7 +31,13 @@ import sys
 sys.path.insert(0, sys.argv[1])
 import orch_settings as s
 values = {'str': 'from-file', 'int': 7, 'number': 7.5, 'bool': True, 'list': ['a', 'b'], 'json': [{'name': 'file'}], 'tables': [{'name': 'file'}]}
-print(s.render({setting: ((list(setting.required) or setting.choices[:1]) if setting.choices else values[setting.kind]) for setting in s.scoped(sys.argv[2]) if not setting.local_only}), end='')
+def sample(setting):
+    if setting.choices:
+        return list(setting.required) or setting.choices[:1]
+    if setting.pattern:
+        return 'fromfile'  # one lowercase word, matching the pattern
+    return values[setting.kind]
+print(s.render({setting: sample(setting) for setting in s.scoped(sys.argv[2]) if not setting.local_only}), end='')
 PY
 }
 
@@ -53,15 +59,87 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   [ "$(printf '%s\n' "$output" | grep -c .)" -eq "$(python3 "$SETTINGS" keys "$ORCH_CONFIG" | wc -w)" ]
   for name in $(python3 "$SETTINGS" keys "$ORCH_CONFIG"); do
     [[ "$output" != *"$name=env-$name"* ]]
-    export "$name=env-$name"
+    if [ "$name" = ORCH_CODEX_SMART_REASONING_EFFORT ]; then
+      export "$name=envword"
+    else
+      export "$name=env-$name"
+    fi
   done
 
   run load_settings global
 
   [ "$status" -eq 0 ]
   for name in $(python3 "$SETTINGS" keys "$ORCH_CONFIG"); do
-    printf '%s\n' "$output" | grep -qxF "$name=env-$name"
+    if [ "$name" = ORCH_CODEX_SMART_REASONING_EFFORT ]; then
+      printf '%s\n' "$output" | grep -qxF "$name=envword"
+    else
+      printf '%s\n' "$output" | grep -qxF "$name=env-$name"
+    fi
   done
+}
+
+@test "an exported bad reasoning effort fails the shell loader" {
+  every_value global >"$ORCH_CONFIG"
+  export ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"
+  run load_settings global
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "an exported good reasoning effort is accepted by the shell loader" {
+  every_value global >"$ORCH_CONFIG"
+  export ORCH_CODEX_SMART_REASONING_EFFORT="high"
+  run load_settings global
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF "ORCH_CODEX_SMART_REASONING_EFFORT=high"
+}
+
+@test "an exported bad reasoning effort fails the shell loader with no config file" {
+  unset ORCH_CONFIG
+  export ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"
+  run load_settings global
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "an exported good reasoning effort passes the shell loader with no config file" {
+  unset ORCH_CONFIG
+  export ORCH_CODEX_SMART_REASONING_EFFORT="high"
+  run load_settings global
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF "ORCH_CODEX_SMART_REASONING_EFFORT=high"
+}
+
+@test "an unexported bad reasoning effort fails the shell loader" {
+  every_value global >"$ORCH_CONFIG"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"; orch_load_config' _ "$ROOT"
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "an unexported bad reasoning effort fails the shell loader with no config file" {
+  unset ORCH_CONFIG
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"; orch_load_config' _ "$ROOT"
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "an unexported good reasoning effort still wins over the file" {
+  every_value global >"$ORCH_CONFIG"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high"; orch_load_config; echo "$ORCH_CODEX_SMART_REASONING_EFFORT"' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "high" ]
+}
+
+@test "the loader leaves an unexported reasoning effort unexported in the caller" {
+  every_value global >"$ORCH_CONFIG"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high"; orch_load_config; declare -p ORCH_CODEX_SMART_REASONING_EFFORT' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != "declare -x "* ]]
 }
 
 @test "a variable set but not exported also wins over the file" {
