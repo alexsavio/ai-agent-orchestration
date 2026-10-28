@@ -252,7 +252,7 @@ Report what actually happened: a survived mutation, a skipped check, a claim you
 
 ## Quota
 
-Treat smart-model quota as scarce. Balance work across providers so one subscription is not exhausted while useful capacity remains in the other. Keep your own replies and tool output lean.
+Treat smart-model quota as scarce. Prefer worker → worker → smart escalation over a smart model for every task. Balance work across providers so one subscription is not exhausted while useful capacity remains in the other. Keep your own replies and tool output lean.
 
 ## Herdr, Codex and watcher specifics
 
