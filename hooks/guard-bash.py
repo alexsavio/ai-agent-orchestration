@@ -901,7 +901,7 @@ def stdin_program(words, where, pipeline, redirects, env):
             return target
         if op == "<":
             key = run_key(target, where, env)
-            return script_text(key) if key else None
+            return script_text(key)
     if len(pipeline) < 2:
         return None
     before = pipeline[-2]
@@ -942,9 +942,7 @@ def runs(entries, disabled):
         name = os.path.basename(words[0])
         text, targets = written_text(words, redirects)
         for target in targets:
-            key = run_key(target, where, env)
-            if key:
-                written[key] = text
+            written[run_key(target, where, env)] = text
         if "guard_inline_shell" not in disabled:
             for text in shell_programs(words):
                 yield "an inline shell program", text, where, None
@@ -981,7 +979,7 @@ def kill_words(entries, text):
 
 
 def bounded(code):
-    """Cuts code at its SCRIPT_HEREDOC_LIMIT-th heredoc operator or at a marker over 256 characters; the heredoc matcher is quadratic on unterminated ones."""
+    """Joins line continuations, then cuts code at a heredoc marker over 256 characters or after SCRIPT_HEREDOC_LIMIT heredoc operators; the heredoc matcher is quadratic on unterminated ones."""
     code = re.sub(r"\\\n[ \t]*", "", code)
     long_marker = re.search(r"<<-?[ \t]*['\"]?\w{257}", code)
     if long_marker:
