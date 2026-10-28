@@ -395,10 +395,7 @@ take_slot() {
       wait "$CHILD_PID"
       status=$?
       stop_watch
-      KILL_CODE=$status
-      if [ "$status" -gt 128 ]; then
-        emit_killed
-      elif [ "$status" -ne 0 ]; then
+      if [ "$status" -ne 0 ]; then
         emit_event FAIL "$CHILD_PID" "code=$status elapsed=$(job_elapsed)"
       fi
       exit "$status"

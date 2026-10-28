@@ -25,8 +25,8 @@ A slot is a file in `~/.claude/heavy-slots/` that holds the job's pid. `take` re
 | Event | When | Example | Feed |
 | --- | --- | --- | --- |
 | `WAIT` | The job found no free slot (once per job) | `SLOT WAIT acme-tests pid=40 slots=4/4 note=first-run.bats for PR 106` | FYI log |
-| `FAIL` | The job exited non-zero | `SLOT FAIL acme-tests pid=41 code=1 elapsed=93s note=...` | FYI log |
-| `KILLED` | A signal ended the job (exit above 128), or `take` stopped it | `SLOT KILLED acme-tests pid=41 code=143 elapsed=12s note=...` | Action line |
+| `FAIL` | The job exited non-zero, also a code above 128 (a kill from outside, such as the OOM killer, looks the same as `exit 137`) | `SLOT FAIL acme-tests pid=41 code=1 elapsed=93s note=...` | FYI log |
+| `KILLED` | `take` received a signal and stopped the job | `SLOT KILLED acme-tests pid=41 code=143 elapsed=12s note=...` | Action line |
 | `RUNLONG` | The job ran past `heavy_slots.long_run` (once per job; 0 turns it off) | `SLOT RUNLONG acme-tests pid=41 elapsed=1800s note=...` | Action line |
 
 Only action lines reach the Coordinator's Monitor and native delivery; see [watchers](watchers.md).

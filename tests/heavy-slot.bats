@@ -741,11 +741,21 @@ EVENTS() { printf '%s' "$ORCH_HEAVY_SLOTS_DIR/.events"; }
   grep -Eq '^[0-9]+ SLOT FAIL agent-fail pid=[0-9]+ code=1 elapsed=[0-9]+s note=-$' "$(EVENTS)"
 }
 
-@test "a job killed by a signal writes one KILLED line, not FAIL" {
+@test "a job killed from outside writes one FAIL line with its code, not KILLED" {
   run "$HELPER" take agent-killed --note 'big run' -- bash -c 'kill -KILL $$'
   [ "$status" -eq 137 ]
   [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
-  grep -Eq '^[0-9]+ SLOT KILLED agent-killed pid=[0-9]+ code=137 elapsed=[0-9]+s note=big run$' "$(EVENTS)"
+  grep -Eq '^[0-9]+ SLOT FAIL agent-killed pid=[0-9]+ code=137 elapsed=[0-9]+s note=big run$' "$(EVENTS)"
+}
+
+@test "a job that exits 143 or 137 on its own writes FAIL, not KILLED" {
+  for code in 143 137; do
+    : >|"$(EVENTS)"
+    run "$HELPER" take "agent-exit$code" -- bash -c "exit $code"
+    [ "$status" -eq "$code" ]
+    [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
+    grep -Eq "^[0-9]+ SLOT FAIL agent-exit$code pid=[0-9]+ code=$code " "$(EVENTS)"
+  done
 }
 
 @test "stopping heavy-slot with TERM writes one KILLED line for the job" {
@@ -881,11 +891,11 @@ assert_nothing_left_behind() {
   grep -Eq '^[0-9]+ SLOT FAIL agent-leftover pid=[0-9]+ code=1 ' "$(EVENTS)"
 }
 
-@test "a killed job that leaves a process behind writes exactly one KILLED line" {
+@test "a killed job that leaves a process behind writes exactly one FAIL line" {
   run "$HELPER" take agent-leftover -- bash -c 'sleep 30 & kill -KILL $$'
   [ "$status" -eq 137 ]
   [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
-  grep -Eq '^[0-9]+ SLOT KILLED agent-leftover pid=[0-9]+ code=137 ' "$(EVENTS)"
+  grep -Eq '^[0-9]+ SLOT FAIL agent-leftover pid=[0-9]+ code=137 ' "$(EVENTS)"
 }
 
 @test "each spool line starts with the epoch of the event" {
