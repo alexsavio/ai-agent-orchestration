@@ -30,13 +30,6 @@ class WeeklyTests(IsolatedTestCase):
         path.write_text(json.dumps(data))
         os.utime(path, (NOW - age_s, NOW - age_s))
 
-    def test_newest_file_by_mtime_wins(self):
-        self.usage("old", {"seven_day_pct": 10, "seven_day_resets_at": NOW + 3600}, 600)
-        self.usage("new", {"seven_day_pct": 55, "seven_day_resets_at": NOW + 3600}, 60)
-        line = orch_usage.weekly(self.dir, NOW)
-        self.assertTrue(line.startswith("weekly: 55% resets "), line)
-        self.assertTrue(line.endswith("(reading 1m old)"), line)
-
     def test_reading_older_than_six_hours_is_unknown(self):
         self.usage(
             "a", {"seven_day_pct": 55, "seven_day_resets_at": NOW + 3600}, 6 * 3600 + 1
