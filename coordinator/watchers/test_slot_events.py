@@ -15,7 +15,7 @@ import watchers as w
 
 HEAVY_SLOT = w.ROOT.parent.parent / "heavy-slot"
 ACTION = [
-    "SLOT KILLED agent-tests pid=41 code=137 elapsed=12s note=first-run.bats for PR 106",
+    "SLOT KILLED agent-tests pid=41 code=143 elapsed=12s note=first-run.bats for PR 106",
     "SLOT RUNLONG agent-tests pid=41 elapsed=1800s note=-",
 ]
 FYI = [

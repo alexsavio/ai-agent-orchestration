@@ -806,6 +806,23 @@ assert_nothing_left_behind() {
   assert_nothing_left_behind agent-wstop-term '2[78]'
 }
 
+@test "a second identical TERM while the job is stopping still cleans up the slot and the watcher" {
+  # shellcheck disable=SC2016 # The child Bash expands nothing here.
+  ORCH_HEAVY_SLOTS_LONG_RUN=26 ORCH_HEAVY_SLOTS_KILL_GRACE=3 "$HELPER" take agent-twice-term -- bash -c 'trap "" TERM; sleep 20' &
+  pid=$!
+  wait_for_file "$ORCH_HEAVY_SLOTS_DIR/agent-twice-term"
+  tries=0
+  while ! pgrep -g 0 -x -f 'sleep 2[67]' >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
+  pgrep -g 0 -x -f 'sleep 2[67]' >/dev/null
+  kill -TERM "$pid"
+  wait_for_file "$(EVENTS)"
+  sleep 1
+  kill -TERM "$pid"
+  wait "$pid" || true
+  [ ! -e "$ORCH_HEAVY_SLOTS_DIR/agent-twice-term" ]
+  assert_nothing_left_behind agent-twice-term '2[67]'
+}
+
 @test "the long-run watcher outlives its RUNLONG line and is gone when the job ends" {
   ORCH_HEAVY_SLOTS_LONG_RUN=1 "$HELPER" take agent-wstop-fired -- sleep 3 &
   pid=$!
