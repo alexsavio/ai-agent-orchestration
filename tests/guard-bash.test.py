@@ -1036,6 +1036,7 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         "three.sh": "cat <<EOF\nx\nEOF\n" * 3 + "pkill -f vite\n",
         "seventy.sh": "cat <<EOF\nx\nEOF\n" * 70 + "pkill -f vite\n",
         "fan.sh": f"bash {scripts}/fan.sh\n" * 120,
+        "-dash.sh": "pkill -f vite\n",
     }
     for fixture, text in fixtures.items():
         (scripts / fixture).write_text(text)
@@ -1084,11 +1085,20 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "tee with an option",
             "tee --append r.sh <<'EOF'\npkill -f vite\nEOF\nbash r.sh",
         ),
+        (
+            "tee after the option terminator",
+            "tee -- -guard.sh <<'EOF'\npkill -f vite\nEOF\nbash ./-guard.sh",
+        ),
+        (
+            "tee after the option terminator, kill -1",
+            "tee -- -guard.sh <<'EOF'\nkill -9 -1\nEOF\nsh -- -guard.sh",
+        ),
         ("echo written script", "echo 'pkill -f vite' > k.sh && bash k.sh"),
         ("printf written script", "printf 'pkill -f vite\\n' > k.sh; sh k.sh"),
         ("appended echo script", "echo 'pkill -f vite' >> k.sh; bash k.sh"),
         ("stdin from a file", f"bash < {scripts}/kills.sh"),
         ("cat piped to a shell", f"cat {scripts}/kills.sh | bash"),
+        ("cat after the option terminator piped to a shell", "cat -- -dash.sh | sh"),
         ("here-string to a shell", "bash <<< 'pkill -f vite'"),
         ("echo piped to a shell", "echo 'pkill -f vite' | sh"),
         ("script run by inline shell", f"bash -c 'bash {scripts}/kills.sh'"),
@@ -1184,6 +1194,10 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("killall of an own process in a script", f"bash {scripts}/killall_own.sh"),
         ("script that only echoes in a pipe", "echo ok | bash"),
         ("piped file without a kill", f"cat {scripts}/clean.sh | bash"),
+        (
+            "tee after the option terminator, never run",
+            "tee -- -notes.md <<'EOF'\npkill -f vite\nEOF",
+        ),
     ]:
         case(name, command, False, scripts)
     started = time.perf_counter()

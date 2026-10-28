@@ -630,7 +630,6 @@ def shell_programs(words):
         return []
     heredocs = heredoc_bodies(words)
     command_mode, stdin_mode, _, operands = shell_args(words)
-    # ksh93 runs a script operand it cannot open as -c text
     if command_mode or (name == "ksh" and operands and not stdin_mode):
         return operands[:1]
     return heredocs if stdin_mode or not operands else []
@@ -902,7 +901,9 @@ def written_text(words, redirects):
     ]
     targets = [target for op, target in redirects if op in WRITE_OPERATORS]
     if name == "tee":
-        targets += [arg for arg in args if not arg.startswith("-")]
+        end = args.index("--") if "--" in args else len(args)
+        targets += [arg for arg in args[:end] if not arg.startswith("-")]
+        targets += args[end + 1 :]
     if heredocs:
         return "\n".join(heredocs), targets
     if name in ("echo", "printf"):
@@ -937,9 +938,13 @@ def stdin_program(words, where, pipeline, redirects, env):
         return echoed_text(before)
     if name == "cat":
         parts, size = [], 0
-        for arg in before[1:]:
-            key = None if arg.startswith("-") else run_key(arg, where, env)
-            if key and size < SCRIPT_SCAN_LIMIT:
+        operands = before[1:]
+        end = operands.index("--") if "--" in operands else len(operands)
+        for arg in [a for a in operands[:end] if not a.startswith("-")] + operands[
+            end + 1 :
+        ]:
+            key = run_key(arg, where, env)
+            if size < SCRIPT_SCAN_LIMIT:
                 parts.append(script_text(key) or "")
                 size += len(parts[-1]) + 1
         return "\n".join(parts)[:SCRIPT_SCAN_LIMIT]
