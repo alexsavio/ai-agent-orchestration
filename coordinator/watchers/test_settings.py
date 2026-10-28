@@ -138,6 +138,42 @@ class GlobalFileTest(SettingsTest):
                 s.parse("", "c.toml")
 
 
+class CodexReasoningEffortTest(SettingsTest):
+    def test_bad_values_are_rejected(self):
+        for bad in ("high; touch /tmp/pwn", "", "high xhigh", "High"):
+            with self.subTest(bad=bad):
+                message = self.error(
+                    f'[models]\ncodex_smart_reasoning_effort = "{bad}"\n'
+                )
+                self.assertIn(
+                    "codex_smart_reasoning_effort: must be one lowercase word", message
+                )
+
+    def test_good_values_are_accepted(self):
+        for good in ("medium", "xhigh"):
+            with self.subTest(good=good):
+                values = s.load_global(
+                    self.write(
+                        "c.toml", f'[models]\ncodex_smart_reasoning_effort = "{good}"\n'
+                    )
+                )
+                self.assertEqual(values["ORCH_CODEX_SMART_REASONING_EFFORT"], good)
+
+    def test_exported_override_must_match_the_pattern(self):
+        path = self.write("c.toml", "")
+        with self.assertRaisesRegex(
+            s.ConfigError,
+            "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word",
+        ):
+            s.resolved_global(path, {"ORCH_CODEX_SMART_REASONING_EFFORT": "high xhigh"})
+        self.assertEqual(
+            s.resolved_global(path, {"ORCH_CODEX_SMART_REASONING_EFFORT": "high"})[
+                "ORCH_CODEX_SMART_REASONING_EFFORT"
+            ],
+            "high",
+        )
+
+
 class SetKeyTest(SettingsTest):
     def test_set_key_edits_dotted_quoted_and_plain_forms_in_place(self):
         for text in (
