@@ -956,11 +956,18 @@ def as_env(values):
 
 
 def check_resolved_env(environ):
-    """Raise ConfigError when an exported value violates its setting's pattern."""
+    """Raise ConfigError when an exported value violates its setting's pattern or choices."""
     for s in SETTINGS:
-        if s.pattern is not None and s.env in environ:
-            if not re.fullmatch(s.pattern, environ[s.env]):
-                raise ConfigError(f"{s.env}: must be {s.pattern_doc}")
+        if s.env not in environ:
+            continue
+        value = environ[s.env]
+        if s.pattern is not None and not re.fullmatch(s.pattern, value):
+            raise ConfigError(f"{s.env}: must be {s.pattern_doc}")
+        if s.kind == "str" and s.choices is not None:
+            if value != "" and value not in s.choices:
+                raise ConfigError(
+                    f"{s.key} ({s.env}): unknown value {json.dumps(value)}; known: empty, {', '.join(s.choices)}"
+                )
 
 
 def resolved_global(path, environ):
@@ -971,13 +978,6 @@ def resolved_global(path, environ):
         s.env: environ.get(s.env, file.get(s.env, env_value(s, s.default)))
         for s in listed("global")
     }
-    for setting in listed("global"):
-        if setting.kind == "str" and setting.choices is not None:
-            value = values[setting.env]
-            if value != "" and value not in setting.choices:
-                raise ConfigError(
-                    f"{setting.key} ({setting.env}): unknown value {json.dumps(value)}; known: empty, {', '.join(setting.choices)}"
-                )
     values[BY_KEY["providers.enabled"].env] = ",".join(enabled_providers(values))
     values[BY_KEY["providers.claude"].env] = ",".join(claude_tiers(values))
     return values
