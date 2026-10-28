@@ -130,13 +130,13 @@ Put it in the brief: which launcher to use, that the worker must stop its instan
 A heavy job is a test runner (Vitest, browser tests), Storybook, a Playwright or screenshot run, or a local Vite build.
 
 1. **Check the machine first:** `ulimit -n`, `sysctl kern.num_files kern.maxfiles`, `vm_stat`, and which heavy processes are already up.
-2. **At most `ORCH_HEAVY_SLOTS_MAX` heavy jobs at once on the machine** (default 4), across all sessions. Run every heavy command through `heavy-slot take <architect>-<job> -- <command> [args...]`; it atomically creates a file containing the child pid, removes it on completion or handled signals, waits up to 1800 seconds when full, and then prints `NEED SLOT`. Use `heavy-slot count` to inspect capacity and `heavy-slot list` to see live and stale records. Do not hand-write slot files. Balance uses the same configured value for its slot boundary. `heavy-slot list` is the source of truth; message nobody about a slot.
+2. **At most `ORCH_HEAVY_SLOTS_MAX` heavy jobs at once on the machine** (default 4), across all sessions. Run every heavy command through `heavy-slot take <architect>-<job> [--note <what the job is>] -- <command> [args...]`; it atomically creates a file containing the child pid, removes it on completion or handled signals, waits up to 1800 seconds when full, and then prints `NEED SLOT`. Use `heavy-slot count` to inspect capacity and `heavy-slot list` to see live and stale records. Do not hand-write slot files. Balance uses the same configured value for its slot boundary. `heavy-slot list` is the source of truth; message nobody about a slot.
 3. **Keep the system in sight while it runs.** Stop the job if open files or memory climb.
 4. **Close what you start:** Storybook, Playwright browsers, Vite and watchers. Kill by pidfile, never broad `pkill`.
 
 **A local pi model is not a `heavy-slot` job, and has its own memory rule.** A loaded local model takes about 20 GB and outlives any single command. With JIT loading on in LM Studio, the first request from a pi worker on a local provider loads the model, so the checks below apply before you start a local pi worker, not only before `lms load`. Check `vm_stat` and the host-pressure alerts first; start only with real headroom. At most one local model is loaded on the machine; run `lms ps` first, and if one is loaded, share it or wait. When the last pi worker on it closes, run `lms unload <id>` for that model only, and only if `herdr agent list` shows no other pi agent on the machine (and stop `lms server` if you started it). Never probe a local provider with a throwaway pi run.
 
-Put these rules in every worker brief, together with the contents of `~/.claude/worker-reports/machine-rules.md` (edit its project-specific list first). **A worker takes a free slot itself** with `heavy-slot take <architect>-<job> -- <command>`; it does not wait for the architect's go, because an architect who misses a `NEED SLOT` line leaves the worker idle.
+Put these rules in every worker brief, together with the contents of `~/.claude/worker-reports/machine-rules.md` (edit its project-specific list first). **A worker takes a free slot itself** with `heavy-slot take <architect>-<job> [--note <what the job is>] -- <command>`; it does not wait for the architect's go, because an architect who misses a `NEED SLOT` line leaves the worker idle.
 
 **Explicit worker signals.** Every brief starts the job with `orch-signal heartbeat --new-job` and ends it, including failure, with `orch-signal done --outcome succeeded|failed --report <path> --summary "<one line>"`. Identical `done` calls are no-ops; a changed report, summary or outcome creates a new completion. Done-suppression ends only after the completed pane is observed idle/done and then working again. Long-running jobs may send `orch-signal heartbeat` (at most once per 30 seconds; fresh for 300 seconds). Ask architectural questions with `orch-signal ask --question "<text>" --options "a,b"`; it blocks for an answer up to `workers.ask_timeout_s` (1800 seconds). Answer with `orch-signal answer <id> "<text>"`, or escalate with `orch-signal answer <id> --to-user` to open the existing Q panel. `orch-signal list` lists pending questions for your workspace. For Claude workers, run `ask` with `run_in_background` or set the Bash timeout above `--timeout` so the tool does not kill the waiter. Never open an interactive picker in a worker pane: the architect may not answer it. `SLOT: go` from the architect means run now. If the command is unavailable or times out, end the turn with a plain `QUESTION: …` line and stop. `NEED SLOT:` and heavy-slot behaviour stay unchanged. Put this rule in every brief.
 
@@ -166,7 +166,7 @@ Never, without an explicit request: **merge**, assign or reassign people beyond 
 
 - routine implementation problem → worker → smart model
 - architectural uncertainty → worker → you
-- product or requirement ambiguity that cannot be resolved from the repo or issues → you → user
+- product or requirement ambiguity that cannot be resolved from the repo or issues → you → user. To ask the user, write the question file `~/.claude/coordinator/questions/<slug>.md` in the [questions format](../../docs/questions.md), then send the Coordinator one line `QUESTION <slug> ~/.claude/coordinator/questions/<slug>.md`.
 
 A worker's failure does not go straight to the user.
 
@@ -191,6 +191,7 @@ No code starts until the Coordinator answers `LEGACY OK`. Other projects skip th
 - Every repo runs `review.finalize_commands` (default: `/finalize-change-footprint` and `/finalize-code-comments`; a repo file overrides it, `[]` opts out). Tell the worker to run each command over the complete PR diff before calling the PR done or ready, send you each findings table and wait, then apply only the approved findings. When commands run and `review.finalize_comment` is not `false`, after the approved findings are applied and pushed the worker posts ONE PR comment with one table per configured command (every finding, approved or rejected, what changed, the commit SHA) ending with the tool's attribution trailer.
 - Respect the repo's own rules on attribution, commit signing and language choice.
 - **Never change shared config to get past a block** — the repo's `.git/config`, global gitconfig, `CLAUDE.md`, settings, credentials. A blocked worker stops and reports `BLOCKED: …`.
+- A PR title, body and commit message name only links and references its reviewers can open. A reviewer cannot open a private repo such as another org's repo or its issues; the body states the problem and why the change fixes it, self-contained.
 
 ## A worker owns its PR's review cycle
 
@@ -207,7 +208,9 @@ Each round the worker polls its PR for new threads and for CI; verifies every re
 code before accepting it (a bot is the most skeptical source, and is wrong often enough to matter);
 fixes what is real and proves the fix; replies with file:line evidence to what is not; replies to and
 resolves every thread either way; fixes CI, running the linter **and** the formatter; and re-requests
-the bot review after each push.
+the bot review after each push. If the bot review is a Copilot error ("Copilot encountered an error
+and was unable to review this pull request. You can try again by re-requesting a review."), do **not**
+re-request it: treat that PR as having no Copilot review.
 
 Two things workers miss unless told: **a human reviewer's blocker often arrives in the review body,
 not in a thread**, so the reviews themselves are read each round; and **merging, undrafting,

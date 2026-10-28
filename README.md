@@ -93,9 +93,9 @@ Every question for you gets its own pane under the to-do pane, with keys to answ
 Many sessions share one machine. `heavy-slot` caps how many test runs, browsers or builds run at once (`ORCH_HEAVY_SLOTS_MAX`):
 
 ```bash
-heavy-slot take acme-tests -- npm test   # waits up to 1800 s for a free slot, then runs
+heavy-slot take acme-tests --note "unit tests" -- npm test   # waits up to 1800 s for a free slot, then runs; --note names the job in list and feed lines
 heavy-slot count                         # slots in use
-heavy-slot list                          # names, pids, ages, stale records
+heavy-slot list                          # names, pids, ages, notes, stale records
 ```
 
 If the cap stays full, `take` prints `NEED SLOT`. Details: [`docs/heavy-slot.md`](docs/heavy-slot.md).

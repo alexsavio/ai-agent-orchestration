@@ -25,7 +25,7 @@ easy to forget:
 Many sessions share this machine, and running out of open file handles can crash it. Before a heavy job (a test runner or browser tests, Storybook, Playwright or screenshot runs, a local front-end build):
 
 1. Check the machine: `ulimit -n`, `sysctl kern.num_files kern.maxfiles`, `vm_stat`, and which heavy processes are already up.
-2. **At most `ORCH_HEAVY_SLOTS_MAX` heavy jobs at once on the machine** (default 4), across all sessions. Run every heavy command through `heavy-slot take <architect>-<job> -- <command> [args...]`; it atomically admits the child, waits up to 1800 seconds when full, and cleans up its slot. Use `heavy-slot count` to inspect capacity. Balance uses the same configured value for its slot boundary. Do not hand-create slot files. `heavy-slot list` is the source of truth; message nobody about a slot.
+2. **At most `ORCH_HEAVY_SLOTS_MAX` heavy jobs at once on the machine** (default 4), across all sessions. Run every heavy command through `heavy-slot take <architect>-<job> [--note <what the job is>] -- <command> [args...]`; it atomically admits the child, waits up to 1800 seconds when full, and cleans up its slot. Use `heavy-slot count` to inspect capacity. Balance uses the same configured value for its slot boundary. Do not hand-create slot files. `heavy-slot list` is the source of truth; message nobody about a slot.
 3. Watch open files and memory while it runs. Stop the job if they climb.
 4. Close what you start: Storybook, Playwright browsers, dev servers, watchers. Kill by pidfile, never broad `pkill`.
 5. Pass these rules to every worker. Full version: `/architect`, "Heavy jobs share one machine".

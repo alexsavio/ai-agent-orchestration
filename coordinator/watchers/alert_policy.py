@@ -412,6 +412,10 @@ def answer_facts(line):
     return None
 
 
+def slot_facts(line):
+    return [fact("balance:" + line, line, terminal=True)]
+
+
 def facts(alert):
     """A `snapshot` alert lists every current condition of its mode; keys of that mode it does not list are released."""
     mode = alert.get("mode", "?")
@@ -455,6 +459,8 @@ def facts(alert):
             parsed = state_reset_facts(mode, line)
         if parsed is None and mode == "host" and line.startswith("HOST "):
             parsed = metric_facts(mode, line, HOST_METRICS)
+        if parsed is None and mode == "balance" and line.startswith("SLOT "):
+            parsed = slot_facts(line)
         if parsed is None and mode == "balance" and line.startswith("BALANCE "):
             parsed = metric_facts(mode, line, BALANCE_METRICS)
         if parsed is None and mode == "hog":
