@@ -910,8 +910,17 @@ def as_env(values):
     return {setting.env: env_value(setting, value) for setting, value in values.items()}
 
 
+def check_resolved_env(environ):
+    """Raise ConfigError when an exported value violates its setting's pattern."""
+    for s in SETTINGS:
+        if s.pattern is not None and s.env in environ:
+            if not re.fullmatch(s.pattern, environ[s.env]):
+                raise ConfigError(f"{s.env}: must be {s.pattern_doc}")
+
+
 def resolved_global(path, environ):
     """Every global ORCH_* setting as the scripts see it: default < the file < an exported variable."""
+    check_resolved_env(environ)
     file = {**load_global(path), **as_env(shared_values(path))}
     values = {
         s.env: environ.get(s.env, file.get(s.env, env_value(s, s.default)))
@@ -1932,6 +1941,7 @@ def main(argv):
     try:
         command = argv[1] if len(argv) > 1 else ""
         if command == "global" and len(argv) == 3:
+            check_resolved_env(os.environ)
             sys.stdout.write(shell_lines(load_global(argv[2])))
         elif command == "print":
             sys.stdout.write(

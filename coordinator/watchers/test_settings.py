@@ -159,6 +159,20 @@ class CodexReasoningEffortTest(SettingsTest):
                 )
                 self.assertEqual(values["ORCH_CODEX_SMART_REASONING_EFFORT"], good)
 
+    def test_exported_override_must_match_the_pattern(self):
+        path = self.write("c.toml", "")
+        with self.assertRaisesRegex(
+            s.ConfigError,
+            "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word",
+        ):
+            s.resolved_global(path, {"ORCH_CODEX_SMART_REASONING_EFFORT": "high xhigh"})
+        self.assertEqual(
+            s.resolved_global(path, {"ORCH_CODEX_SMART_REASONING_EFFORT": "high"})[
+                "ORCH_CODEX_SMART_REASONING_EFFORT"
+            ],
+            "high",
+        )
+
 
 class SetKeyTest(SettingsTest):
     def test_set_key_edits_dotted_quoted_and_plain_forms_in_place(self):
