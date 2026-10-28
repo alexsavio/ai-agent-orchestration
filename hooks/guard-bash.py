@@ -15,6 +15,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 PUSH_REASON = "Never push to main/master; open a PR (see .ai/git-workflow.md)."
@@ -545,6 +546,14 @@ def word_substitutions(word):
 
 
 SHELL_OPTION_VALUES = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+SHELL_SINGLE_DASH_FLAGS = {
+    "-login",
+    "-noediting",
+    "-noprofile",
+    "-norc",
+    "-posix",
+    "-restricted",
+}
 
 
 def shell_args(words):
@@ -560,11 +569,13 @@ def shell_args(words):
         elif word == "--":
             index += 1
             break
+        elif word in SHELL_SINGLE_DASH_FLAGS:
+            index += 1
         elif re.fullmatch(r"[-+][A-Za-z]+", word):
             command_mode = command_mode or "c" in word
             stdin_mode = stdin_mode or "s" in word
             check_only = check_only or (word[0] == "-" and "n" in word)
-            index += 2 if word.endswith("o") else 1
+            index += 1 + sum(c in "oO" for c in word[1:])
         elif word.startswith("--"):
             index += 1
         else:
@@ -779,6 +790,7 @@ def guard_broad_kill(raw):
 
 SCRIPT_SCAN_LIMIT = 64 * 1024
 SCRIPT_SCAN_BUDGET = 512 * 1024
+SCRIPT_SCAN_SECONDS = 5
 SCRIPT_HEREDOC_LIMIT = 64
 SCRIPT_SHELLS = SHELL_EXECUTABLES - {"eval"}
 WRITE_OPERATORS = {">", ">>", ">|", "&>", "&>>"}
@@ -882,11 +894,13 @@ def stdin_program(words, where, pipeline, redirects, env):
     if name in ("echo", "printf"):
         return echoed_text(before)
     if name == "cat":
-        keys = [
-            run_key(arg, where, env) for arg in before[1:] if not arg.startswith("-")
-        ]
-        text = "\n".join(script_text(key) or "" for key in keys if key)
-        return text[:SCRIPT_SCAN_LIMIT]
+        parts, size = [], 0
+        for arg in before[1:]:
+            key = None if arg.startswith("-") else run_key(arg, where, env)
+            if key and size < SCRIPT_SCAN_LIMIT:
+                parts.append(script_text(key) or "")
+                size += len(parts[-1]) + 1
+        return "\n".join(parts)[:SCRIPT_SCAN_LIMIT]
     return None
 
 
@@ -897,7 +911,7 @@ def runs(entries, disabled):
         words = list(words)
         if words[0] == "builtin":
             words = words[1:]
-        if words and words[0] in ("export", "local", "declare", "readonly"):
+        if words and words[0] in ("export", "local", "declare", "typeset", "readonly"):
             words = [word for word in words[1:] if not word.startswith("-")]
         if words and all(ASSIGNMENT.match(word) for word in words):
             for word in words:
@@ -968,6 +982,8 @@ def code_kills(code, cwd, disabled, depth, state):
     state["left"] -= len(code)
     if state["left"] < 0:
         raise ScanBudget(f"more than {SCRIPT_SCAN_BUDGET} bytes of code to scan")
+    if time.monotonic() >= state["deadline"]:
+        raise ScanBudget(f"more than {SCRIPT_SCAN_SECONDS} seconds to scan")
     if broad_kill_text(code):
         return True
     try:
@@ -981,9 +997,9 @@ def code_kills(code, cwd, disabled, depth, state):
         return False
     for _, inner, where, key in runs(entries, disabled):
         if key:
-            if (key, depth) in state["seen"]:
+            if (key, depth, where) in state["seen"]:
                 continue
-            state["seen"].add((key, depth))
+            state["seen"].add((key, depth, where))
         if code_kills(inner, where, disabled, depth + 1, state):
             return True
     return False
@@ -992,13 +1008,19 @@ def code_kills(code, cwd, disabled, depth, state):
 def guard_script_kill(raw, cwd, disabled):
     """Denies a broad kill in code a command runs: inline shell text, shell stdin, a script it writes or a script on disk.
     An error or an exhausted budget ends only this scan; the other guards still run."""
-    state = {"left": SCRIPT_SCAN_BUDGET, "seen": set()}
     try:
-        for label, code, where, _ in runs(command_entries(raw, cwd), disabled):
+        entries = command_entries(raw, cwd)
+    except ValueError:
+        return None
+    state = {
+        "left": SCRIPT_SCAN_BUDGET,
+        "seen": set(),
+        "deadline": time.monotonic() + SCRIPT_SCAN_SECONDS,
+    }
+    try:
+        for label, code, where, _ in runs(entries, disabled):
             if code_kills(code, where, disabled, 1, state):
                 return f"{BROAD_KILL_REASON} Found inside {label}."
-    except ValueError:
-        pass
     except ScanBudget as exc:
         log_failure(exc, raw, "scan-budget")
     except Exception as exc:

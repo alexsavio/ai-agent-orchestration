@@ -1188,7 +1188,6 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         case(name, command, False, scripts)
     started = time.perf_counter()
     log_path = Path.home() / ".claude/hooks/guard-bash.log"
-    log_before = ""
     assert not guard.evaluate(f"bash {scripts}/fan.sh", repo)
     cat_many = "cat " + f"{scripts}/big.sh " * 100 + "| bash"
     assert not guard.evaluate(cat_many, repo)
@@ -1212,6 +1211,89 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         guard.runs = saved_runs
     log_new = log_path.read_text()[len(log_before) :]
     assert "scan-error: RuntimeError: forced scan error" in log_new, log_new
+
+    def logged(command, cwd=repo):
+        before = log_path.read_text() if log_path.exists() else ""
+        result = guard.evaluate(command, cwd)
+        return result, log_path.read_text()[len(before) :]
+
+    bulk_five = "; ".join(f"bash {scripts}/bulk{number}.sh" for number in range(5))
+    result, new_log = logged(f"{bulk_five}; bash {scripts}/kills.sh")
+    assert result and "scan-budget" not in new_log, "scan budget is below 512 KB"
+
+    nest = scripts / "nest"
+    for folder in ("vs", "seen/a", "seen/b"):
+        (nest / folder).mkdir(parents=True)
+    for name, text in {
+        "vs/p.sh": "bash r.sh\n",
+        "vs/r.sh": "bash X.sh\n",
+        "vs/q.sh": "bash X.sh\n",
+        "vs/X.sh": "bash K.sh\n",
+        "vs/K.sh": "pkill -f vite\n",
+        "vs/two.sh": 'echo ok | bash\necho "bash K.sh" | bash\n',
+        "seen/outer.sh": "cd a\nbash ../lib.sh\ncd ../b\nbash ../lib.sh\n",
+        "seen/lib.sh": "bash ./step.sh\n",
+        "seen/a/step.sh": "echo ok\n",
+        "seen/b/step.sh": "pkill -f vite\n",
+    }.items():
+        (nest / name).write_text(text)
+    for name, command, cwd in [
+        ("file seen at another depth", "bash p.sh; bash q.sh", nest / "vs"),
+        ("inline code seen twice", "bash two.sh", nest / "vs"),
+        ("file seen from another folder", "bash outer.sh", nest / "seen"),
+    ]:
+        case(name, command, True, cwd)
+
+    read_files = []
+    saved_text = guard.script_text
+
+    def counting_text(path):
+        read_files.append(path)
+        return saved_text(path)
+
+    guard.script_text = counting_text
+    try:
+        assert not guard.evaluate(cat_many, repo)
+    finally:
+        guard.script_text = saved_text
+    assert len(read_files) == 1, f"cat read {len(read_files)} files past the limit"
+
+    for name, command in [
+        ("option group with o first", f"bash -oe pipefail {scripts}/kills.sh"),
+        ("option group with O last", f"bash -eO extglob {scripts}/kills.sh"),
+        ("option group with O first", f"bash -Oe extglob {scripts}/kills.sh"),
+        ("single dash norc", f"bash -norc {scripts}/kills.sh"),
+        ("single dash posix", f"bash -posix {scripts}/kills.sh"),
+        ("single dash login", f"bash -login {scripts}/kills.sh"),
+        ("single dash noediting", f"bash -noediting {scripts}/kills.sh"),
+        ("single dash noprofile", f"bash -noprofile {scripts}/kills.sh"),
+        ("single dash restricted", f"bash -restricted {scripts}/kills.sh"),
+        ("typeset variable", f"typeset -x S={scripts}; bash $S/kills.sh"),
+    ]:
+        case(name, command, True, scripts)
+
+    saved_seconds = guard.SCRIPT_SCAN_SECONDS
+    guard.SCRIPT_SCAN_SECONDS = -1
+    try:
+        result, new_log = logged(f"bash {scripts}/kills.sh", repo)
+        assert not result and "scan-budget" in new_log, (result, new_log)
+        result, new_log = logged(f"bash {scripts}/kills.sh; git stash", wt)
+        assert result and "scan-budget" in new_log, (result, new_log)
+    finally:
+        guard.SCRIPT_SCAN_SECONDS = saved_seconds
+
+    guard.runs = lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("forced"))
+    try:
+        result, new_log = logged("bash x.sh; git push origin HEAD:main")
+    finally:
+        guard.runs = saved_runs
+    assert result and "scan-error: ValueError: forced" in new_log, (result, new_log)
+    result, new_log = logged("bash ~a\0b.sh; bash x.sh")
+    assert "scan-error: ValueError" in new_log, new_log
+    assert guard.evaluate("echo 'a\"b'; git push origin HEAD:main", repo)
+    before = log_path.read_text()
+    assert guard.guard_script_kill('echo "unterminated', repo, set()) is None
+    assert log_path.read_text() == before, "unparsable command text was logged"
     started = time.perf_counter()
     assert not guard.evaluate(f"bash {big}", repo)
     assert not guard.evaluate(f"bash {many}", repo)
