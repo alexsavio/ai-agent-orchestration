@@ -757,3 +757,115 @@ test("closePr uses pending URLs for loading tabs and pending navigation away", a
   assert.deepEqual(await worker.closePr("acme/webapp#7", 2), { closed: 0 });
   assert.deepEqual(ids(), [2]);
 });
+
+test("goTo opens every item of a pasted list in order, each once, in the one picked repo", async () => {
+  const multi = await multiRepoWorker("list-open");
+
+  world.tabs = [
+    { id: 1, url: "https://github.com/acme/api/pull/5/files", windowId: 1, groupId: -1 },
+  ];
+
+  const reply = await multi.goTo("7, 5 8\nhttps://github.com/acme/webapp/pull/9 7 docs#3", "api");
+
+  assert.deepEqual(reply, { focused: "acme/docs#3" });
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.url),
+    [
+      "https://github.com/acme/api/pull/5/files",
+      "https://github.com/acme/api/pull/7",
+      "https://github.com/acme/api/pull/8",
+      "https://github.com/acme/webapp/pull/9",
+      "https://github.com/acme/docs/pull/3",
+    ],
+  );
+});
+
+test("goTo opens the valid items of a list and names the ones that failed", async () => {
+  const multi = await multiRepoWorker("list-partial");
+
+  assert.deepEqual(await multi.goTo("7 12a foo other#1 8"), {
+    error: "Couldn't open: 12a, foo, other#1",
+    tabsOpened: 2,
+  });
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.url),
+    ["https://github.com/acme/webapp/pull/7", "https://github.com/acme/webapp/pull/8"],
+  );
+});
+
+test("goTo opens nothing for a list above the cap", async () => {
+  const multi = await multiRepoWorker("list-cap");
+  const over = Array.from({ length: 21 }, (_, index) => index + 1).join(", ");
+  const atCap = Array.from({ length: 20 }, (_, index) => index + 1).join(", ");
+
+  assert.deepEqual(await multi.goTo(over), { error: "Too many PRs. Paste at most 20 at a time." });
+  assert.deepEqual(world.tabs, []);
+  assert.deepEqual(await multi.goTo(atCap), { focused: "acme/webapp#20" });
+  assert.equal(world.tabs.length, 20);
+});
+
+test("a one-item list behaves as a single goTo", async () => {
+  const multi = await multiRepoWorker("list-single");
+
+  assert.deepEqual(await multi.goTo("other#1,"), { error: "Not a acme PR number or URL" });
+  assert.deepEqual(await multi.goTo(" 7 "), { opened: "acme/webapp#7" });
+});
+
+test("a list names the missing setting instead of listing every item as failed", async () => {
+  world.hostSettings = { ...CONFIGURED, org: "" };
+
+  const noOrg = await freshWorker("list-missing-org");
+
+  assert.deepEqual(await noOrg.goTo("7 8"), { error: "Set pr_tabs.org in orchestration.toml" });
+});
+
+test("a list opens its new tabs in the background and a failed item does not stop the rest", async () => {
+  const multi = await multiRepoWorker("list-quiet");
+
+  world.tabs = [{ id: 1, url: `${PR}/5`, windowId: 2, groupId: -1, active: false }];
+
+  assert.deepEqual(await multi.goTo("5 foo 8"), { error: "Couldn't open: foo", tabsOpened: 1 });
+  assert.equal(tabWithId(1).active, false, "an open PR is not focused while an item failed");
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.active),
+    [false, false],
+  );
+  assert.equal(world.tabs.length, 2);
+});
+
+test("a list focuses its last PR once every item opened", async () => {
+  const multi = await multiRepoWorker("list-focus-last");
+
+  assert.deepEqual(await multi.goTo("7 8"), { focused: "acme/webapp#8" });
+  assert.equal(world.tabs.length, 2);
+  assert.equal(world.tabs[1]?.active, true);
+});
+
+test("a list with a URL still opens when bare numbers have no repo to go to", async () => {
+  world.tabs = [];
+  world.store = {};
+  world.hostSettings = { ...CONFIGURED, defaultRepo: "", repos: [] };
+
+  const noRepo = await freshWorker("list-no-repo");
+
+  assert.deepEqual(await noRepo.goTo(`7 ${PR}/8`), { error: "Couldn't open: 7", tabsOpened: 1 });
+  assert.deepEqual(
+    world.tabs.map((tab) => tab.url),
+    [`${PR}/8`],
+  );
+  assert.deepEqual(await noRepo.goTo("7 9"), {
+    error: "Set pr_tabs.default_repo in orchestration.toml",
+  });
+});
+
+test("a list whose closing focus rejects reports the error and the tabs it opened", async () => {
+  const multi = await multiRepoWorker("list-focus-rejects");
+
+  vi.spyOn(chrome.windows, "update").mockRejectedValue(new Error("window gone"));
+
+  const reply = await multi.goTo("7 8");
+
+  assert.ok("error" in reply && reply.error.includes("window gone"));
+  assert.equal("tabsOpened" in reply && reply.tabsOpened, 2);
+  assert.equal(world.tabs.length, 2);
+});
