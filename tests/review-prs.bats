@@ -273,11 +273,21 @@ dispatch() {
   [ "$status" -eq 1 ]
 }
 
-@test "the reviewer start denies the file-edit tools and the template pins the findings table" {
+@test "the reviewer start is a worker start with the file-edit deny last" {
   # shellcheck disable=SC2016 # The backticks are literal skill text.
-  grep -qF -- 'a Claude reviewer start ends with `--disallowedTools "Edit(./**)" NotebookEdit`' "$ROOT/skills/architect/references/dispatch.md"
+  grep -qF -- 'A Claude reviewer start is a worker start with the deny last: `... -- --model <model> <effort flag> --strict-mcp-config --disallowedTools "Edit(./**)" NotebookEdit`' "$ROOT/skills/architect/references/dispatch.md"
+}
+
+@test "the gate item 7 points to the reviewer template" {
   grep -qF -- 'Brief the reviewer with [references/reviewer.md](references/reviewer.md)' "$ROOT/skills/architect/SKILL.md"
+}
+
+@test "the reviewer template pins the findings table header" {
   grep -qF -- '| claim | file:line opened | verdict | evidence | rung | fix the author can apply |' "$ROOT/skills/architect/references/reviewer.md"
+}
+
+@test "the reviewer template says the tool block is a tripwire, not a sandbox" {
+  grep -qF -- 'this is a tripwire, not a sandbox' "$ROOT/skills/architect/references/reviewer.md"
 }
 
 @test "a per-dispatch effort survives a worker recycle through the handoff" {
