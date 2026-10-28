@@ -1262,16 +1262,24 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("option group with o first", f"bash -oe pipefail {scripts}/kills.sh"),
         ("option group with O last", f"bash -eO extglob {scripts}/kills.sh"),
         ("option group with O first", f"bash -Oe extglob {scripts}/kills.sh"),
-        ("single dash norc", f"bash -norc {scripts}/kills.sh"),
-        ("single dash posix", f"bash -posix {scripts}/kills.sh"),
-        ("single dash login", f"bash -login {scripts}/kills.sh"),
-        ("single dash noediting", f"bash -noediting {scripts}/kills.sh"),
-        ("single dash noprofile", f"bash -noprofile {scripts}/kills.sh"),
-        ("single dash restricted", f"bash -restricted {scripts}/kills.sh"),
+        ("single dash norc", "bash -norc kills.sh"),
+        ("single dash posix", "bash -posix kills.sh"),
+        ("single dash login", "bash -login kills.sh"),
+        ("single dash noediting", "bash -noediting kills.sh"),
+        ("single dash noprofile", "bash -noprofile kills.sh"),
+        ("single dash restricted", "bash -restricted kills.sh"),
+        ("two o options in one group", "bash -oO pipefail extglob kills.sh"),
+        ("single dash verbose", "bash -verbose kills.sh"),
+        ("single dash protected", "bash -protected kills.sh"),
+        ("verbose inline kill", "bash -verbose -c 'pkill -f vite'"),
+        ("verbose inline kill in sh", "sh -verbose -c 'pkill -f vite'"),
+        ("verbose inline pi start", "bash -verbose -c 'pi -p hello'"),
+        ("verbose inline pi start in sh", "sh -verbose -c 'pi -p hello'"),
         ("typeset variable", f"typeset -x S={scripts}; bash $S/kills.sh"),
     ]:
         case(name, command, True, scripts)
 
+    assert guard.SCRIPT_SCAN_SECONDS == 5
     saved_seconds = guard.SCRIPT_SCAN_SECONDS
     guard.SCRIPT_SCAN_SECONDS = -1
     try:
@@ -1288,11 +1296,39 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     finally:
         guard.runs = saved_runs
     assert result and "scan-error: ValueError: forced" in new_log, (result, new_log)
+    saved_entries = guard.command_entries
+
+    def failing_entries(*args, **kwargs):
+        raise RuntimeError("forced parse error")
+
+    guard.command_entries = failing_entries
+    try:
+        result, new_log = logged("git push origin HEAD:main")
+    finally:
+        guard.command_entries = saved_entries
+    assert result and "scan-error: RuntimeError: forced parse error" in new_log, (
+        result,
+        new_log,
+    )
     result, new_log = logged("bash ~a\0b.sh; bash x.sh")
     assert "scan-error: ValueError" in new_log, new_log
     before = log_path.read_text()
     assert guard.guard_script_kill('echo "unterminated', repo, set()) is None
     assert log_path.read_text() == before, "unparsable command text was logged"
+    marker = "m" * 256
+    assert guard.bounded(f"echo ok\ncat <<{marker}\nx\n") == (
+        f"echo ok\ncat <<{marker}\nx\n"
+    )
+    for before, operator in (
+        ("cat ", "<<"),
+        ("x=$(cat ", "<<-"),
+        ("cat ", "<< '"),
+        ("cat ", '<<"'),
+    ):
+        cut = guard.bounded(f"echo ok\n{before}{operator}{marker}m\npkill -f vite\n")
+        assert cut == f"echo ok\n{before}", (before, operator, cut)
+    (scripts / "marker.sh").write_text(f"pkill -f vite\ncat <<{marker}m\nx\n")
+    case("kill before a long marker", f"bash {scripts}/marker.sh", True)
     started = time.perf_counter()
     assert not guard.evaluate(f"bash {big}", repo)
     assert not guard.evaluate(f"bash {many}", repo)

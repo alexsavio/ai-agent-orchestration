@@ -552,7 +552,9 @@ SHELL_SINGLE_DASH_FLAGS = {
     "-noprofile",
     "-norc",
     "-posix",
+    "-protected",
     "-restricted",
+    "-verbose",
 }
 
 
@@ -963,7 +965,10 @@ def kill_words(entries, text):
 
 
 def bounded(code):
-    """Cuts code at its SCRIPT_HEREDOC_LIMIT-th heredoc operator; the heredoc matcher is quadratic on unterminated ones."""
+    """Cuts code at its SCRIPT_HEREDOC_LIMIT-th heredoc operator or at a marker over 256 characters; the heredoc matcher is quadratic on unterminated ones."""
+    long_marker = re.search(r"<<-?[ \t]*['\"]?\w{257}", code)
+    if long_marker:
+        code = code[: long_marker.start()]
     index = -1
     for _ in range(SCRIPT_HEREDOC_LIMIT + 1):
         index = code.find("<<", index + 1)
@@ -1011,6 +1016,9 @@ def guard_script_kill(raw, cwd, disabled):
     try:
         entries = command_entries(raw, cwd)
     except ValueError:
+        return None
+    except Exception as exc:
+        log_failure(exc, raw, "scan-error")
         return None
     state = {
         "left": SCRIPT_SCAN_BUDGET,
