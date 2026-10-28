@@ -938,6 +938,7 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         "killall puma",
     ):
         case(command, command, True)
+    PAD = ": " + "x" * 1000 + "\\n"
     scripts = root / "scripts"
     scripts.mkdir()
     killing = scripts / "kills.sh"
@@ -1125,6 +1126,77 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "printf '" + "%1$s" * 100 + "' " + "a" * 60000 + " | sh; bash kills.sh",
         ),
         ("printf %d with a leading blank", "printf 'kill -9 %d\\n' ' -1' | sh"),
+        ("printf width splits a word", "printf 'pkill%2s-f vite\\n' | sh"),
+        ("printf width splits a pid", "printf 'kill -9%3d\\n' -1 | sh"),
+        (
+            "printf width splits a word in a written script",
+            "printf 'pkill%2s-f vite\\n' > k.sh; bash k.sh",
+        ),
+        (
+            "printf position too long to read",
+            "printf '%" + "9" * 4301 + "$s\\n' x; bash kills.sh",
+        ),
+        (
+            "printf kill built from format and argument past the cut",
+            "printf '" + PAD + "p%s\\n' " + "x " * 70 + "'kill -f vite' | sh",
+        ),
+        (
+            "printf kill built from two arguments past the cut",
+            "printf '" + PAD + "%s%s\\n' " + "true '' " * 70 + "pk 'ill -f vite' | sh",
+        ),
+        (
+            "printf %b kill past the cut",
+            "printf '" + PAD + "%b\\n' " + "true " * 70 + "'\\160kill -f vite' | sh",
+        ),
+        (
+            "printf long width splits a word",
+            "printf 'pkill%99999999999s-f vite\\n' | sh",
+        ),
+        (
+            "printf width of thousands of digits splits a word",
+            "printf 'pkill%" + "9" * 4301 + "s-f vite\\n' | sh",
+        ),
+        (
+            "printf long position, kill in an argument",
+            "printf '%9999999999$s' x 'pkill -f vite' | sh",
+        ),
+        (
+            "printf cut text written, then catted to a shell",
+            "printf '" + PAD + "%s\\n' " + "x " * 70 + " > big.txt; cat big.txt | sh",
+        ),
+        (
+            "printf cut text written, appended to, then run",
+            "printf '"
+            + PAD
+            + "%s\\n' "
+            + "x " * 70
+            + " > big.sh; echo done >> big.sh; bash big.sh",
+        ),
+        (
+            "append whose printf text has a lone quote",
+            "echo 'p\"k\"ill -f vite' > a.sh; printf '%1$s%1$s\\n' '\"' >> a.sh; bash a.sh",
+        ),
+        (
+            "cat of a printf text with a lone quote",
+            "printf 'p\"k\"ill -f vite\\n%1$s%1$s\\n' '\"' > a.sh; echo hi > b.sh; cat a.sh b.sh | sh",
+        ),
+        (
+            "printf cut text written and run",
+            "printf '" + PAD + "%s\\n' " + "x " * 70 + "> big.sh; bash big.sh",
+        ),
+        (
+            "printf quote escape leaves a lone quote",
+            'printf \'p"k"ill -f vite\\n\\"\\n\' | sh',
+        ),
+        (
+            "printf single quote escape leaves a lone quote",
+            "printf 'p\"k\"ill -f vite\\n\\'\"'\"'\\n' | sh",
+        ),
+        (
+            "printf cut inside a quoted argument",
+            "printf 'p\"k\"ill -f vite\\n%s\\n' \"'" + "x" * 70000 + "'\" | sh",
+        ),
+        ("printf precision on a number", "printf 'kill -9 %.2d\\n' -1 | sh"),
         ("printf single quote escape", "printf \"p\\'\\'kill -f vite\\n\" | sh"),
         (
             "tee --append to a script on disk",
@@ -1411,6 +1483,19 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("echo -e of a kill, never run", "echo -e 'pkill -f vite' > notes.md"),
         ("overwrite of a script on disk", "echo 'echo hi' > kills.sh; bash kills.sh"),
         ("echo a lone dash", "echo - hi | sh"),
+        ("wide printf padding piped to a shell", "printf 'echo %70000s\\n' x | sh"),
+        (
+            "big printf to a file, never run",
+            "printf '" + PAD + "%s\\n' " + "x " * 70 + "> big.txt",
+        ),
+        (
+            "big printf to a pipe that is no shell",
+            "printf '" + PAD + "%s\\n' " + "x " * 70 + "| wc -l",
+        ),
+        (
+            "big printf written, script run is another file",
+            "printf '" + PAD + "%s\\n' " + "x " * 70 + "> big.txt; bash clean.sh",
+        ),
         (
             "printf width and precision",
             "printf '%-10s|%5d|%.2s\\n' a 3 xyz > table.txt",

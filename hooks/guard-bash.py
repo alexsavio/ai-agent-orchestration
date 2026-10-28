@@ -690,11 +690,16 @@ PRINTF_CONVERSION = re.compile(
     r"%(\d+\$)?([-+ #0]*)(\*|\d+)?(\.\*|\.\d*)?[hlLjqtz]*([a-zA-Z%])"
 )
 INTEGER = re.compile(r"\s*([-+]?)(0[xX][0-9a-fA-F]+|\d+)")
+VARIANT = "\x1e"
+CUT = "\x1f"
+PRINTF_TOO_LARGE_REASON = "printf output run by a shell is too large to check safely; write it to a file with a smaller format or remove the pipe to a shell."
 
 
-def unescape(text):
+def unescape(text, quotes=True):
     def escape(match):
         body = match[1]
+        if body in ("'", '"', "?") and not quotes:
+            return match[0]
         try:
             if body[0] in "01234567":
                 return chr(int(body, 8) % 256).replace("\0", "")
@@ -707,7 +712,15 @@ def unescape(text):
     return ESCAPE.sub(escape, text)
 
 
-def printf_value(flags, precision, conversion, arg):
+def padding(flags, width, spec, value):
+    """Width for a padded conversion, cut to one pad character: it keeps the word break and bounds the text."""
+    if not width:
+        return ""
+    unpadded = len(("%" + flags + spec) % value)
+    return str(min(int(width), unpadded + 1) if len(width) < 10 else unpadded + 1)
+
+
+def printf_value(flags, width, precision, conversion, arg):
     if conversion in "diuxXo":
         integer = INTEGER.match(arg)
         if integer:
@@ -715,41 +728,46 @@ def printf_value(flags, precision, conversion, arg):
             number = int(integer[1] + integer[2], base)
         else:
             number = ord(arg[1]) if arg[:1] in "'\"" and len(arg) > 1 else 0
-        return ("%" + flags + ("d" if conversion in "iu" else conversion)) % number
+        spec = "d" if conversion in "iu" else conversion
+        return ("%" + flags + padding(flags, width, spec, number) + spec) % number
     value = {"b": unescape, "q": shlex.quote, "c": lambda arg: arg[:1]}.get(
         conversion, str
     )(arg)
-    return ("%" + flags + precision + "s") % value
+    spec = precision + "s"
+    return ("%" + flags + padding(flags, width, spec, value) + spec) % value
 
 
-def printf_text(format_, args):
-    """Returns the text printf writes for a format and its arguments, and the arguments left over when a conversion is not modelled."""
+def printf_text(format_, args, quotes=True):
+    """Returns the text printf writes for a format and its arguments, and the arguments left over when a conversion is not modelled.
+    Output past SCRIPT_SCAN_LIMIT is cut and ends in CUT."""
     out, used, modelled, size = [], 0, True, 0
     while True:
         start, position, first = used, 0, len(out)
         for match in PRINTF_CONVERSION.finditer(format_):
             place, flags, width, precision, conversion = match.groups(default="")
-            out.append(unescape(format_[position : match.start()]))
+            out.append(unescape(format_[position : match.start()], quotes))
             position = match.end()
             if conversion == "%":
                 out.append("%")
                 continue
-            if place:
+            if place and len(place) < 10:
                 used = max(int(place[:-1]) - 1, 0)
+            elif place:
+                modelled = False
             used += (width == "*") + (precision == ".*")
             arg = args[used] if used < len(args) else ""
             used += 1
             try:
                 if "*" in width + precision or conversion not in "sbcdiuxXoq":
                     raise ValueError(conversion)
-                out.append(printf_value(flags, precision, conversion, arg))
+                out.append(printf_value(flags, width, precision, conversion, arg))
             except (ValueError, TypeError):
                 modelled = False
                 out.append(arg)
-        out.append(unescape(format_[position:]))
+        out.append(unescape(format_[position:], quotes))
         size += sum(map(len, out[first:]))
         if size > SCRIPT_SCAN_LIMIT:
-            return "".join(out)[:SCRIPT_SCAN_LIMIT], False
+            return "".join(out)[:SCRIPT_SCAN_LIMIT] + CUT, False
         if used >= len(args) or used == start:
             return "".join(out), modelled
 
@@ -762,15 +780,16 @@ def echoed_text(words):
         while args[:1] == ["--"] or args[:1] == ["-v"]:
             args = args[2:] if args[0] == "-v" else args[1:]
         if args:
-            text, modelled = printf_text(args[0], args[1:])
-            texts.append(text)
+            for quotes in (True, False):
+                text, modelled = printf_text(args[0], args[1:], quotes)
+                texts.append(text)
             if not modelled:
                 texts.append("\n".join(args[1:]))
     else:
         while args and ECHO_OPTIONS.match(args[0]):
             args = args[1:]
         texts += [" ".join(args), unescape(" ".join(args))]
-    return "\n".join(dict.fromkeys(texts))
+    return VARIANT.join(dict.fromkeys(texts))
 
 
 def shell_programs(words):
@@ -983,6 +1002,17 @@ def guard_broad_kill(raw):
 
 SCRIPT_SCAN_LIMIT = 64 * 1024
 SCRIPT_SCAN_BUDGET = 512 * 1024
+
+
+def joined(texts):
+    """Joins texts that may each hold VARIANT alternatives, so every alternative of every text lands in a joined piece."""
+    parts = [text.split(VARIANT) for text in texts]
+    return VARIANT.join(
+        "\n".join(part[min(i, len(part) - 1)] for part in parts)
+        for i in range(max(map(len, parts)))
+    )
+
+
 SCRIPT_SCAN_SECONDS = 5
 SCRIPT_HEREDOC_LIMIT = 64
 SCRIPT_SHELLS = SHELL_EXECUTABLES - {"eval"}
@@ -1114,7 +1144,11 @@ def stdin_program(words, where, pipeline, redirects, env, written):
             if size < SCRIPT_SCAN_LIMIT:
                 parts.append(written_or_disk_text(key, written))
                 size += len(parts[-1]) + 1
-        return "\n".join(parts)[:SCRIPT_SCAN_LIMIT]
+        return VARIANT.join(
+            piece[:SCRIPT_SCAN_LIMIT]
+            + (CUT if CUT in piece[SCRIPT_SCAN_LIMIT:] else "")
+            for piece in joined(parts or [""]).split(VARIANT)
+        )
     return None
 
 
@@ -1140,7 +1174,7 @@ def runs(entries, disabled):
         for target, append in targets:
             key = run_key(target, where, env)
             before = written_or_disk_text(key, written) if append else ""
-            written[key] = before + "\n" + text if before else text
+            written[key] = joined([before, text]) if before else text
         if "guard_inline_shell" not in disabled:
             for text in shell_programs(words):
                 yield "an inline shell program", text, where, None
@@ -1201,8 +1235,19 @@ class ScanBudget(Exception):
     pass
 
 
+class PrintfCut(Exception):
+    pass
+
+
 def code_kills(code, cwd, disabled, depth, state):
     """True when code a shell runs kills broadly, directly or through code it runs in turn."""
+    if CUT in code:
+        raise PrintfCut
+    if VARIANT in code:
+        return any(
+            code_kills(piece, cwd, disabled, depth, state)
+            for piece in code.split(VARIANT)
+        )
     code = bounded(code)
     state["left"] -= len(code)
     if state["left"] < 0:
@@ -1249,6 +1294,8 @@ def guard_script_kill(raw, cwd, disabled):
         for label, code, where, _ in runs(entries, disabled):
             if code_kills(code, where, disabled, 1, state):
                 return f"{BROAD_KILL_REASON} Found inside {label}."
+    except PrintfCut:
+        return PRINTF_TOO_LARGE_REASON
     except ScanBudget as exc:
         log_failure(exc, raw, "scan-budget")
     except Exception as exc:
