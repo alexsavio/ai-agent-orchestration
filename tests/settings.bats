@@ -142,6 +142,14 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   [[ "$output" != "declare -x "* ]]
 }
 
+@test "the loader leaves an unexported reasoning effort unexported in the caller with no config file" {
+  unset ORCH_CONFIG
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high"; orch_load_config; declare -p ORCH_CODEX_SMART_REASONING_EFFORT' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != "declare -x "* ]]
+}
+
 @test "a variable set but not exported also wins over the file" {
   printf '[heavy_slots]\nmax = 2\ndir = "/from/file"\n' >"$ORCH_CONFIG"
 
