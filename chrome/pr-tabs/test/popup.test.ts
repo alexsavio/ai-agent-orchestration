@@ -17,6 +17,10 @@ afterEach(() => {
 
 function noop(): void {}
 
+function withoutPolls(sent: Request[]): Request[] {
+  return sent.filter((message) => message.type !== "openingProgress");
+}
+
 const SUMMARY: Summary = {
   prs: 2,
   groups: [{ id: "1", title: "Finder", color: "yellow", count: 2, prs: [] }],
@@ -123,7 +127,7 @@ test("submitting the form sends the input with the picked repo and closes the po
   await wrapper.find("form").trigger("submit");
   await flushPromises();
 
-  assert.deepEqual(sent, [
+  assert.deepEqual(withoutPolls(sent), [
     { type: "pickRepo", repo: "api" },
     { type: "goTo", input: "76", repo: "api" },
   ]);
@@ -221,13 +225,13 @@ test("the first expanded group looks up panes once; go to pane focuses and close
     await flushPromises();
   }
 
-  assert.deepEqual(sent, [{ type: "panes", heads: [PANE_HEAD] }]);
+  assert.deepEqual(withoutPolls(sent), [{ type: "panes", heads: [PANE_HEAD] }]);
   assert.equal(wrapper.findAll(".p-tag").length, 2);
 
   await wrapper.find("li .p-button").trigger("click");
   await flushPromises();
 
-  assert.deepEqual(sent.at(-1), { type: "focusPane", head: PANE_HEAD });
+  assert.deepEqual(withoutPolls(sent).at(-1), { type: "focusPane", head: PANE_HEAD });
   assert.equal(close.mock.calls.length, 1);
 
   wrapper.unmount();
@@ -387,7 +391,7 @@ test("a terminal focus failure is visible in the popup error status", async () =
   await wrapper.find("li .p-button").trigger("click");
   await flushPromises();
 
-  assert.deepEqual(sent.at(-1), { type: "focusPane", head });
+  assert.deepEqual(withoutPolls(sent).at(-1), { type: "focusPane", head });
   assert.equal(
     wrapper.find("#status .p-message-error").text(),
     "Native focus failed: diagnostic reason",
@@ -410,7 +414,7 @@ test("selecting a row focuses its existing tab and closes the popup", async () =
     sent.length = 0;
     await wrapper.find("button[data-pr-tab]").trigger("click");
     await flushPromises();
-    assert.deepEqual(sent, [{ type: "focusPr", key: "acme/webapp#1" }]);
+    assert.deepEqual(withoutPolls(sent), [{ type: "focusPr", key: "acme/webapp#1" }]);
     assert.equal(close.mock.calls.length, 1);
   } finally {
     wrapper.unmount();
