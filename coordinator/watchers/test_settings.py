@@ -1004,7 +1004,7 @@ class ProvidersTest(SettingsTest):
         for role in ("coordinator", "architect", "worker", "reviewer"):
             with self.subTest(role):
                 self.assertIn(
-                    f'models.{role}_effort: unknown value "turbo"; known: low, medium, high, xhigh, max',
+                    f'models.{role}_effort: unknown value "turbo"; known: empty, low, medium, high, xhigh, max',
                     self.error(f'[models]\n{role}_effort = "turbo"\n'),
                 )
 
@@ -1020,19 +1020,28 @@ class ProvidersTest(SettingsTest):
                         level,
                     )
 
-    def test_the_effort_defaults_are_medium_except_the_reviewer(self):
+    def test_every_effort_defaults_to_empty_so_no_saved_level_is_lowered(self):
+        for role in ("coordinator", "architect", "worker", "reviewer"):
+            with self.subTest(role):
+                self.assertEqual(s.BY_KEY[f"models.{role}_effort"].default, "")
+
+    def test_an_empty_effort_is_valid_in_the_file(self):
+        path = self.write("e.toml", '[models]\nworker_effort = ""\n')
         self.assertEqual(
-            {
-                role: s.BY_KEY[f"models.{role}_effort"].default
-                for role in ("coordinator", "architect", "worker", "reviewer")
-            },
-            {
-                "coordinator": "medium",
-                "architect": "medium",
-                "worker": "medium",
-                "reviewer": "high",
-            },
+            s.read_file(path, "global")[s.BY_KEY["models.worker_effort"]], ""
         )
+
+    def test_an_exported_effort_is_checked_like_a_file_value(self):
+        for role in ("COORDINATOR", "ARCHITECT", "WORKER", "REVIEWER"):
+            name = f"ORCH_{role}_EFFORT"
+            with self.subTest(role):
+                with self.assertRaisesRegex(
+                    s.ConfigError,
+                    rf'models.{role.lower()}_effort \({name}\): unknown value "bogus"; known: empty, low',
+                ):
+                    self.resolve(**{name: "bogus"})
+                self.assertEqual(self.resolve(**{name: ""})[name], "")
+                self.assertEqual(self.resolve(**{name: "max"})[name], "max")
 
     def test_one_codex_model_is_enough_and_serves_both_tiers(self):
         for worker, smart in (

@@ -49,14 +49,14 @@ claude = ["haiku", "sonnet", "opus", "fable"]
 coordinator = "claude-opus-5-5"
 # Model of the architects
 architect = "claude-opus-5-5"
-# Claude effort level of the Coordinator, passed as --effort at every start and recycle
-coordinator_effort = "medium"
-# Claude effort level of the architects, passed as --effort at every start and recycle
-architect_effort = "medium"
-# Claude effort level of Claude workers (the architect may pick another level per dispatch), passed as --effort at every start and recycle
-worker_effort = "medium"
-# Claude effort level of Claude reviewers, passed as --effort at every start and recycle
-reviewer_effort = "high"
+# Claude effort level of the Coordinator, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it
+coordinator_effort = ""
+# Claude effort level of the architects, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it
+architect_effort = ""
+# Claude effort level of Claude workers (the architect may pick another level per dispatch), passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it
+worker_effort = ""
+# Claude effort level of Claude reviewers, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it
+reviewer_effort = ""
 # Codex model for routine work; empty or a placeholder means codex_smart serves it too. With codex on, set at least one of the two
 codex_worker = "<codex-worker-model>"
 # Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two

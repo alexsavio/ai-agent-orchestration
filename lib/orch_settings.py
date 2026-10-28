@@ -225,32 +225,32 @@ SETTINGS = [
         "models.coordinator_effort",
         "ORCH_COORDINATOR_EFFORT",
         "str",
-        "medium",
-        "Claude effort level of the Coordinator, passed as --effort at every start and recycle",
+        "",
+        "Claude effort level of the Coordinator, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it",
         choices=EFFORT_LEVELS,
     ),
     _g(
         "models.architect_effort",
         "ORCH_ARCHITECT_EFFORT",
         "str",
-        "medium",
-        "Claude effort level of the architects, passed as --effort at every start and recycle",
+        "",
+        "Claude effort level of the architects, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it",
         choices=EFFORT_LEVELS,
     ),
     _g(
         "models.worker_effort",
         "ORCH_WORKER_EFFORT",
         "str",
-        "medium",
-        "Claude effort level of Claude workers (the architect may pick another level per dispatch), passed as --effort at every start and recycle",
+        "",
+        "Claude effort level of Claude workers (the architect may pick another level per dispatch), passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it",
         choices=EFFORT_LEVELS,
     ),
     _g(
         "models.reviewer_effort",
         "ORCH_REVIEWER_EFFORT",
         "str",
-        "high",
-        "Claude effort level of Claude reviewers, passed as --effort at every start and recycle",
+        "",
+        "Claude effort level of Claude reviewers, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it",
         choices=EFFORT_LEVELS,
     ),
     _g(
@@ -896,9 +896,9 @@ def validate(data, label, scope):
             if has_nul(value):
                 raise ConfigError(f"{label}: {key}: contains a NUL character")
             if setting.kind == "str" and setting.choices is not None:
-                if value not in setting.choices:
+                if value != "" and value not in setting.choices:
                     raise ConfigError(
-                        f"{label}: {key}: unknown value {json.dumps(value)}; known: {', '.join(setting.choices)}"
+                        f"{label}: {key}: unknown value {json.dumps(value)}; known: empty, {', '.join(setting.choices)}"
                     )
             if setting.kind == "list":
                 for item in value:
@@ -941,6 +941,13 @@ def resolved_global(path, environ):
         s.env: environ.get(s.env, file.get(s.env, env_value(s, s.default)))
         for s in listed("global")
     }
+    for setting in listed("global"):
+        if setting.kind == "str" and setting.choices is not None:
+            value = values[setting.env]
+            if value != "" and value not in setting.choices:
+                raise ConfigError(
+                    f"{setting.key} ({setting.env}): unknown value {json.dumps(value)}; known: empty, {', '.join(setting.choices)}"
+                )
     values[BY_KEY["providers.enabled"].env] = ",".join(enabled_providers(values))
     values[BY_KEY["providers.claude"].env] = ",".join(claude_tiers(values))
     return values

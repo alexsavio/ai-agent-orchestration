@@ -51,16 +51,31 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   run load_settings global
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c .)" -eq "$(python3 "$SETTINGS" keys "$ORCH_CONFIG" | wc -w)" ]
+  # The effort settings accept only a level or empty, so they get a level; every other setting gets env-<NAME>.
+  exported_value() { case "$1" in *_EFFORT) printf 'xhigh' ;; *) printf 'env-%s' "$1" ;; esac; }
   for name in $(python3 "$SETTINGS" keys "$ORCH_CONFIG"); do
-    [[ "$output" != *"$name=env-$name"* ]]
-    export "$name=env-$name"
+    [[ "$output" != *"$name=$(exported_value "$name")"* ]]
+    export "$name=$(exported_value "$name")"
   done
 
   run load_settings global
 
   [ "$status" -eq 0 ]
   for name in $(python3 "$SETTINGS" keys "$ORCH_CONFIG"); do
-    printf '%s\n' "$output" | grep -qxF "$name=env-$name"
+    printf '%s\n' "$output" | grep -qxF "$name=$(exported_value "$name")"
+  done
+}
+
+@test "an exported effort that is not empty or a level is an error; empty is valid" {
+  every_value global >"$ORCH_CONFIG"
+  for name in ORCH_COORDINATOR_EFFORT ORCH_ARCHITECT_EFFORT ORCH_WORKER_EFFORT ORCH_REVIEWER_EFFORT; do
+    run env "$name=bogus" python3 "$SETTINGS" print "$ORCH_CONFIG"
+    echo "$output"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"unknown value \"bogus\"; known: empty, low, medium, high, xhigh, max"* ]]
+    run env "$name=" python3 "$SETTINGS" print "$ORCH_CONFIG"
+    [ "$status" -eq 0 ]
+    printf '%s\n' "$output" | grep -qxF "$name="
   done
 }
 
