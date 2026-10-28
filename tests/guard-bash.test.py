@@ -1284,6 +1284,17 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("zsh attached option then inline kill", "zsh -eopipefail -c 'pkill -f vite'"),
         ("zsh option name in the next word", "zsh -o pipefail -c 'pi -p hello'"),
         ("ksh grouped option then its name", "ksh -eo errexit kills.sh"),
+        ("zsh option name with n", "zsh -onounset kills.sh"),
+        ("zsh option name with c and n", "zsh -onoclobber kills.sh"),
+        ("ksh option name with c, then a program", "ksh -onoclobber 'pi -p hello'"),
+        ("ksh runs a missing script as a program", "ksh 'pi -p hello'"),
+        ("ksh -o value is optional before -c", "ksh -eo -c 'pi -p hello'"),
+        (
+            "ksh -o value is optional before -s",
+            "ksh -eo -s arg <<'EOF'\npi -p hello\nEOF",
+        ),
+        ("ksh -o value is optional before +e", "ksh -o +e -c 'pi -p hello'"),
+        ("ksh lone -o before -s", "ksh -o -s arg <<'EOF'\npi -p hello\nEOF"),
         ("bash two letters then option name", "bash -oe pipefail -c 'pi -p hello'"),
         ("sh two letters then option name", "sh -oe pipefail -c 'pi -p hello'"),
         ("single dash rcfile", "bash -rcfile /dev/null kills.sh"),
@@ -1385,6 +1396,39 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("substitution ps kill", "kill $(ps aux | grep vite | awk '{print $2}')"),
     ]:
         case(name, command, True)
+    for name, command in [
+        ("kill -TERM -1", "kill -TERM -1"),
+        ("kill -9 -1", "kill -9 -1"),
+        ("kill -KILL -1", "kill -KILL -1"),
+        ("kill -SIGTERM -1", "kill -SIGTERM -1"),
+        ("kill -s TERM -1", "kill -s TERM -1"),
+        ("kill -n 9 -1", "kill -n 9 -1"),
+        ("kill -- -1", "kill -- -1"),
+        ("kill -9 -- -1", "kill -9 -- -1"),
+        ("kill with a pid then -1", "kill -TERM 1234 -1"),
+        ("kill by path -1", "/bin/kill -TERM -1"),
+        ("kill -1 on every process", "kill -1 -1"),
+        ("inline bash kill -1", "bash -c 'kill -9 -1'"),
+        ("sudo kill -1", "sudo kill -9 -1"),
+        ("written script kill -1", "cat > k.sh <<'EOF'\nkill -TERM -1\nEOF\nbash k.sh"),
+    ]:
+        case(name, command, True)
+    for name, command in [
+        ("kill signal 1 to a pid", "kill -1 1234"),
+        ("kill -HUP pid", "kill -HUP 1234"),
+        ("kill -TERM pid", "kill -TERM 1234"),
+        ("kill -l", "kill -l"),
+        ("kill job", "kill %1"),
+        ("kill -1 alone", "kill -1"),
+        ("kill -s takes -1 as its signal", "kill -s -1 1234"),
+        ("kill -n takes -1 as its signal", "kill -n -1 1234"),
+        ("ls -a -1 is not a kill", "ls -a -1"),
+        ("kill -1 text not run", "echo 'kill -9 -1' >| notes.md"),
+        ("zsh does not run a missing script as text", "zsh -onoclobber 'pi -p hello'"),
+        ("zsh -o takes -c as its value", "zsh -eo -c 'pi -p hello'"),
+        ("bash -o takes -c as its value", "bash -o -c 'pi -p hello'"),
+    ]:
+        case(name, command)
     case("killall regex vite", 'killall -m "vit.*"', True)
     case("killall bundle", "killall bundle", True)
     case("killall regex rails", 'killall -m "rail.*"', True)

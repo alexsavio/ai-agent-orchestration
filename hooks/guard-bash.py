@@ -570,14 +570,19 @@ SHELL_SINGLE_DASH_FLAGS = {
 def shell_args(words):
     """Parses a shell's options; returns (-c mode, -s mode, -n syntax check only, operands)."""
     command_mode = stdin_mode = check_only = False
-    letter_options = os.path.basename(words[0]) in ("zsh", "ksh")
+    ksh = os.path.basename(words[0]) == "ksh"
+    letter_options = ksh or os.path.basename(words[0]) == "zsh"
     index = 1
     while index < len(words):
         word = words[index]
+        # ksh93 does not take a word that starts with - or + as the -o value
+        takes_value = not (
+            ksh and index + 1 < len(words) and words[index + 1].startswith(("-", "+"))
+        )
         if word == "--guard-heredoc":
             index += 2
         elif word in (("-o", "+o") if letter_options else SHELL_OPTION_VALUES):
-            index += 2
+            index += 1 + takes_value
         elif word == "--":
             index += 1
             break
@@ -587,7 +592,7 @@ def shell_args(words):
             letters = word[1:]
             if letter_options:
                 letters, o, name = letters.partition("o")
-                values = bool(o and not name)
+                values = bool(o and not name and takes_value)
             else:
                 values = sum(c in "oO" for c in letters)
             command_mode = command_mode or "c" in letters
@@ -625,7 +630,8 @@ def shell_programs(words):
         return []
     heredocs = heredoc_bodies(words)
     command_mode, stdin_mode, _, operands = shell_args(words)
-    if command_mode:
+    # ksh93 runs a script operand it cannot open as -c text
+    if command_mode or (name == "ksh" and operands and not stdin_mode):
         return operands[:1]
     return heredocs if stdin_mode or not operands else []
 
@@ -706,6 +712,18 @@ def broad_kill_stage(words, wrapped):
     return "xargs" in wrapped or any(not target.isdigit() for target in targets)
 
 
+def kills_every_process(words):
+    """True for a kill whose pid operands include -1, which signals every process the user owns."""
+    if not words or os.path.basename(words[0]) != "kill":
+        return False
+    targets = words[1:]
+    if targets[:1] in (["-s"], ["-n"]):
+        targets = targets[2:]
+    elif targets[:1] and targets[0].startswith("-"):
+        targets = targets[1:]
+    return "-1" in targets
+
+
 def listing_kind(words):
     name = os.path.basename(words[0]) if words else ""
     options = words[1 : words.index("--")] if "--" in words else words[1:]
@@ -773,13 +791,19 @@ def broad_kill_text(raw, depth=0):
         kills = [words for words, wrapped in stages if broad_kill_stage(words, wrapped)]
         feeding = feeds_kill(stages)
         if (
-            kills
-            and (
-                feeding
-                or references(tainted, [word for words in kills for word in words[1:]])
+            any(kills_every_process(words) for words, _ in stages)
+            or (
+                kills
+                and (
+                    feeding
+                    or references(
+                        tainted, [word for words in kills for word in words[1:]]
+                    )
+                )
             )
-        ) or shell_program_kills(
-            [(unmask_words(segment), False) for segment in unit], depth
+            or shell_program_kills(
+                [(unmask_words(segment), False) for segment in unit], depth
+            )
         ):
             return True
         values = assignments(unit)
@@ -979,7 +1003,7 @@ def kill_words(entries, text):
 
 
 def bounded(code):
-    """Joins line continuations, then cuts code at a heredoc marker over 256 characters or after SCRIPT_HEREDOC_LIMIT heredoc operators; the heredoc matcher is quadratic on unterminated ones."""
+    """Joins line continuations, then cuts code at a heredoc marker over 256 characters or after SCRIPT_HEREDOC_LIMIT `<<`; the heredoc matcher is quadratic on unterminated ones."""
     code = re.sub(r"\\\n[ \t]*", "", code)
     long_marker = re.search(r"<<-?[ \t]*['\"]?\w{257}", code)
     if long_marker:
