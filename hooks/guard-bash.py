@@ -28,6 +28,68 @@ BIG_REPO_REASON = (
 )
 BIG_REPO_BATCH_REASON = "No whole-tree cat-file batch read in a configured big repo. Use rg scoped to the directories you need."
 PI_REASON = "pi starts only through ~/.claude/coordinator/pi-start.sh <name> <pane> <worker|smart>; DeepSeek is off unless the repo opted in, and a live pi never switches model."
+CODEX_REASON = "A raw codex start may not carry --dangerously-bypass-hook-trust, --dangerously-bypass-approvals-and-sandbox, --yolo, --full-auto, --approve-for-me, -a/--ask-for-approval, -s/--sandbox, --add-dir, -p/--profile, --disable hooks, -c/--config keys starting sandbox, approval, permissions, default_permissions, profiles or hooks, or a $ or backtick in its agent arguments; start a bypassed Codex worker with ~/.claude/coordinator/codex-start.sh <name> <pane> <worker|smart>."
+CODEX_FLAGS = (
+    "--dangerously-bypass-hook-trust",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--yolo",
+    "--full-auto",
+    "--approve-for-me",
+    "--ask-for-approval",
+    "--add-dir",
+    "--sandbox",
+    "--profile",
+    "--disable=hook",
+)
+CODEX_SHORT = re.compile(r"-[sap]")
+CODEX_KEY = (
+    "sandbox",
+    "approval",
+    "default_permissions",
+    "permissions",
+    "profiles",
+    "hooks",
+)
+
+
+def codex_key_widened(override):
+    """True when a -c override sets a sandbox, approval or permissions key, also under profiles.<name>."""
+    key = override.lstrip("= \t").split("=", 1)[0]
+    return any(
+        part.strip(" \t\"'").lower().startswith(CODEX_KEY) for part in key.split(".")
+    )
+
+
+def codex_widened(agent_args):
+    """True when a codex start's own arguments bypass hook trust, approvals or the sandbox."""
+    skip = False
+    for index, arg in enumerate(agent_args):
+        if skip:
+            skip = False
+            continue
+        if arg in ("--cd", "-C", "--model", "-m"):
+            skip = True
+        elif arg == "--disable":
+            if "hook" in "".join(agent_args[index + 1 : index + 2]).lower():
+                return True
+            skip = True
+        elif arg.startswith(CODEX_FLAGS) or CODEX_SHORT.match(arg):
+            return True
+        elif arg in ("-c", "--config"):
+            if codex_key_widened("".join(agent_args[index + 1 : index + 2])):
+                return True
+            skip = True
+        elif arg.startswith("--config=") and codex_key_widened(arg[len("--config=") :]):
+            return True
+        elif (
+            arg.startswith("-c")
+            and not arg.startswith("--")
+            and codex_key_widened(arg[2:])
+        ):
+            return True
+    return False
+
+
 MODEL_COMMAND = re.compile(r"\s*/(?:model|models|scoped-models|settings)\b", re.I)
 BAD_ATTR = re.compile(
     r"co-authored-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|co-authored-by:[^\n]*(?:anthropic\.com|openai\.com|chatgpt\.com)|generated-by:\s*(?:Claude|Codex|ChatGPT|OpenAI|Copilot|Gemini)|Generated (?:with|using) (?:\[?(?:Claude Code|Codex|ChatGPT|OpenAI|Copilot|Gemini)\]?)|🤖\s*Generated|claude\.ai/code/session_",
@@ -1273,6 +1335,11 @@ def guard_pi(executable, args, where=".", disabled=()):
         if pair == ("agent", "start"):
             kinds = pi_kind(args)
             agent_args = rest[rest.index("--") + 1 :] if "--" in rest else []
+            if "codex" in kinds and (
+                codex_widened(agent_args)
+                or any(re.search(r"[$`]", a) for a in agent_args)
+            ):
+                return CODEX_REASON
             agent_args = [
                 a
                 for i, a in enumerate(agent_args)
@@ -1343,7 +1410,7 @@ def guard_pi_text(text, where, disabled, depth, direct=True, strict=False):
                     and os.path.basename(candidate[0]) == "pi"
                     and not pi_info(candidate[1:])
                 ):
-                    return PI_REASON
+                    return reason or PI_REASON
         for nested in [
             body for word in segment for body in word_substitutions(word)
         ] + shell_programs(words):
