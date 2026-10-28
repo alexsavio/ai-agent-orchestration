@@ -1,4 +1,7 @@
-"""Appends one usage line for a pane that is about to be closed on purpose; best effort, never blocks the close."""
+"""Usage ledger line for a pane that is closed on purpose; best effort, never blocks the close.
+
+`usage_ledger.py <pane>` prints the row (herdr still knows the pane); `usage_ledger.py --append <row>` writes it,
+which close-pane.sh does only after the close worked."""
 
 import json
 import os
@@ -105,11 +108,14 @@ def append(row):
 
 def main(argv):
     try:
-        row = record(
-            argv[1], datetime.now().astimezone(), time.monotonic() + DEADLINE_S
-        )
-        if row:
-            append(row)
+        if argv[1] == "--append":
+            append(argv[2].split("\t"))
+        else:
+            row = record(
+                argv[1], datetime.now().astimezone(), time.monotonic() + DEADLINE_S
+            )
+            if row:
+                print("\t".join(cell(value) for value in row))
     except NoAgent:
         pass
     except Exception as error:  # best effort: the close must still run

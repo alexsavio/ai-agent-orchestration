@@ -87,10 +87,11 @@ close_pane() {
   grep -qx 'pane close wW:p1' "$HERDR_CALLS"
 }
 
-@test "a failed close still exits 1 and removes the marker" {
+@test "a failed close still exits 1, removes the marker and writes no ledger row" {
   HERDR_CLOSE_FAIL=1 close_pane wW:p1
   [ "$status" -eq 1 ]
   [ ! -e "$ORCH_CLOSED_DIR/wW:p1" ]
+  [ ! -e "$LEDGER" ]
 }
 
 @test "a pane with no agent gets no line and no warning (real agent_not_found reply)" {
