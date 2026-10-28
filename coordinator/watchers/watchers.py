@@ -32,6 +32,7 @@ from watcher_platform import (
     herdr_bin,
     host_metrics,
     process_rows,
+    take_slot_events,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -1732,7 +1733,10 @@ def reduce(mode, before, raw):
         return reduce_workers(before, raw)
     after = conditions(mode, raw)
     if mode in PRESSURE_SETTINGS:
-        return reduce_pressure(mode, before, raw, after)
+        state, events = reduce_pressure(mode, before, raw, after)
+        if mode == "balance":
+            events = events + raw.get("slot_events", [])
+        return state, events
     if mode == "context":
         return reduce_context(before, after, raw)
     return reduce_hog(before, after)
@@ -1973,7 +1977,7 @@ def cycle_pass(base, mode, collector, failures, budget):
                     line
                     for line in reduced_events
                     if line.startswith(
-                        ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ")
+                        ("WORKER DONE ", "WORKER QUESTION ", "TODO ANSWER ", "SLOT ")
                     )
                 ]
             if mode == "hog":
@@ -2342,7 +2346,10 @@ def collect(mode, before, scope="", base=None):
     if mode == "host":
         return host_metrics(command)
     if mode == "balance":
-        return balance_metrics(command, balance_limits(), before=before)
+        raw = balance_metrics(command, balance_limits(), before=before)
+        raw["slot_events"], failed = take_slot_events()
+        raw["unreadable"] = sorted(raw["unreadable"] + failed)
+        return raw
     if mode == "prs":
         spec = importlib.util.spec_from_file_location("prs_copy", ROOT / "prs-copy.py")
         module = importlib.util.module_from_spec(spec)
