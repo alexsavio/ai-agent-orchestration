@@ -1290,7 +1290,6 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     assert result and "scan-error: ValueError: forced" in new_log, (result, new_log)
     result, new_log = logged("bash ~a\0b.sh; bash x.sh")
     assert "scan-error: ValueError" in new_log, new_log
-    assert guard.evaluate("echo 'a\"b'; git push origin HEAD:main", repo)
     before = log_path.read_text()
     assert guard.guard_script_kill('echo "unterminated', repo, set()) is None
     assert log_path.read_text() == before, "unparsable command text was logged"

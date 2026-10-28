@@ -817,7 +817,7 @@ def script_text(path):
             return None
         with open(path, "rb") as handle:
             data = handle.read(SCRIPT_SCAN_LIMIT)
-    except (OSError, ValueError):
+    except OSError:
         return None
     return None if b"\0" in data else data.decode("utf-8", "replace")
 
@@ -925,7 +925,7 @@ def runs(entries, disabled):
         text, targets = written_text(words, redirects)
         for target in targets:
             key = run_key(target, where, env)
-            if key and text is not None:
+            if key:
                 written[key] = text
         if "guard_inline_shell" not in disabled:
             for text in shell_programs(words):
@@ -1165,7 +1165,6 @@ def without_redirections(words):
 
 
 def redirections(words):
-    """Returns (operator, target) pairs for the redirections in masked words."""
     return [
         (words[i], unmask(words[i + 1]))
         for i in range(len(words) - 1)
