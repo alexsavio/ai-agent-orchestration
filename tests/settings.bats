@@ -31,7 +31,15 @@ import sys
 sys.path.insert(0, sys.argv[1])
 import orch_settings as s
 values = {'str': 'from-file', 'int': 7, 'number': 7.5, 'bool': True, 'list': ['a', 'b'], 'json': [{'name': 'file'}], 'tables': [{'name': 'file'}]}
-print(s.render({setting: ((setting.choices[0] if setting.kind == 'str' else list(setting.required) or setting.choices[:1]) if setting.choices else values[setting.kind]) for setting in s.scoped(sys.argv[2]) if not setting.local_only}), end='')
+def sample(setting):
+    if setting.choices:
+        if setting.kind == 'str':
+            return setting.choices[0]
+        return list(setting.required) or setting.choices[:1]
+    if setting.pattern:
+        return 'fromfile'  # one lowercase word, matching the pattern
+    return values[setting.kind]
+print(s.render({setting: sample(setting) for setting in s.scoped(sys.argv[2]) if not setting.local_only}), end='')
 PY
 }
 
@@ -51,8 +59,8 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   run load_settings global
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c .)" -eq "$(python3 "$SETTINGS" keys "$ORCH_CONFIG" | wc -w)" ]
-  # The effort settings accept only a level or empty, so they get a level; every other setting gets env-<NAME>.
-  exported_value() { case "$1" in *_EFFORT) printf 'xhigh' ;; *) printf 'env-%s' "$1" ;; esac; }
+  # The Claude effort settings accept only a level or empty, the Codex one a lowercase word; every other setting gets env-<NAME>.
+  exported_value() { case "$1" in ORCH_CODEX_SMART_REASONING_EFFORT) printf 'envword' ;; *_EFFORT) printf 'xhigh' ;; *) printf 'env-%s' "$1" ;; esac; }
   for name in $(python3 "$SETTINGS" keys "$ORCH_CONFIG"); do
     [[ "$output" != *"$name=$(exported_value "$name")"* ]]
     export "$name=$(exported_value "$name")"
@@ -78,6 +86,93 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
     [ "$status" -eq 0 ]
     printf '%s\n' "$output" | grep -qxF "$name="
   done
+}
+
+@test "an exported bad reasoning effort fails the shell loader" {
+  every_value global >"$ORCH_CONFIG"
+  export ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"
+  run load_settings global
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "an exported good reasoning effort is accepted by the shell loader" {
+  every_value global >"$ORCH_CONFIG"
+  export ORCH_CODEX_SMART_REASONING_EFFORT="high"
+  run load_settings global
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF "ORCH_CODEX_SMART_REASONING_EFFORT=high"
+}
+
+@test "an exported bad reasoning effort fails the shell loader with no config file" {
+  unset ORCH_CONFIG
+  export ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"
+  run load_settings global
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "an exported good reasoning effort passes the shell loader with no config file" {
+  unset ORCH_CONFIG
+  export ORCH_CODEX_SMART_REASONING_EFFORT="high"
+  run load_settings global
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qxF "ORCH_CODEX_SMART_REASONING_EFFORT=high"
+}
+
+@test "an unexported bad reasoning effort fails the shell loader" {
+  every_value global >"$ORCH_CONFIG"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"; orch_load_config' _ "$ROOT"
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "an unexported bad reasoning effort fails the shell loader with no config file" {
+  unset ORCH_CONFIG
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"; orch_load_config' _ "$ROOT"
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "a bad Claude effort fails the shell loader with or without a config file, exported or not; a level and empty pass" {
+  for config in file none; do
+    if [ "$config" = file ]; then every_value global >"$ORCH_CONFIG"; else unset ORCH_CONFIG; fi
+    for name in ORCH_COORDINATOR_EFFORT ORCH_ARCHITECT_EFFORT ORCH_WORKER_EFFORT ORCH_REVIEWER_EFFORT; do
+      for bad in "high xhigh" High; do
+        # shellcheck disable=SC2016 # The child shell expands these.
+        run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; export "$2=$3"; orch_load_config' _ "$ROOT" "$name" "$bad"
+        [ "$status" -eq 2 ] || { echo "$config exported $name=$bad: $status"; false; }
+        printf '%s\n' "$output" | grep -qF "($name): unknown value"
+        # shellcheck disable=SC2016 # The child shell expands these.
+        run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; printf -v "$2" %s "$3"; orch_load_config' _ "$ROOT" "$name" "$bad"
+        [ "$status" -eq 2 ] || { echo "$config unexported $name=$bad: $status"; false; }
+        printf '%s\n' "$output" | grep -qF "($name): unknown value"
+      done
+      for good in xhigh ""; do
+        # shellcheck disable=SC2016 # The child shell expands these.
+        run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; export "$2=$3"; orch_load_config' _ "$ROOT" "$name" "$good"
+        [ "$status" -eq 0 ] || { echo "$config good $name=$good: $status"; false; }
+      done
+    done
+  done
+}
+
+@test "an unexported good reasoning effort still wins over the file" {
+  every_value global >"$ORCH_CONFIG"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high"; orch_load_config; echo "$ORCH_CODEX_SMART_REASONING_EFFORT"' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "high" ]
+}
+
+@test "the loader leaves an unexported reasoning effort unexported in the caller" {
+  every_value global >"$ORCH_CONFIG"
+  # shellcheck disable=SC2016 # The child shell expands these.
+  run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high"; orch_load_config; declare -p ORCH_CODEX_SMART_REASONING_EFFORT' _ "$ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != "declare -x "* ]]
 }
 
 @test "a variable set but not exported also wins over the file" {

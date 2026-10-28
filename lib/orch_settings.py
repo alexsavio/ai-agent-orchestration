@@ -37,6 +37,8 @@ class Setting:
         why="",
         nonempty=False,
         shared=False,
+        pattern=None,
+        pattern_doc="",
     ):
         self.key, self.env, self.kind, self.default = key, env, kind, default
         self.scope, self.doc, self.sep, self.paths = scope, doc, sep, paths
@@ -48,6 +50,7 @@ class Setting:
         )
         self.nonempty = nonempty
         self.shared = shared
+        self.pattern, self.pattern_doc = pattern, pattern_doc
 
     @property
     def table(self):
@@ -76,7 +79,9 @@ class Provider:
 PROVIDERS = [
     Provider("claude", ["ORCH_COORDINATOR_MODEL", "ORCH_ARCHITECT_MODEL"]),
     Provider("codex", ["ORCH_CODEX_WORKER_MODEL", "ORCH_CODEX_SMART_MODEL"], "one"),
-    Provider("pi", ["ORCH_PI_WORKER_MODEL", "ORCH_PI_SMART_MODEL"], "none"),
+    Provider(
+        "pi", ["ORCH_PI_WORKER_MODEL", "ORCH_PI_SMART_MODEL", "ORCH_PI_MODELS"], "none"
+    ),
 ]
 REQUIRED_PROVIDERS = ["claude"]
 CLAUDE_TIERS = ["haiku", "sonnet", "opus", "fable"]
@@ -275,6 +280,15 @@ SETTINGS = [
         "Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two",
     ),
     _g(
+        "models.codex_smart_reasoning_effort",
+        "ORCH_CODEX_SMART_REASONING_EFFORT",
+        "str",
+        "medium",
+        "Reasoning effort for Codex smart starts and resumes: one lowercase word (such as low, medium or high), passed as -c model_reasoning_effort=<value>; the routine worker tier keeps Codex's default",
+        pattern=r"^[a-z]+$",
+        pattern_doc="one lowercase word, such as low, medium or high",
+    ),
+    _g(
         "models.pi_worker",
         "ORCH_PI_WORKER_MODEL",
         "str",
@@ -287,6 +301,14 @@ SETTINGS = [
         "str",
         "",
         "pi model for hard work as provider/model-id; empty means pi is not used on this machine",
+    ),
+    _g(
+        "models.pi_models",
+        "ORCH_PI_MODELS",
+        "list",
+        [],
+        "More pi models as provider/model-id that the architect may pick per task, besides pi_worker and pi_smart; any of the three set turns pi on",
+        sep=",",
     ),
     _g(
         "remote_control.architects",
@@ -907,6 +929,8 @@ def validate(data, label, scope):
                     raise ConfigError(
                         f"{label}: {key}: unknown value {json.dumps(value)}; known: empty, {', '.join(setting.choices)}"
                     )
+            if setting.pattern is not None and not re.fullmatch(setting.pattern, value):
+                raise ConfigError(f"{label}: {key}: must be {setting.pattern_doc}")
             if setting.kind == "list":
                 for item in value:
                     if (
@@ -941,20 +965,29 @@ def as_env(values):
     return {setting.env: env_value(setting, value) for setting, value in values.items()}
 
 
+def check_resolved_env(environ):
+    """Raise ConfigError when an exported value violates its setting's pattern or choices."""
+    for s in SETTINGS:
+        if s.env not in environ:
+            continue
+        value = environ[s.env]
+        if s.pattern is not None and not re.fullmatch(s.pattern, value):
+            raise ConfigError(f"{s.env}: must be {s.pattern_doc}")
+        if s.kind == "str" and s.choices is not None:
+            if value != "" and value not in s.choices:
+                raise ConfigError(
+                    f"{s.key} ({s.env}): unknown value {json.dumps(value)}; known: empty, {', '.join(s.choices)}"
+                )
+
+
 def resolved_global(path, environ):
     """Every global ORCH_* setting as the scripts see it: default < the file < an exported variable."""
+    check_resolved_env(environ)
     file = {**load_global(path), **as_env(shared_values(path))}
     values = {
         s.env: environ.get(s.env, file.get(s.env, env_value(s, s.default)))
         for s in listed("global")
     }
-    for setting in listed("global"):
-        if setting.kind == "str" and setting.choices is not None:
-            value = values[setting.env]
-            if value != "" and value not in setting.choices:
-                raise ConfigError(
-                    f"{setting.key} ({setting.env}): unknown value {json.dumps(value)}; known: empty, {', '.join(setting.choices)}"
-                )
     values[BY_KEY["providers.enabled"].env] = ",".join(enabled_providers(values))
     values[BY_KEY["providers.claude"].env] = ",".join(claude_tiers(values))
     return values
@@ -1970,6 +2003,7 @@ def main(argv):
     try:
         command = argv[1] if len(argv) > 1 else ""
         if command == "global" and len(argv) == 3:
+            check_resolved_env(os.environ)
             sys.stdout.write(shell_lines(load_global(argv[2])))
         elif command == "print":
             sys.stdout.write(
@@ -2030,13 +2064,15 @@ def main(argv):
                     )
                 )
             )
+        elif command == "check" and len(argv) == 2:
+            check_resolved_env(os.environ)
         elif command == "names" and len(argv) == 2:
             print(" ".join(env_names()))
         else:
             print(
                 "usage: orch_settings.py global <file> | print [<file>] | repo <dir> | migrate <env> <toml> <snippet-dir> "
                 "| upgrade [--watched <global-file>] <repo-file>... [--clones <dir>...] | set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | providers [<file>] | fill-models [<file>] "
-                "| example global|repo | table global|repo | names",
+                "| example global|repo | table global|repo | check | names",
                 file=sys.stderr,
             )
             return 2

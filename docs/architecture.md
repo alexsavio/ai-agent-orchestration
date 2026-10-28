@@ -51,7 +51,7 @@ The architect confirms `tokens.owner` with `herdr workspace get <worker-id>` bef
 
 [Herdr Radar](https://github.com/combinaut/herdr-radar) reads these tags and groups workers under their architects in its Agents panel. Radar is optional; its checkout is `ORCH_RADAR_PATH`. See [`env/README.md`](../env/README.md).
 
-Workspace names stay true: `PR <n> · <job>` once a PR exists, `#<issue> · <job> (no PR yet)` before. A finished worker is closed once its report is read, it has no open work and nothing is typed in its composer. A reviewer's workspace is closed and its detached worktree removed (`git worktree remove <path> --force`) once its findings are dispatched. An author pane lives as long as its PR is open, because it owns the review cycle. Panes are closed with [`close-pane.sh`](../coordinator/watchers/close-pane.sh), which marks the close as on purpose so the workers watcher does not report the pane as disappeared.
+Workspace names stay true: `PR <n> · <job>` once a PR exists, `#<issue> · <job> (no PR yet)` before. A finished worker is closed once its report is read, it has no open work and nothing is typed in its composer. A reviewer's pane is closed with `close-pane.sh` (a workspace closes with its last pane), then its workspace with `herdr workspace close <id>` if it is still there, and its detached worktree removed (`git worktree remove <path> --force`), once its findings are dispatched. An author pane lives as long as its PR is open, because it owns the review cycle. Panes are closed with [`close-pane.sh`](../coordinator/watchers/close-pane.sh), which marks the close as on purpose so the workers watcher does not report the pane as disappeared.
 
 ## 💬 Messaging
 
@@ -77,8 +77,8 @@ flowchart LR
 | Coordinator | `ORCH_COORDINATOR_MODEL` (smart tier) |
 | Architect | `ORCH_ARCHITECT_MODEL` |
 | Worker, routine | Codex at `ORCH_CODEX_WORKER_MODEL` (the default) |
-| Worker, hard | Codex at `ORCH_CODEX_SMART_MODEL`, reasoning effort `medium` |
-| Worker on a local or DeepSeek model | pi at `ORCH_PI_WORKER_MODEL` (routine) or `ORCH_PI_SMART_MODEL` (hard); only when set. DeepSeek only in repos that opted in |
+| Worker, hard | Codex at `ORCH_CODEX_SMART_MODEL`, reasoning effort `ORCH_CODEX_SMART_REASONING_EFFORT` (default `medium`) |
+| Worker on a local or DeepSeek model | pi at `ORCH_PI_WORKER_MODEL` (routine), `ORCH_PI_SMART_MODEL` (hard) or one entry of `ORCH_PI_MODELS`; only when set. DeepSeek only in repos that opted in |
 | Worker where Codex cannot do the step | Claude: the lightest allowed tier that does the task well (Haiku mechanical, Sonnet implementation and review, Opus hard, Fable only for the hardest); only tiers `providers.claude` allows |
 | Reviewer | The family that did not write the code |
 
@@ -111,6 +111,7 @@ sequenceDiagram
 ```
 
 - The status line writes tokens used to `~/.claude/context-usage/<session-id>.tokens`. When that file is absent the fallback is `ORCH_RECYCLE_PCT` (55) percent of context.
+- The status line also writes `~/.claude/context-usage/<session-id>.usage`: one JSON object with only the fields the input has (`model`, `cost_usd`, `seven_day_pct`, `seven_day_resets_at`). `close-pane.sh`, the path every planned pane close takes, appends one line per closed agent to `~/.claude/coordinator/usage-ledger.tsv` (`closed_at`, `owner`, `workspace_label`, `agent_name`, `pane`, `session_id`, `model`, `cost_usd`). `orch-usage` prints the weekly limit % and the cost per workspace label. A session that ends without `close-pane.sh` (closed by the user, a crash) leaves no ledger line. `/clear` starts a new session id, so cost from before it never reaches the ledger. `cost_usd` is cumulative within a session id, so a session resumed with `claude --resume` appears twice and `orch-usage` counts its last line.
 - The handoff is overwritten, never appended, and stays under about 4,000 characters. Architect template: open PRs (number, head SHA, state, what each waits on), workers (pane id, worktree, model), standing user decisions, open user questions, Coordinator session name.
 - The successor keeps the session name, Herdr agent name, tab name, and `owner` and `role` tags, so `ListAgents`, Radar and the user see one continuous session.
 - One architect recycles at a time, and never one that holds a heavy slot.
