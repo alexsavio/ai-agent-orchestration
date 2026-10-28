@@ -62,6 +62,7 @@ A family left out is never started: the installer does not ask for its models, a
 | `models.architect` | `ORCH_ARCHITECT_MODEL` | `"claude-opus-5-5"` | Model of the architects |
 | `models.codex_worker` | `ORCH_CODEX_WORKER_MODEL` | `"<codex-worker-model>"` | Codex model for routine work; empty or a placeholder means codex_smart serves it too. With codex on, set at least one of the two |
 | `models.codex_smart` | `ORCH_CODEX_SMART_MODEL` | `"<codex-smart-model>"` | Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two |
+| `models.codex_smart_reasoning_effort` | `ORCH_CODEX_SMART_REASONING_EFFORT` | `"medium"` | Reasoning effort for Codex smart starts and resumes: one lowercase word (such as low, medium or high), passed as -c model_reasoning_effort=<value>; the routine worker tier keeps Codex's default |
 | `models.pi_worker` | `ORCH_PI_WORKER_MODEL` | empty | pi model for routine work as provider/model-id; empty means pi is not used on this machine |
 | `models.pi_smart` | `ORCH_PI_SMART_MODEL` | empty | pi model for hard work as provider/model-id; empty means pi is not used on this machine |
 | `models.pi_models` | `ORCH_PI_MODELS` | empty | More pi models as provider/model-id that the architect may pick per task, besides pi_worker and pi_smart; any of the three set turns pi on |

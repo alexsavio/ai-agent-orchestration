@@ -37,6 +37,8 @@ class Setting:
         why="",
         nonempty=False,
         shared=False,
+        pattern=None,
+        pattern_doc="",
     ):
         self.key, self.env, self.kind, self.default = key, env, kind, default
         self.scope, self.doc, self.sep, self.paths = scope, doc, sep, paths
@@ -48,6 +50,7 @@ class Setting:
         )
         self.nonempty = nonempty
         self.shared = shared
+        self.pattern, self.pattern_doc = pattern, pattern_doc
 
     @property
     def table(self):
@@ -242,6 +245,15 @@ SETTINGS = [
         "str",
         "<codex-smart-model>",
         "Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two",
+    ),
+    _g(
+        "models.codex_smart_reasoning_effort",
+        "ORCH_CODEX_SMART_REASONING_EFFORT",
+        "str",
+        "medium",
+        "Reasoning effort for Codex smart starts and resumes: one lowercase word (such as low, medium or high), passed as -c model_reasoning_effort=<value>; the routine worker tier keeps Codex's default",
+        pattern=r"^[a-z]+$",
+        pattern_doc="one lowercase word, such as low, medium or high",
     ),
     _g(
         "models.pi_worker",
@@ -879,6 +891,8 @@ def validate(data, label, scope):
                 )
             if has_nul(value):
                 raise ConfigError(f"{label}: {key}: contains a NUL character")
+            if setting.pattern is not None and not re.fullmatch(setting.pattern, value):
+                raise ConfigError(f"{label}: {key}: must be {setting.pattern_doc}")
             if setting.kind == "list":
                 for item in value:
                     if (
@@ -913,8 +927,17 @@ def as_env(values):
     return {setting.env: env_value(setting, value) for setting, value in values.items()}
 
 
+def check_resolved_env(environ):
+    """Raise ConfigError when an exported value violates its setting's pattern."""
+    for s in SETTINGS:
+        if s.pattern is not None and s.env in environ:
+            if not re.fullmatch(s.pattern, environ[s.env]):
+                raise ConfigError(f"{s.env}: must be {s.pattern_doc}")
+
+
 def resolved_global(path, environ):
     """Every global ORCH_* setting as the scripts see it: default < the file < an exported variable."""
+    check_resolved_env(environ)
     file = {**load_global(path), **as_env(shared_values(path))}
     values = {
         s.env: environ.get(s.env, file.get(s.env, env_value(s, s.default)))
@@ -1935,6 +1958,7 @@ def main(argv):
     try:
         command = argv[1] if len(argv) > 1 else ""
         if command == "global" and len(argv) == 3:
+            check_resolved_env(os.environ)
             sys.stdout.write(shell_lines(load_global(argv[2])))
         elif command == "print":
             sys.stdout.write(
@@ -1995,13 +2019,15 @@ def main(argv):
                     )
                 )
             )
+        elif command == "check" and len(argv) == 2:
+            check_resolved_env(os.environ)
         elif command == "names" and len(argv) == 2:
             print(" ".join(env_names()))
         else:
             print(
                 "usage: orch_settings.py global <file> | print [<file>] | repo <dir> | migrate <env> <toml> <snippet-dir> "
                 "| upgrade [--watched <global-file>] <repo-file>... [--clones <dir>...] | set <file> <ORCH_NAME> <value>... | drop <file> | keys <file> | providers [<file>] | fill-models [<file>] "
-                "| example global|repo | table global|repo | names",
+                "| example global|repo | table global|repo | check | names",
                 file=sys.stderr,
             )
             return 2
