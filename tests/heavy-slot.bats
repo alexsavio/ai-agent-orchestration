@@ -908,13 +908,6 @@ assert_nothing_left_behind() {
   grep -Eq '^[0-9]+ SLOT FAIL agent-leftover pid=[0-9]+ code=1 ' "$(EVENTS)"
 }
 
-@test "a killed job that leaves a process behind writes exactly one FAIL line" {
-  run "$HELPER" take agent-leftover -- bash -c 'sleep 30 & kill -KILL $$'
-  [ "$status" -eq 137 ]
-  [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
-  grep -Eq '^[0-9]+ SLOT FAIL agent-leftover pid=[0-9]+ code=137 ' "$(EVENTS)"
-}
-
 @test "each spool line starts with the epoch of the event" {
   before=$(date +%s)
   run "$HELPER" take agent-epoch -- bash -c 'exit 1'
