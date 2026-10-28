@@ -617,8 +617,91 @@ def heredoc_bodies(words):
     ]
 
 
+ECHO_OPTIONS = re.compile(r"-[neE]+$")
+ESCAPE = re.compile(
+    r"\\(0[0-7]{0,3}|[1-7][0-7]{0,2}|x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8}|.)",
+    re.S,
+)
+ESCAPED = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n"}
+ESCAPED |= {"r": "\r", "t": "\t", "v": "\v", "\\": "\\"}
+PRINTF_CONVERSION = re.compile(r"%([-+ #0]*)(\*|\d+)?(\.\*|\.\d*)?([a-zA-Z%])")
+
+
+def unescape(text):
+    def escape(match):
+        body = match[1]
+        try:
+            if body[0] in "01234567":
+                return chr(int(body, 8) % 256).replace("\0", "")
+            if body[0] in "xuU":
+                return chr(int(body[1:], 16)).replace("\0", "")
+        except ValueError:
+            return ""
+        return ESCAPED.get(body, "\\" + body)
+
+    return ESCAPE.sub(escape, text)
+
+
+def printf_value(flags, width, precision, conversion, arg):
+    if conversion in "diuxXo":
+        try:
+            number = int(arg, 0)
+        except ValueError:
+            number = ord(arg[1]) if arg[:1] in "'\"" and len(arg) > 1 else 0
+        spec = "d" if conversion in "iu" else conversion
+        value = number
+    else:
+        spec = "s"
+        value = {"b": unescape, "q": shlex.quote, "c": lambda arg: arg[:1]}.get(
+            conversion, str
+        )(arg)
+    return ("%" + flags + width + precision + spec) % value
+
+
+def printf_text(format_, args):
+    """Returns the text printf writes for a format and its arguments, and the arguments left over when a conversion is not modelled."""
+    out, used, modelled = [], 0, True
+    while True:
+        start, position = used, 0
+        for match in PRINTF_CONVERSION.finditer(format_):
+            flags, width, precision, conversion = match.groups(default="")
+            out.append(unescape(format_[position : match.start()]))
+            position = match.end()
+            if conversion == "%":
+                out.append("%")
+                continue
+            used += (width == "*") + (precision == ".*")
+            arg = args[used] if used < len(args) else ""
+            used += 1
+            try:
+                if "*" in width + precision or conversion not in "sbcdiuxXoq":
+                    raise ValueError(conversion)
+                out.append(printf_value(flags, width, precision, conversion, arg))
+            except (ValueError, TypeError):
+                modelled = False
+                out.append(arg)
+        out.append(unescape(format_[position:]))
+        if used >= len(args) or used == start:
+            return "".join(out), modelled
+
+
 def echoed_text(words):
-    return " ".join(words[1:]).replace("\\n", "\n")
+    """Returns the text echo or printf writes: as written, with escapes read, and with the format filled in."""
+    args = words[1:]
+    texts = [" ".join(args).replace("\\n", "\n")]
+    if os.path.basename(words[0]) == "printf":
+        while args[:1] == ["--"] or args[:1] == ["-v"]:
+            args = args[2:] if args[0] == "-v" else args[1:]
+        if args:
+            text, modelled = printf_text(args[0], args[1:])
+            texts.append(text)
+            if not modelled:
+                texts.append("\n".join(args[1:]))
+    else:
+        while args and ECHO_OPTIONS.match(args[0]):
+            args = args[1:]
+        texts += [" ".join(args), unescape(" ".join(args))]
+    return "\n".join(dict.fromkeys(texts))
 
 
 def shell_programs(words):
