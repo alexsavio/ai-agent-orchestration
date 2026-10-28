@@ -241,11 +241,11 @@ dispatch() {
   [ "$status" -eq 1 ]
 }
 
-@test "every Claude start and recycle line passes --effort next to --model" {
-  # shellcheck disable=SC2016 # The dollar signs are literal skill text.
-  grep -qF -- '<effort flag> (architect: `ORCH_ARCHITECT_EFFORT`) --name' "$ROOT/skills/coordinate/references/recycle.md"
-  # shellcheck disable=SC2016 # The dollar signs are literal skill text.
-  grep -qF -- '<effort flag> (Coordinator: `ORCH_COORDINATOR_EFFORT`) --name Coordinator' "$ROOT/skills/coordinate/references/recycle.md"
+@test "every Claude start and recycle line pins the effort flag placeholder next to --model" {
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '$ORCH_ARCHITECT_MODEL <effort flag> --name "<architect name>"` (`<effort flag>` from `ORCH_ARCHITECT_EFFORT`)' "$ROOT/skills/coordinate/references/recycle.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '$ORCH_COORDINATOR_MODEL <effort flag> --name Coordinator --remote-control "Coordinator"` (`<effort flag>` from `ORCH_COORDINATOR_EFFORT`)' "$ROOT/skills/coordinate/references/recycle.md"
   # shellcheck disable=SC2016 # The backticks are literal skill text.
   grep -qF -- 'adds `<effort flag>` after the model (worker: `ORCH_WORKER_EFFORT`;' "$ROOT/skills/architect/references/dispatch.md"
   # shellcheck disable=SC2016 # The backticks are literal skill text.
@@ -260,6 +260,10 @@ dispatch() {
     # shellcheck disable=SC2016 # The backticks are literal skill text.
     grep -qF -- '`<effort flag>` is `--effort <value>` with the value `orch-settings` prints for that role'"'"'s `ORCH_…_EFFORT` (or the per-dispatch level), and nothing at all when it prints empty; the `ORCH_…` variables are not set in your shell, so write the value in' "$ROOT/$file"
   done
+  # The start command in each recycle line is one clean code span: a backtick or "(" inside it would end up in the shell line.
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  run grep -c -E '`herdr agent start [^`(]*<effort flag>[^`(]*`' "$ROOT/skills/coordinate/references/recycle.md"
+  [ "$output" -eq 2 ]
   # The ORCH_ variables are not set in an agent's shell, so no ${ORCH_…:+ form may be left.
   run bash -c "grep -rnF '\${ORCH_' '$ROOT/skills' | grep -F ':+'"
   [ "$status" -eq 1 ]

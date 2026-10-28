@@ -71,7 +71,6 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   for name in ORCH_COORDINATOR_EFFORT ORCH_ARCHITECT_EFFORT ORCH_WORKER_EFFORT ORCH_REVIEWER_EFFORT; do
     for bad in bogus High; do
       run env "$name=$bad" python3 "$SETTINGS" print "$ORCH_CONFIG"
-      echo "$output"
       [ "$status" -ne 0 ]
       [[ "$output" == *"unknown value \"$bad\"; known: empty, low, medium, high, xhigh, max"* ]]
     done
