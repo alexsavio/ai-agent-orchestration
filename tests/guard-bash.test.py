@@ -1295,6 +1295,10 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ),
         ("ksh -o value is optional before +e", "ksh -o +e -c 'pi -p hello'"),
         ("ksh lone -o before -s", "ksh -o -s arg <<'EOF'\npi -p hello\nEOF"),
+        (
+            "ksh heredoc after an option name",
+            "ksh -o errexit <<'EOF'\npkill -f vite\nEOF",
+        ),
         ("bash two letters then option name", "bash -oe pipefail -c 'pi -p hello'"),
         ("sh two letters then option name", "sh -oe pipefail -c 'pi -p hello'"),
         ("single dash rcfile", "bash -rcfile /dev/null kills.sh"),
@@ -1411,6 +1415,9 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("inline bash kill -1", "bash -c 'kill -9 -1'"),
         ("sudo kill -1", "sudo kill -9 -1"),
         ("written script kill -1", "cat > k.sh <<'EOF'\nkill -TERM -1\nEOF\nbash k.sh"),
+        ("kill -1 then another pid", "kill -9 -1 1234"),
+        ("kill -1 in an if block", "if true; then kill -9 -1; fi"),
+        ("kill -1 in a substitution", "x=$(kill -9 -1)"),
     ]:
         case(name, command, True)
     for name, command in [
