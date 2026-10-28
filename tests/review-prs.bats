@@ -1208,3 +1208,7 @@ assert len(lines) == 1 and lines[0].startswith("ready:"), lines
   [ "$(printf '%s' "$output" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["queue"], "codex is off" in d["note"])')" = "[] True" ]
   [ ! -e "$TMP/gh.called" ]
 }
+
+@test "the architect skill keeps /goal out of the default worker brief" {
+  grep -qF 'is not part of the default worker brief' "$ROOT/skills/architect/SKILL.md"
+}
