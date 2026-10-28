@@ -12,9 +12,12 @@ mkdir -p "$dir"
 touch "$dir/$pane"
 # Usage ledger row, best effort: read it before the close (Herdr forgets the pane after), write it only if the close worked.
 # A failure here never stops the close or changes the exit code.
-ledger_warn() { echo "warning: usage ledger line not written for $pane" >&2; }
+ledger_warn() { echo "warning: usage ledger line not written for $pane" >&2 || :; }
 ledger() { (orch_watcher_python && "$ORCH_WATCHER_PYTHON" -I "$root/usage_ledger.py" "$@"); }
-row=$(ledger "$pane") || ledger_warn
+row=$(ledger "$pane") || {
+  row=""
+  ledger_warn
+}
 if ! "${HERDR_BIN_PATH:-${ORCH_HERDR_BIN:-herdr}}" pane close "$pane"; then
   rm -f "$dir/$pane"
   exit 1

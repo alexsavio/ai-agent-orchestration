@@ -130,3 +130,60 @@ close_pane() {
   [ "$(wc -l <"$LEDGER")" -eq 2 ]
   [ "$(awk -F'\t' 'NR == 2 { print NF }' "$LEDGER")" -eq 8 ]
 }
+
+# A python3 stand-in: PY_FAIL=append fails the --append call, PY_FAIL=read prints half a row and fails the read.
+fake_python() {
+  cat >"$BIN/py" <<'PY'
+#!/usr/bin/env bash
+mode=read
+for a in "$@"; do
+  case "$a" in
+    --append) mode=append ;;
+  esac
+done
+for a in "$@"; do
+  case "$a" in
+    */usage_ledger.py)
+      [ "$mode $PY_FAIL" != "append append" ] || exit 9
+      [ "$mode $PY_FAIL" != "read read" ] || { printf 'partial\tcell\n'; exit 9; }
+      ;;
+  esac
+done
+exec "$REAL_PY" "$@"
+PY
+  chmod +x "$BIN/py"
+  export REAL_PY="$python_bin" ORCH_PYTHON3="$BIN/py"
+}
+
+@test "a failed ledger append warns, the close still exits 0, and the pane was closed" {
+  fake_python
+  export PY_FAIL=append
+  close_pane wW:p1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: usage ledger line not written for wW:p1"* ]] || return 1
+  grep -qx 'pane close wW:p1' "$HERDR_CALLS"
+}
+
+@test "a failed ledger read drops its partial row: nothing is appended" {
+  fake_python
+  export PY_FAIL=read
+  close_pane wW:p1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: usage ledger line not written for wW:p1"* ]] || return 1
+  [ ! -e "$LEDGER" ]
+  grep -qx 'pane close wW:p1' "$HERDR_CALLS"
+}
+
+@test "an unwritable stderr does not stop the close after a failed ledger read" {
+  HERDR_LOOKUP_FAIL=1 run bash -c '"$1" wW:p1 2>&-' _ "$ROOT/coordinator/watchers/close-pane.sh"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane close wW:p1' "$HERDR_CALLS"
+}
+
+@test "an unwritable stderr does not turn a good close into a failure after a failed ledger append" {
+  fake_python
+  export PY_FAIL=append
+  run bash -c '"$1" wW:p1 2>&-' _ "$ROOT/coordinator/watchers/close-pane.sh"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane close wW:p1' "$HERDR_CALLS"
+}
