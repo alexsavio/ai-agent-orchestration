@@ -15,6 +15,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 PUSH_REASON = "Never push to main/master; open a PR (see .ai/git-workflow.md)."
@@ -97,9 +98,9 @@ BAD_ATTR = re.compile(
 )
 
 
-def log_failure(exc, command=None):
+def log_failure(exc, command=None, kind="fail-open"):
     try:
-        line = f"{datetime.datetime.now().astimezone().isoformat(timespec='seconds')} guard-bash fail-open: {type(exc).__name__}: {exc}"
+        line = f"{datetime.datetime.now().astimezone().isoformat(timespec='seconds')} guard-bash {kind}: {type(exc).__name__}: {exc}"
         if isinstance(command, str):
             line += f" command={command[:200]!r}"
         with (Path.home() / ".claude/hooks/guard-bash.log").open("a") as f:
@@ -524,6 +525,7 @@ def unmask(word):
     return word.translate(UNMASK)
 
 
+@functools.lru_cache(maxsize=8)
 def shell_tokens(command):
     lex = shlex.shlex(
         mask_quoted(expand_heredocs(re.sub(r"\\\n[ \t]*", "", command))),
@@ -533,7 +535,7 @@ def shell_tokens(command):
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     lex.commenters = ""
-    return [part for token in lex for part in split_operators(token)] + [";"]
+    return tuple(part for token in lex for part in split_operators(token)) + (";",)
 
 
 def split_operators(token):
@@ -605,34 +607,60 @@ def word_substitutions(word):
             index += 1
 
 
-SHELL_OPTION_VALUES = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+SHELL_OPTION_VALUES = {
+    "-o",
+    "+o",
+    "-O",
+    "+O",
+    "--rcfile",
+    "--init-file",
+    "-rcfile",
+    "-init-file",
+}
+SHELL_SINGLE_DASH_FLAGS = {
+    "-login",
+    "-noediting",
+    "-noprofile",
+    "-norc",
+    "-posix",
+    "-protected",
+    "-restricted",
+    "-verbose",
+}
 
 
-def shell_programs(words):
-    """Returns the code a shell runs: its -c program, else its stdin heredoc unless a script file is named."""
-    name = os.path.basename(words[0]) if words else ""
-    if name == "eval":
-        return [" ".join(words[1:])]
-    if name not in SHELL_EXECUTABLES:
-        return []
-    heredocs = [
-        words[i + 1] for i in range(1, len(words) - 1) if words[i] == "--guard-heredoc"
-    ]
-    command_mode = stdin_mode = False
+def shell_args(words):
+    """Parses a shell's options; returns (-c mode, -s mode, -n syntax check only, operands)."""
+    command_mode = stdin_mode = check_only = False
+    ksh = os.path.basename(words[0]) == "ksh"
+    letter_options = ksh or os.path.basename(words[0]) == "zsh"
     index = 1
     while index < len(words):
         word = words[index]
+        # ksh93 does not take a word that starts with - or + as the -o value
+        takes_value = not (
+            ksh and index + 1 < len(words) and words[index + 1].startswith(("-", "+"))
+        )
         if word == "--guard-heredoc":
             index += 2
-        elif word in SHELL_OPTION_VALUES:
-            index += 2
+        elif word in (("-o", "+o") if letter_options else SHELL_OPTION_VALUES):
+            index += 1 + takes_value
         elif word == "--":
             index += 1
             break
-        elif re.fullmatch(r"[-+][A-Za-z]+", word):
-            command_mode = command_mode or "c" in word
-            stdin_mode = stdin_mode or "s" in word
+        elif word in SHELL_SINGLE_DASH_FLAGS and not letter_options:
             index += 1
+        elif re.fullmatch(r"[-+][A-Za-z]+", word):
+            letters = word[1:]
+            if letter_options:
+                letters, o, name = letters.partition("o")
+                values = bool(o and not name and takes_value)
+            else:
+                values = sum(c in "oO" for c in letters)
+            command_mode = command_mode or "c" in letters
+            stdin_mode = stdin_mode or "s" in letters
+            check_only = check_only or (word[0] == "-" and "n" in letters)
+            index += 1 + values
         elif word.startswith("--"):
             index += 1
         else:
@@ -642,7 +670,112 @@ def shell_programs(words):
         for i, word in enumerate(words[index:], index)
         if word != "--guard-heredoc" and words[i - 1] != "--guard-heredoc"
     ]
-    if command_mode:
+    return command_mode, stdin_mode, check_only, operands
+
+
+def heredoc_bodies(words):
+    return [
+        words[i + 1] for i in range(len(words) - 1) if words[i] == "--guard-heredoc"
+    ]
+
+
+ECHO_OPTIONS = re.compile(r"-[neE]+$")
+ESCAPE = re.compile(
+    r"\\(0[0-7]{0,3}|[1-7][0-7]{0,2}|x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8}|.)",
+    re.S,
+)
+ESCAPED = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n"}
+ESCAPED |= {"r": "\r", "t": "\t", "v": "\v", "\\": "\\"}
+PRINTF_CONVERSION = re.compile(r"%([-+ #0]*)(\*|\d+)?(\.\*|\.\d*)?([a-zA-Z%])")
+
+
+def unescape(text):
+    def escape(match):
+        body = match[1]
+        try:
+            if body[0] in "01234567":
+                return chr(int(body, 8) % 256).replace("\0", "")
+            if body[0] in "xuU":
+                return chr(int(body[1:], 16)).replace("\0", "")
+        except ValueError:
+            return ""
+        return ESCAPED.get(body, "\\" + body)
+
+    return ESCAPE.sub(escape, text)
+
+
+def printf_value(flags, width, precision, conversion, arg):
+    if conversion in "diuxXo":
+        try:
+            number = int(arg, 0)
+        except ValueError:
+            number = ord(arg[1]) if arg[:1] in "'\"" and len(arg) > 1 else 0
+        spec = "d" if conversion in "iu" else conversion
+        value = number
+    else:
+        spec = "s"
+        value = {"b": unescape, "q": shlex.quote, "c": lambda arg: arg[:1]}.get(
+            conversion, str
+        )(arg)
+    return ("%" + flags + width + precision + spec) % value
+
+
+def printf_text(format_, args):
+    """Returns the text printf writes for a format and its arguments, and the arguments left over when a conversion is not modelled."""
+    out, used, modelled = [], 0, True
+    while True:
+        start, position = used, 0
+        for match in PRINTF_CONVERSION.finditer(format_):
+            flags, width, precision, conversion = match.groups(default="")
+            out.append(unescape(format_[position : match.start()]))
+            position = match.end()
+            if conversion == "%":
+                out.append("%")
+                continue
+            used += (width == "*") + (precision == ".*")
+            arg = args[used] if used < len(args) else ""
+            used += 1
+            try:
+                if "*" in width + precision or conversion not in "sbcdiuxXoq":
+                    raise ValueError(conversion)
+                out.append(printf_value(flags, width, precision, conversion, arg))
+            except (ValueError, TypeError):
+                modelled = False
+                out.append(arg)
+        out.append(unescape(format_[position:]))
+        if used >= len(args) or used == start:
+            return "".join(out), modelled
+
+
+def echoed_text(words):
+    """Returns the text echo or printf writes: as written, with escapes read, and with the format filled in."""
+    args = words[1:]
+    texts = [" ".join(args).replace("\\n", "\n")]
+    if os.path.basename(words[0]) == "printf":
+        while args[:1] == ["--"] or args[:1] == ["-v"]:
+            args = args[2:] if args[0] == "-v" else args[1:]
+        if args:
+            text, modelled = printf_text(args[0], args[1:])
+            texts.append(text)
+            if not modelled:
+                texts.append("\n".join(args[1:]))
+    else:
+        while args and ECHO_OPTIONS.match(args[0]):
+            args = args[1:]
+        texts += [" ".join(args), unescape(" ".join(args))]
+    return "\n".join(dict.fromkeys(texts))
+
+
+def shell_programs(words):
+    """Returns the code a shell runs: its -c program, else its stdin heredoc unless a script file is named; for ksh, also an operand it cannot open as a file."""
+    name = os.path.basename(words[0]) if words else ""
+    if name == "eval":
+        return [" ".join(words[1:])]
+    if name not in SHELL_EXECUTABLES:
+        return []
+    heredocs = heredoc_bodies(words)
+    command_mode, stdin_mode, _, operands = shell_args(words)
+    if command_mode or (name == "ksh" and operands and not stdin_mode):
         return operands[:1]
     return heredocs if stdin_mode or not operands else []
 
@@ -723,6 +856,18 @@ def broad_kill_stage(words, wrapped):
     return "xargs" in wrapped or any(not target.isdigit() for target in targets)
 
 
+def kills_every_process(words):
+    """True for a kill whose pid operands include -1, which signals every process the user owns."""
+    if not words or os.path.basename(words[0]) != "kill":
+        return False
+    targets = words[1:]
+    if targets[:1] in (["-s"], ["-n"]):
+        targets = targets[2:]
+    elif targets[:1] and targets[0].startswith("-"):
+        targets = targets[1:]
+    return "-1" in targets
+
+
 def listing_kind(words):
     name = os.path.basename(words[0]) if words else ""
     options = words[1 : words.index("--")] if "--" in words else words[1:]
@@ -790,13 +935,19 @@ def broad_kill_text(raw, depth=0):
         kills = [words for words, wrapped in stages if broad_kill_stage(words, wrapped)]
         feeding = feeds_kill(stages)
         if (
-            kills
-            and (
-                feeding
-                or references(tainted, [word for words in kills for word in words[1:]])
+            any(kills_every_process(words) for words, _ in stages)
+            or (
+                kills
+                and (
+                    feeding
+                    or references(
+                        tainted, [word for words in kills for word in words[1:]]
+                    )
+                )
             )
-        ) or shell_program_kills(
-            [(unmask_words(segment), False) for segment in unit], depth
+            or shell_program_kills(
+                [(unmask_words(segment), False) for segment in unit], depth
+            )
         ):
             return True
         values = assignments(unit)
@@ -821,6 +972,274 @@ def unmask_words(segment):
 
 def guard_broad_kill(raw):
     return BROAD_KILL_REASON if broad_kill_text(raw) else None
+
+
+SCRIPT_SCAN_LIMIT = 64 * 1024
+SCRIPT_SCAN_BUDGET = 512 * 1024
+SCRIPT_SCAN_SECONDS = 5
+SCRIPT_HEREDOC_LIMIT = 64
+SCRIPT_SHELLS = SHELL_EXECUTABLES - {"eval"}
+WRITE_OPERATORS = {">", ">>", ">|", "&>", "&>>"}
+ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
+
+
+def script_operand(words):
+    """Returns the script file a shell, source or direct command word runs, else None."""
+    name = os.path.basename(words[0])
+    if name in ("source", "."):
+        args = words[2:] if words[1:2] == ["--"] else words[1:]
+        return args[0] if args else None
+    if name not in SCRIPT_SHELLS:
+        return words[0]
+    command_mode, stdin_mode, check_only, operands = shell_args(words)
+    if command_mode or stdin_mode or check_only or not operands:
+        return None
+    return operands[0]
+
+
+def script_text(path):
+    """Reads the first SCRIPT_SCAN_LIMIT bytes of a regular text file; None when unreadable."""
+    try:
+        if not os.path.isfile(path):
+            return None
+        with open(path, "rb") as handle:
+            data = handle.read(SCRIPT_SCAN_LIMIT)
+    except OSError:
+        return None
+    return None if b"\0" in data else data.decode("utf-8", "replace")
+
+
+def runs_as_shell(code):
+    """True when a directly run file has no shebang or one that names a shell."""
+    first = code.split("\n", 1)[0]
+    if not first.startswith("#!"):
+        return True
+    return any(os.path.basename(word) in SCRIPT_SHELLS for word in first[2:].split())
+
+
+def expand_literal(path, env):
+    """Expands ~, variables the command assigned plain literals and the hook's own environment; other variables stay as written."""
+
+    def value(match):
+        name = match[1] or match[2]
+        found = env[name] if name in env else os.environ.get(name)
+        return match[0] if found is None else found
+
+    return re.sub(r"\$(?:\{(\w+)\}|(\w+))", value, os.path.expanduser(path))
+
+
+def run_key(path, where, env):
+    return os.path.normpath(
+        os.path.join(where, expand_literal(path, {"PWD": where, **env}))
+    )
+
+
+def file_operands(args):
+    """File operands of tee or cat; options end at --, - or the first other word, as BSD getopt reads them."""
+    for index, arg in enumerate(args):
+        if arg == "--":
+            return args[index + 1 :]
+        if arg == "-" or not arg.startswith("-"):
+            return args[index:]
+    return []
+
+
+def written_text(words, redirects):
+    """Returns (text, file targets) for a command that writes text to files, else (None, [])."""
+    name = os.path.basename(words[0])
+    if name not in ("cat", "tee", "echo", "printf"):
+        return None, []
+    heredocs = heredoc_bodies(words)
+    args = [
+        word
+        for i, word in enumerate(words[1:], 1)
+        if word != "--guard-heredoc" and words[i - 1] != "--guard-heredoc"
+    ]
+    targets = [target for op, target in redirects if op in WRITE_OPERATORS]
+    if name == "tee":
+        targets += file_operands(args)
+    if heredocs:
+        return "\n".join(heredocs), targets
+    if name in ("echo", "printf"):
+        return echoed_text(words), targets
+    return None, []
+
+
+def command_entries(text, cwd):
+    redirects = []
+    return [
+        (words, where, pipeline, list(redirects))
+        for words, where, pipeline in commands(text, cwd, redirects)
+    ]
+
+
+def written_or_disk_text(key, written):
+    return written[key] if key in written else script_text(key) or ""
+
+
+def stdin_program(words, where, pipeline, redirects, env, written):
+    """The code a shell without a script operand reads from a here-string, a file or the pipe before it."""
+    for op, target in redirects:
+        if op == "<<<":
+            return target
+        if op == "<":
+            return written_or_disk_text(run_key(target, where, env), written)
+    if len(pipeline) < 2:
+        return None
+    before = unwrap(list(pipeline[-2]))[0]
+    if not before:
+        return None
+    heredocs = heredoc_bodies(before)
+    name = os.path.basename(before[0])
+    if heredocs:
+        return "\n".join(heredocs)
+    if name in ("echo", "printf"):
+        return echoed_text(before)
+    if name == "cat":
+        parts, size = [], 0
+        for arg in [a for a in file_operands(before[1:]) if a != "-"]:
+            key = run_key(arg, where, env)
+            if size < SCRIPT_SCAN_LIMIT:
+                parts.append(written_or_disk_text(key, written))
+                size += len(parts[-1]) + 1
+        return "\n".join(parts)[:SCRIPT_SCAN_LIMIT]
+    return None
+
+
+def runs(entries, disabled):
+    """Yields (label, code, cwd, file) for each piece of code the commands run: inline shell text, shell stdin and script files."""
+    env, written = {}, {}
+    for words, where, pipeline, redirects in entries:
+        words = list(words)
+        if words[0] == "builtin":
+            words = words[1:]
+        if words and words[0] in ("export", "local", "declare", "typeset", "readonly"):
+            words = [word for word in words[1:] if not word.startswith("-")]
+        if words and all(ASSIGNMENT.match(word) for word in words):
+            for word in words:
+                name, _, value = word.partition("=")
+                env[name] = None if re.search(r"[$`]", value) else value
+            continue
+        words, _ = unwrap(words)
+        if not words:
+            continue
+        name = os.path.basename(words[0])
+        text, targets = written_text(words, redirects)
+        for target in targets:
+            written[run_key(target, where, env)] = text
+        if "guard_inline_shell" not in disabled:
+            for text in shell_programs(words):
+                yield "an inline shell program", text, where, None
+            if name in SCRIPT_SHELLS and not shell_programs(words):
+                command_mode, stdin_mode, _, operands = shell_args(words)
+                if not command_mode and (stdin_mode or not operands):
+                    code = stdin_program(
+                        words,
+                        where,
+                        pipeline,
+                        redirects,
+                        env,
+                        {} if "guard_written_script" in disabled else written,
+                    )
+                    if code:
+                        yield "the stdin of a shell", code, where, None
+        path = script_operand(words)
+        direct = name not in SCRIPT_SHELLS | {"source", "."}
+        key = (
+            run_key(path, where, env) if path and (not direct or "/" in path) else None
+        )
+        if not key:
+            continue
+        if key in written:
+            code = None if "guard_written_script" in disabled else written[key]
+        else:
+            code = None if "guard_disk_script" in disabled else script_text(key)
+        if code is not None and (not direct or runs_as_shell(code)):
+            yield f"script {path}", code, where, key
+
+
+def kill_words(entries, text):
+    return any(
+        words
+        and os.path.basename(words[0]) in ("pkill", "killall")
+        and evaluate_words(words, where, text, (), pipeline)
+        for words, where, pipeline in (
+            (unwrap(list(entry[0]))[0], entry[1], entry[2]) for entry in entries
+        )
+    )
+
+
+def bounded(code):
+    """Joins line continuations, then cuts code at a heredoc marker over 256 characters or after SCRIPT_HEREDOC_LIMIT `<<`; the heredoc matcher is quadratic on unterminated ones."""
+    code = re.sub(r"\\\n[ \t]*", "", code)
+    long_marker = re.search(r"<<-?[ \t]*['\"]?\w{257}", code)
+    if long_marker:
+        code = code[: long_marker.start()]
+    index = -1
+    for _ in range(SCRIPT_HEREDOC_LIMIT + 1):
+        index = code.find("<<", index + 1)
+        if index < 0:
+            return code
+    return code[:index]
+
+
+class ScanBudget(Exception):
+    pass
+
+
+def code_kills(code, cwd, disabled, depth, state):
+    """True when code a shell runs kills broadly, directly or through code it runs in turn."""
+    code = bounded(code)
+    state["left"] -= len(code)
+    if state["left"] < 0:
+        raise ScanBudget(f"more than {SCRIPT_SCAN_BUDGET} bytes of code to scan")
+    if time.monotonic() >= state["deadline"]:
+        raise ScanBudget(f"more than {SCRIPT_SCAN_SECONDS} seconds to scan")
+    if broad_kill_text(code):
+        return True
+    try:
+        entries = command_entries(code, cwd)
+    except ValueError:
+        entries = [(words, cwd, [], []) for words, _ in fallback_stages(code) if words]
+        return kill_words(entries, code)
+    if kill_words(entries, code):
+        return True
+    if depth >= 3:
+        return False
+    for _, inner, where, key in runs(entries, disabled):
+        if key:
+            if (key, depth, where) in state["seen"]:
+                continue
+            state["seen"].add((key, depth, where))
+        if code_kills(inner, where, disabled, depth + 1, state):
+            return True
+    return False
+
+
+def guard_script_kill(raw, cwd, disabled):
+    """Denies a broad kill in code a command runs: inline shell text, shell stdin, a script it writes or a script on disk.
+    An error or an exhausted budget ends only this scan; the other guards still run."""
+    try:
+        entries = command_entries(raw, cwd)
+    except ValueError:
+        return None
+    except Exception as exc:
+        log_failure(exc, raw, "scan-error")
+        return None
+    state = {
+        "left": SCRIPT_SCAN_BUDGET,
+        "seen": set(),
+        "deadline": time.monotonic() + SCRIPT_SCAN_SECONDS,
+    }
+    try:
+        for label, code, where, _ in runs(entries, disabled):
+            if code_kills(code, where, disabled, 1, state):
+                return f"{BROAD_KILL_REASON} Found inside {label}."
+    except ScanBudget as exc:
+        log_failure(exc, raw, "scan-budget")
+    except Exception as exc:
+        log_failure(exc, raw, "scan-error")
+    return None
 
 
 def guard_memory(args, cwd, opts, raw):
@@ -959,7 +1378,16 @@ def without_redirections(words):
     return [unmask(word) for word in split_redirections(words)[0]]
 
 
-def commands(command, cwd):
+def redirections(words):
+    return [
+        (words[i], unmask(words[i + 1]))
+        for i in range(len(words) - 1)
+        if REDIRECTION.fullmatch(words[i])
+    ]
+
+
+def commands(command, cwd, redirects=None):
+    """Yields (words, cwd, pipeline); redirects, when given, holds the segment's redirections at each yield."""
     segment = []
     pipeline = []
     stack = []
@@ -968,10 +1396,13 @@ def commands(command, cwd):
     previous_status = None
     for token in shell_tokens(command):
         if is_operator(token):
+            found = redirections(segment) if redirects is not None else []
             segment = without_redirections(segment)
             if segment:
                 pipeline.append(segment[:])
                 for current in currents:
+                    if redirects is not None:
+                        redirects[:] = found
                     yield segment[:], current, pipeline[:]
                 cd_args = segment[1:]
                 while segment[0] == "cd" and cd_args[:1] in (["--"], ["-L"], ["-P"]):
@@ -1488,7 +1919,9 @@ def evaluate(command, cwd, disabled=()):
     try:
         normalized_command = re.sub(r"\\\n[ \t]*", "", command)
         if "guard_memory" not in disabled and "guard_broad_kill" not in disabled:
-            reason = guard_broad_kill(normalized_command)
+            reason = guard_broad_kill(normalized_command) or guard_script_kill(
+                normalized_command, cwd, disabled
+            )
             if reason:
                 return reason
         for words, where, pipeline in commands(normalized_command, cwd):

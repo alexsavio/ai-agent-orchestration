@@ -938,6 +938,587 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         "killall puma",
     ):
         case(command, command, True)
+    scripts = root / "scripts"
+    scripts.mkdir()
+    killing = scripts / "kills.sh"
+    killing.write_text("#!/bin/bash\npkill -f vite\n")
+    killing.chmod(0o755)
+    clean_script = scripts / "clean.sh"
+    clean_script.write_text("#!/bin/bash\necho ok\n")
+    clean_script.chmod(0o755)
+    incident = (
+        "S=/private/tmp/scratch\ncat > $S/repro.sh <<'EOF'\n#!/bin/bash\n"
+        "pkill -f 'sleep 30' -u $(id -u) 2>/dev/null; true\nEOF\n"
+        "chmod +x $S/repro.sh; "
+    )
+    for name, command in [
+        ("incident heredoc script run directly", incident + "$S/repro.sh $S 2>&1"),
+        ("incident heredoc script run with bash", incident + "bash $S/repro.sh $S"),
+        ("heredoc script run with source", incident + "source $S/repro.sh"),
+        ("tee heredoc script run", "tee run.sh <<'EOF'\npkill -f vite\nEOF\nsh run.sh"),
+        ("disk script via bash", f"bash {killing}"),
+        ("disk script via path", f"{killing}"),
+        ("disk script via dot", f". {killing}"),
+        ("BSD option order after pattern", "pkill -f 'sleep 30' -u $(id -u)"),
+        ("BSD option order with literal uid", "pkill -f '^x$' -u 501"),
+    ]:
+        case(name, command, True)
+    for name, command in [
+        (
+            "notes heredoc mentioning pkill",
+            "cat > notes.md <<'EOF'\npkill -f vite\nEOF",
+        ),
+        (
+            "heredoc script written but not run",
+            "cat > a.sh <<'EOF'\npkill -f vite\nEOF\nchmod +x a.sh",
+        ),
+        ("disk script without a kill", f"bash {clean_script}"),
+        ("disk script missing", f"bash {scripts}/missing.sh"),
+    ]:
+        case(name, command)
+    for name, command, cwd in [
+        ("inline bash -c pkill", "bash -c 'pkill -f vite'", repo),
+        ("inline sh -c pkill", 'sh -c "pkill -f vite"', repo),
+        ("inline eval pkill", "eval 'pkill -f vite'", repo),
+        ("heredoc to bash pkill", "bash <<'EOF'\npkill -f vite\nEOF", repo),
+        ("bash relative script", "bash kills.sh", scripts),
+        ("sh relative script", "sh kills.sh", scripts),
+        ("cd then bash relative script", f"cd {scripts} && bash kills.sh", repo),
+        ("cd then direct script", f"cd {scripts} && ./kills.sh", repo),
+        ("literal variable script", f"S={scripts}; bash $S/kills.sh", repo),
+        (
+            "braced literal variable script",
+            f"S='{scripts}' && bash ${{S}}/kills.sh",
+            repo,
+        ),
+        ("nested inline shell pkill", "bash -c \"sh -c 'pkill -f vite'\"", repo),
+    ]:
+        case(name, command, True, cwd)
+    for name, command, cwd in [
+        ("inline bash -c without kill", "bash -c 'echo ok'", repo),
+        ("relative script without kill", "bash clean.sh", scripts),
+        ("bare word is a PATH lookup", "kills.sh", scripts),
+        (
+            "command substitution variable is skipped",
+            f"S=$(echo {scripts}); bash $S/kills.sh",
+            repo,
+        ),
+        (
+            "literal variable script without kill",
+            f"S={scripts}; bash $S/clean.sh",
+            repo,
+        ),
+    ]:
+        case(name, command, False, cwd)
+    fixtures = {
+        "pipe.sh": "#!/bin/bash\npgrep -f vite | xargs kill\n",
+        "killall.sh": "#!/bin/bash\nkillall -m vite\n",
+        "killall_own.sh": "#!/bin/bash\nkillall myapp\n",
+        "apos.sh": "#!/bin/bash\necho don't\n",
+        "apos_kill.sh": "#!/bin/bash\necho don't\npkill -f vite\n",
+        "tool.js": "#!/usr/bin/env node\n// don't panic\npkill -f vite\n",
+        "env_bash.sh": "#!/usr/bin/env bash\npkill -f vite\n",
+        "lib.sh": "stopdev() { pkill -f vite; }\n",
+        "eval": "pkill -f vite\n",
+        "outer.sh": f"#!/bin/bash\n{killing}\n",
+        "exec_log.sh": "#!/bin/bash\nexec >/dev/null 2>&1\necho started\n",
+        "sudo_v.sh": "#!/bin/bash\nsudo -v\necho ok\n",
+        "exec_nested.sh": f"#!/bin/bash\nexec 2>&1\n{killing}\n",
+        "env_s.sh": "#!/usr/bin/env -S bash -e\npkill -f vite\n",
+        "d1.sh": f"bash {scripts}/d2.sh\n",
+        "d2.sh": f"bash {scripts}/d3.sh\n",
+        "d3.sh": "pkill -f vite\n",
+        "e1.sh": f"bash {scripts}/e2.sh\n",
+        "e2.sh": f"bash {scripts}/e3.sh\n",
+        "e3.sh": f"bash {scripts}/e4.sh\n",
+        "e4.sh": "pkill -f vite\n",
+        "mid.sh": "echo ok\n" * 2000 + "pkill -f vite\n",
+        "three.sh": "cat <<EOF\nx\nEOF\n" * 3 + "pkill -f vite\n",
+        "seventy.sh": "cat <<EOF\nx\nEOF\n" * 70 + "pkill -f vite\n",
+        "fan.sh": f"bash {scripts}/fan.sh\n" * 120,
+        "-dash.sh": "pkill -f vite\n",
+    }
+    for fixture, text in fixtures.items():
+        (scripts / fixture).write_text(text)
+    (scripts / "dash").mkdir()
+    (scripts / "dash" / "-").write_text("pkill -f vite\n")
+    (scripts / "bin.sh").write_bytes(b"#!/bin/bash\npkill -f vite\n\0")
+    os.mkfifo(scripts / "fifo.sh")
+    late = scripts / "late.sh"
+    late.write_text("echo ok\n" * 12000 + "pkill -f vite\n")
+    big = scripts / "big.sh"
+    big.write_text('if [ -n "$X" ]; then echo "checking $X" >&5; fi\n' * 6000)
+    many = scripts / "many.sh"
+    many.write_text("cat <<EOF\n" * 6000)
+    repro = "cat > repro.sh <<'EOF'\npkill -f vite\nEOF\n"
+    for name, command in [
+        ("unparsable script then pkill", f"bash {scripts}/apos.sh; pkill -f vite"),
+        ("unparsable script holding pkill", f"bash {scripts}/apos_kill.sh"),
+        ("heredoc script run by dot slash", repro + "chmod +x repro.sh && ./repro.sh"),
+        (
+            "heredoc script written to dot slash",
+            repro.replace("> r", "> ./r") + "bash repro.sh",
+        ),
+        (
+            "heredoc script via quoted variable",
+            f'S={scripts}\ncat > "$S"/r.sh <<\'EOF\'\npkill -f vite\nEOF\nbash "$S"/r.sh',
+        ),
+        (
+            "heredoc script via braced variable",
+            f'S={scripts}\ncat > "${{S}}/r.sh" <<\'EOF\'\npkill -f vite\nEOF\nbash "$S/r.sh"',
+        ),
+        (
+            "heredoc script via unset variable",
+            "cat > $NOPE_VAR/r.sh <<'EOF'\npkill -f vite\nEOF\nbash $NOPE_VAR/r.sh",
+        ),
+        (
+            "heredoc script run after cd",
+            f"cat > {scripts}/r.sh <<'EOF'\npkill -f vite\nEOF\ncd {scripts} && bash r.sh",
+        ),
+        (
+            "heredoc script written after cd",
+            f"cd {scripts} && cat > r.sh <<'EOF'\npkill -f vite\nEOF\nbash r.sh",
+        ),
+        (
+            "heredoc script after an earlier redirect",
+            "echo hi > log.txt && " + repro + "bash repro.sh",
+        ),
+        (
+            "tee with an option",
+            "tee --append r.sh <<'EOF'\npkill -f vite\nEOF\nbash r.sh",
+        ),
+        (
+            "tee after the option terminator",
+            "tee -- -guard.sh <<'EOF'\npkill -f vite\nEOF\nbash ./-guard.sh",
+        ),
+        (
+            "tee after the option terminator, kill -1",
+            "tee -- -guard.sh <<'EOF'\nkill -9 -1\nEOF\nsh -- -guard.sh",
+        ),
+        ("printf %s written script", "printf '%s' 'pkill -f vite' > k.sh; bash k.sh"),
+        (
+            "printf format with the kill operand as an argument",
+            "printf 'kill -9 %s\\n' -1 > k.sh; bash k.sh",
+        ),
+        ("echo -e written script", "echo -e 'pkill -f vite' > k.sh; bash k.sh"),
+        ("echo -n written script", "echo -n 'pkill -f vite' > k.sh; bash k.sh"),
+        ("printf %s piped to a shell", "printf '%s' 'pkill -f vite' | sh"),
+        ("echo -e piped to a shell", "echo -e 'pkill -f vite' | sh"),
+        ("echo -e unicode escape", "echo -e '\\u0070kill -f vite' > k.sh; bash k.sh"),
+        (
+            "echo -e code point past the Unicode range",
+            "echo -e '\\U00110000pkill -f vite' > k.sh; bash k.sh",
+        ),
+        (
+            "echo -e octal NUL inside a word",
+            "echo -e 'pk\\000ill -f vite' > k.sh; bash k.sh",
+        ),
+        ("echo -e NUL inside a word", "echo -e 'pk\\x00ill -f vite' > k.sh; bash k.sh"),
+        ("printf %d with a number", "printf 'kill -9 %d\\n' -1 > k.sh; bash k.sh"),
+        ("printf %d with a word", "printf 'pkill -f vite %d\\n' x > k.sh; bash k.sh"),
+        (
+            "printf %d with a character constant",
+            "printf 'pkill -f vite %d\\n' \"'x\" > k.sh; bash k.sh",
+        ),
+        ("echo -e hex escape", "echo -e '\\x70kill -f vite' > k.sh; bash k.sh"),
+        ("echo -e octal escape", "echo -e '\\0160kill -f vite' > k.sh; bash k.sh"),
+        (
+            "printf escape in the format",
+            "printf '\\x70kill -f vite\\n' > k.sh; bash k.sh",
+        ),
+        ("printf %b escape in an argument", "printf '%b' '\\x70kill -f vite' | sh"),
+        ("printf format reused for each argument", "printf '%s ' kill -9 -1 | sh"),
+        (
+            "printf escape before a conversion",
+            "printf '\\x70kill %s\\n' '-f vite' | sh",
+        ),
+        ("printf percent sign before the kill", "printf '%%\\nkill -9 %s\\n' -1 | sh"),
+        ("printf width taken from an argument", "printf '%*s' 1 'pkill -f vite' | sh"),
+        ("printf after the option terminator", "printf -- '%s' 'pkill -f vite' | sh"),
+        (
+            "printf conversion not modelled scans each argument",
+            "printf '%a %s\\n' 1 'pkill -f vite' > k.sh; bash k.sh",
+        ),
+        (
+            "tee file after a file",
+            "tee out.txt -guard.sh <<'EOF'\npkill -f vite\nEOF\nbash ./-guard.sh",
+        ),
+        (
+            "tee file named -",
+            "tee - <<'EOF'\npkill -f vite\nEOF\nbash ./-",
+        ),
+        (
+            "tee file named --",
+            "tee -- -- <<'EOF'\npkill -f vite\nEOF\nbash ./--",
+        ),
+        (
+            "cat dash file after a file piped to a shell",
+            "cat /dev/null -dash.sh | sh",
+        ),
+        (
+            "source after the option terminator",
+            "source -- -dash.sh",
+        ),
+        (
+            "dot after the option terminator",
+            ". -- -dash.sh",
+        ),
+        (
+            "echo written script read by cat into a shell",
+            "echo 'pkill -f vite' > w.sh; cat w.sh | bash",
+        ),
+        (
+            "echo written script as shell stdin",
+            "echo 'pkill -f vite' > w.sh; bash < w.sh",
+        ),
+        (
+            "tee written dash script read by cat",
+            "tee -- -w.sh <<'EOF'\npkill -f vite\nEOF\ncat -- -w.sh | sh",
+        ),
+        (
+            "wrapped cat piped to a shell",
+            "command cat ./-dash.sh | sh",
+        ),
+        (
+            "sudo cat piped to a shell",
+            "sudo cat ./-dash.sh | sh",
+        ),
+        ("echo written script", "echo 'pkill -f vite' > k.sh && bash k.sh"),
+        ("printf written script", "printf 'pkill -f vite\\n' > k.sh; sh k.sh"),
+        ("appended echo script", "echo 'pkill -f vite' >> k.sh; bash k.sh"),
+        ("stdin from a file", f"bash < {scripts}/kills.sh"),
+        ("cat piped to a shell", f"cat {scripts}/kills.sh | bash"),
+        ("cat after the option terminator piped to a shell", "cat -- -dash.sh | sh"),
+        ("here-string to a shell", "bash <<< 'pkill -f vite'"),
+        ("echo piped to a shell", "echo 'pkill -f vite' | sh"),
+        ("script run by inline shell", f"bash -c 'bash {scripts}/kills.sh'"),
+        ("relative script run by inline shell", "sh -c './kills.sh'"),
+        ("script run by a script", f"bash {scripts}/outer.sh"),
+        ("long option before the script", f"bash --norc {scripts}/kills.sh"),
+        (
+            "another long option before the script",
+            f"bash --noprofile {scripts}/kills.sh",
+        ),
+        ("option value before the script", f"bash -o errexit {scripts}/kills.sh"),
+        ("exported variable script", f"export S={scripts}; bash $S/kills.sh"),
+        (
+            "variable reassigned after the run",
+            f"S={scripts}; bash $S/kills.sh; S=/nonexistent",
+        ),
+        ("pipeline kill in a script", f"bash {scripts}/pipe.sh"),
+        ("killall -m in a script", f"bash {scripts}/killall.sh"),
+        ("shebang names env bash", f"{scripts}/env_bash.sh"),
+        ("node file run through bash", f"bash {scripts}/tool.js"),
+        ("sourced library that only defines a kill", f"source {scripts}/lib.sh"),
+        ("file named eval run by path", "./eval"),
+        (
+            "bare exec in an inline program",
+            "bash -c 'exec 2>&1'; git push origin HEAD:main",
+        ),
+        ("bare env in an inline program", "bash -c env; git push origin HEAD:main"),
+        (
+            "bare exec piped to a shell",
+            "echo 'exec 2>&1' | bash; git push origin HEAD:main",
+        ),
+        (
+            "script with exec redirects then push",
+            f"bash {scripts}/exec_log.sh; git push origin HEAD:main",
+        ),
+        (
+            "script with sudo -v then push",
+            f"bash {scripts}/sudo_v.sh; git push origin HEAD:main",
+        ),
+        (
+            "this repo's heavy-slot then push",
+            f"{ROOT}/heavy-slot count; git push origin HEAD:main",
+        ),
+        ("exec then a nested kill script", f"bash {scripts}/exec_nested.sh"),
+        ("depth 3 run is followed", f"bash {scripts}/d1.sh"),
+        ("kill inside the scan limit", f"bash {scripts}/mid.sh"),
+        ("kill after a few heredocs", f"bash {scripts}/three.sh"),
+        ("ampersand redirect script", "echo 'pkill -f vite' &> k.sh; bash k.sh"),
+        ("printf escape script", "printf 'echo hi\\npkill -f vite' > k.sh; sh k.sh"),
+        (
+            "kill script behind two pipe stages",
+            f"echo hi | cat {scripts}/kills.sh | bash",
+        ),
+        ("option group ending in o", f"bash -euo pipefail {scripts}/kills.sh"),
+        ("option group ending in o with x", f"bash -euxo pipefail {scripts}/kills.sh"),
+        ("env -S shebang names a shell", f"{scripts}/env_s.sh"),
+        ("declare -x variable script", f"declare -x S={scripts}; bash $S/kills.sh"),
+        ("readonly variable script", f"readonly S={scripts}; bash $S/kills.sh"),
+        ("builtin source", f"builtin source {scripts}/kills.sh"),
+        (
+            "PWD names the written script",
+            "cat > r.sh <<'EOF'\npkill -f vite\nEOF\nbash \"$PWD/r.sh\"",
+        ),
+        (
+            "PWD assigned by the command",
+            f"PWD={scripts}/..; bash $PWD/scripts/kills.sh",
+        ),
+        ("plus n runs the script", f"bash +n {scripts}/kills.sh"),
+        ("PWD follows cd", f"cd {scripts} && bash ${{PWD}}/kills.sh"),
+    ]:
+        case(name, command, True, scripts)
+    case("unparsable script then stash", f"bash {scripts}/apos.sh; git stash", True, wt)
+    case("node file then stash", f"{scripts}/tool.js; git stash", True, wt)
+    for name, command in [
+        ("node shebang file run directly", f"{scripts}/tool.js"),
+        ("syntax check of a written script", repro + "bash -n repro.sh"),
+        (
+            "stdin shell with a positional argument",
+            "bash -s kills.sh <<'EOF'\necho hi\nEOF",
+        ),
+        ("eval is not a file lookup", "eval echo hi"),
+        ("inline program named like a file", "bash -c kills.sh"),
+        ("kill beyond the depth limit", f"bash {scripts}/e1.sh"),
+        ("kill after many heredocs", f"bash {scripts}/seventy.sh"),
+        ("inline program with a script name after it", "bash -c 'echo ok' kills.sh"),
+        (
+            "variable reassigned before the run",
+            f"S=/nonexistent; bash $S/kills.sh; S={scripts}",
+        ),
+        ("binary file holding the words", f"bash {scripts}/bin.sh"),
+        ("kill after the scan limit", f"bash {scripts}/late.sh"),
+        ("FIFO as the script", f"bash {scripts}/fifo.sh"),
+        ("killall of an own process in a script", f"bash {scripts}/killall_own.sh"),
+        ("script that only echoes in a pipe", "echo ok | bash"),
+        ("piped file without a kill", f"cat {scripts}/clean.sh | bash"),
+        (
+            "tee file after a file, never run",
+            "tee out.txt -notes.md <<'EOF'\npkill -f vite\nEOF",
+        ),
+        (
+            "cat of a missing dash file",
+            "cat -- -clean.sh | sh",
+        ),
+        ("wrapper alone piped to a shell", "command | sh"),
+        (
+            "cat of standard input",
+            "cd dash && cat - | sh",
+        ),
+        (
+            "written clean script read by cat",
+            "echo hi > w.sh; cat w.sh | bash",
+        ),
+        (
+            "pipe into tee after the option terminator",
+            "git log --oneline | tee -- log.txt",
+        ),
+        (
+            "printf %s of a harmless line, run",
+            "printf '%s\\n' 'echo hi' > k.sh; bash k.sh",
+        ),
+        ("echo -e of a kill, never run", "echo -e 'pkill -f vite' > notes.md"),
+        (
+            "tee after the option terminator, never run",
+            "tee -- -notes.md <<'EOF'\npkill -f vite\nEOF",
+        ),
+    ]:
+        case(name, command, False, scripts)
+    started = time.perf_counter()
+    log_path = Path.home() / ".claude/hooks/guard-bash.log"
+    assert not guard.evaluate(f"bash {scripts}/fan.sh", repo)
+    cat_many = "cat " + f"{scripts}/big.sh " * 100 + "| bash"
+    assert not guard.evaluate(cat_many, repo)
+    assert time.perf_counter() - started < 3, "scan budget is not applied"
+    assert not log_path.exists() or "scan-budget" not in log_path.read_text()
+    for number in range(40):
+        (scripts / f"bulk{number}.sh").write_text("echo ok\n" * 7500)
+    bulk = "; ".join(f"bash {scripts}/bulk{number}.sh" for number in range(40))
+    assert not guard.evaluate(bulk, repo)
+    assert "scan-budget" in log_path.read_text()
+    log_before = log_path.read_text()
+    saved_runs = guard.runs
+
+    def failing_runs(*args, **kwargs):
+        raise RuntimeError("forced scan error")
+
+    guard.runs = failing_runs
+    try:
+        assert guard.evaluate("bash x.sh; git push origin HEAD:main", repo)
+    finally:
+        guard.runs = saved_runs
+    log_new = log_path.read_text()[len(log_before) :]
+    assert "scan-error: RuntimeError: forced scan error" in log_new, log_new
+
+    def logged(command, cwd=repo):
+        before = log_path.read_text() if log_path.exists() else ""
+        result = guard.evaluate(command, cwd)
+        return result, log_path.read_text()[len(before) :]
+
+    bulk_five = "; ".join(f"bash {scripts}/bulk{number}.sh" for number in range(5))
+    result, new_log = logged(f"{bulk_five}; bash {scripts}/kills.sh")
+    assert result and "scan-budget" not in new_log, "scan budget is below 512 KB"
+
+    nest = scripts / "nest"
+    for folder in ("vs", "seen/a", "seen/b"):
+        (nest / folder).mkdir(parents=True)
+    for name, text in {
+        "vs/p.sh": "bash r.sh\n",
+        "vs/r.sh": "bash X.sh\n",
+        "vs/q.sh": "bash X.sh\n",
+        "vs/X.sh": "bash K.sh\n",
+        "vs/K.sh": "pkill -f vite\n",
+        "vs/two.sh": 'echo ok | bash\necho "bash K.sh" | bash\n',
+        "seen/outer.sh": "cd a\nbash ../lib.sh\ncd ../b\nbash ../lib.sh\n",
+        "seen/lib.sh": "bash ./step.sh\n",
+        "seen/a/step.sh": "echo ok\n",
+        "seen/b/step.sh": "pkill -f vite\n",
+    }.items():
+        (nest / name).write_text(text)
+    for name, command, cwd in [
+        ("file seen at another depth", "bash p.sh; bash q.sh", nest / "vs"),
+        ("inline code seen twice", "bash two.sh", nest / "vs"),
+        ("file seen from another folder", "bash outer.sh", nest / "seen"),
+    ]:
+        case(name, command, True, cwd)
+
+    read_files = []
+    saved_text = guard.script_text
+
+    def counting_text(path):
+        read_files.append(path)
+        return saved_text(path)
+
+    guard.script_text = counting_text
+    try:
+        assert not guard.evaluate(cat_many, repo)
+    finally:
+        guard.script_text = saved_text
+    assert len(read_files) == 1, f"cat read {len(read_files)} files past the limit"
+
+    for name, command in [
+        ("option group with o first", f"bash -oe pipefail {scripts}/kills.sh"),
+        ("option group with O last", f"bash -eO extglob {scripts}/kills.sh"),
+        ("option group with O first", f"bash -Oe extglob {scripts}/kills.sh"),
+        ("single dash norc", "bash -norc kills.sh"),
+        ("single dash posix", "bash -posix kills.sh"),
+        ("single dash login", "bash -login kills.sh"),
+        ("single dash noediting", "bash -noediting kills.sh"),
+        ("single dash noprofile", "bash -noprofile kills.sh"),
+        ("single dash restricted", "bash -restricted kills.sh"),
+        ("two o options in one group", "bash -oO pipefail extglob kills.sh"),
+        ("zsh option name attached", "zsh -oerrexit kills.sh"),
+        ("ksh option name attached", "ksh -oerrexit kills.sh"),
+        ("zsh path option name attached", "/bin/zsh -oerrexit kills.sh"),
+        ("zsh option name without a space", "zsh -oposixargzero kills.sh"),
+        ("zsh -oposixargzero then inline pi", "zsh -oposixargzero -c 'pi -p hello'"),
+        ("zsh -eO then inline pi", "zsh -eO -c 'pi -p hello'"),
+        ("zsh -O then inline pi", "zsh -O -c 'pi -p hello'"),
+        ("zsh -restricted then inline pi", "zsh -restricted 'pi -p hello'"),
+        ("zsh -rcfile then inline pi", "zsh -rcfile -c 'pi -p hello'"),
+        ("ksh -rcfile then inline pi", "ksh -rcfile -c 'pi -p hello'"),
+        ("zsh attached option then inline pi", "zsh -opipefail -c 'pi -p hello'"),
+        ("ksh attached option then inline pi", "ksh -opipefail -c 'pi -p hello'"),
+        ("zsh attached option then inline kill", "zsh -eopipefail -c 'pkill -f vite'"),
+        ("zsh option name in the next word", "zsh -o pipefail -c 'pi -p hello'"),
+        ("ksh grouped option then its name", "ksh -eo errexit kills.sh"),
+        ("zsh option name with n", "zsh -onounset kills.sh"),
+        ("zsh option name with c and n", "zsh -onoclobber kills.sh"),
+        ("ksh option name with c, then a program", "ksh -onoclobber 'pi -p hello'"),
+        ("ksh runs a missing script as a program", "ksh 'pi -p hello'"),
+        ("ksh -o value is optional before -c", "ksh -eo -c 'pi -p hello'"),
+        (
+            "ksh -o value is optional before -s",
+            "ksh -eo -s arg <<'EOF'\npi -p hello\nEOF",
+        ),
+        ("ksh -o value is optional before +e", "ksh -o +e -c 'pi -p hello'"),
+        ("ksh lone -o before -s", "ksh -o -s arg <<'EOF'\npi -p hello\nEOF"),
+        (
+            "ksh heredoc after an option name",
+            "ksh -o errexit <<'EOF'\npkill -f vite\nEOF",
+        ),
+        ("bash two letters then option name", "bash -oe pipefail -c 'pi -p hello'"),
+        ("sh two letters then option name", "sh -oe pipefail -c 'pi -p hello'"),
+        ("single dash rcfile", "bash -rcfile /dev/null kills.sh"),
+        ("single dash init-file", "bash -init-file /dev/null kills.sh"),
+        ("single dash verbose", "bash -verbose kills.sh"),
+        ("single dash protected", "bash -protected kills.sh"),
+        ("verbose inline kill", "bash -verbose -c 'pkill -f vite'"),
+        ("verbose inline kill in sh", "sh -verbose -c 'pkill -f vite'"),
+        ("verbose inline pi start", "bash -verbose -c 'pi -p hello'"),
+        ("verbose inline pi start in sh", "sh -verbose -c 'pi -p hello'"),
+        ("typeset variable", f"typeset -x S={scripts}; bash $S/kills.sh"),
+    ]:
+        case(name, command, True, scripts)
+
+    assert guard.SCRIPT_SCAN_SECONDS == 5
+    saved_seconds = guard.SCRIPT_SCAN_SECONDS
+    guard.SCRIPT_SCAN_SECONDS = -1
+    try:
+        result, new_log = logged(f"bash {scripts}/kills.sh", repo)
+        assert not result and "scan-budget" in new_log, (result, new_log)
+        result, new_log = logged(f"bash {scripts}/kills.sh; git stash", wt)
+        assert result and "scan-budget" in new_log, (result, new_log)
+    finally:
+        guard.SCRIPT_SCAN_SECONDS = saved_seconds
+
+    guard.runs = lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("forced"))
+    try:
+        result, new_log = logged("bash x.sh; git push origin HEAD:main")
+    finally:
+        guard.runs = saved_runs
+    assert result and "scan-error: ValueError: forced" in new_log, (result, new_log)
+    saved_entries = guard.command_entries
+
+    def failing_entries(*args, **kwargs):
+        raise RuntimeError("forced parse error")
+
+    guard.command_entries = failing_entries
+    try:
+        result, new_log = logged("git push origin HEAD:main")
+    finally:
+        guard.command_entries = saved_entries
+    assert result and "scan-error: RuntimeError: forced parse error" in new_log, (
+        result,
+        new_log,
+    )
+    result, new_log = logged("bash ~a\0b.sh; bash x.sh")
+    assert "scan-error: ValueError" in new_log, new_log
+    before = log_path.read_text()
+    assert guard.guard_script_kill('echo "unterminated', repo, set()) is None
+    assert log_path.read_text() == before, "unparsable command text was logged"
+    marker = "m" * 256
+    assert guard.bounded(f"echo ok\ncat <<{marker}\nx\n") == (
+        f"echo ok\ncat <<{marker}\nx\n"
+    )
+    for before, operator in (
+        ("cat ", "<<"),
+        ("x=$(cat ", "<<-"),
+        ("cat ", "<< '"),
+        ("cat ", '<<"'),
+    ):
+        cut = guard.bounded(f"echo ok\n{before}{operator}{marker}m\npkill -f vite\n")
+        assert cut == f"echo ok\n{before}", (before, operator, cut)
+    pieces = "\\\n".join(["m" * 100, "m" * 100, "m" * 57])
+    assert guard.bounded(f"echo ok\ncat <<{pieces}\npkill -f vite\n") == "echo ok\ncat "
+    operators = guard.bounded("cat <\\\n<x\n" * 70)
+    assert operators.count("<<") == guard.SCRIPT_HEREDOC_LIMIT, operators.count("<<")
+    (scripts / "marker.sh").write_text(f"pkill -f vite\ncat <<{marker}m\nx\n")
+    case("kill before a long marker", f"bash {scripts}/marker.sh", True)
+    started = time.perf_counter()
+    assert not guard.evaluate(f"bash {big}", repo)
+    assert not guard.evaluate(f"bash {many}", repo)
+    assert time.perf_counter() - started < 1, "script scan is slow"
+    saved_tmp = os.environ.get("TMPDIR")
+    os.environ["TMPDIR"] = str(scripts.parent)
+    try:
+        assert guard.evaluate("bash $TMPDIR/scripts/kills.sh", repo)
+    finally:
+        os.environ.pop("TMPDIR") if saved_tmp is None else os.environ.update(
+            TMPDIR=saved_tmp
+        )
+    home = scripts / "home"
+    home.mkdir()
+    (home / "kills.sh").write_text("pkill -f vite\n")
+    saved_home = os.environ["HOME"]
+    os.environ["HOME"] = str(home)
+    try:
+        for text in ("bash $HOME/kills.sh", "bash ${HOME}/kills.sh", "bash ~/kills.sh"):
+            assert guard.evaluate(text, repo), text
+    finally:
+        os.environ["HOME"] = saved_home
     case("pgrep full kill", "pgrep --full rails | xargs kill", True)
     case("ps grep kill", "ps aux | grep vite | awk '{print $2}' | xargs kill", True)
     for name, command in [
@@ -949,6 +1530,42 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("substitution ps kill", "kill $(ps aux | grep vite | awk '{print $2}')"),
     ]:
         case(name, command, True)
+    for name, command in [
+        ("kill -TERM -1", "kill -TERM -1"),
+        ("kill -9 -1", "kill -9 -1"),
+        ("kill -KILL -1", "kill -KILL -1"),
+        ("kill -SIGTERM -1", "kill -SIGTERM -1"),
+        ("kill -s TERM -1", "kill -s TERM -1"),
+        ("kill -n 9 -1", "kill -n 9 -1"),
+        ("kill -- -1", "kill -- -1"),
+        ("kill -9 -- -1", "kill -9 -- -1"),
+        ("kill with a pid then -1", "kill -TERM 1234 -1"),
+        ("kill by path -1", "/bin/kill -TERM -1"),
+        ("kill -1 on every process", "kill -1 -1"),
+        ("inline bash kill -1", "bash -c 'kill -9 -1'"),
+        ("sudo kill -1", "sudo kill -9 -1"),
+        ("written script kill -1", "cat > k.sh <<'EOF'\nkill -TERM -1\nEOF\nbash k.sh"),
+        ("kill -1 then another pid", "kill -9 -1 1234"),
+        ("kill -1 in an if block", "if true; then kill -9 -1; fi"),
+        ("kill -1 in a substitution", "x=$(kill -9 -1)"),
+    ]:
+        case(name, command, True)
+    for name, command in [
+        ("kill signal 1 to a pid", "kill -1 1234"),
+        ("kill -HUP pid", "kill -HUP 1234"),
+        ("kill -TERM pid", "kill -TERM 1234"),
+        ("kill -l", "kill -l"),
+        ("kill job", "kill %1"),
+        ("kill -1 alone", "kill -1"),
+        ("kill -s takes -1 as its signal", "kill -s -1 1234"),
+        ("kill -n takes -1 as its signal", "kill -n -1 1234"),
+        ("ls -a -1 is not a kill", "ls -a -1"),
+        ("kill -1 text not run", "echo 'kill -9 -1' >| notes.md"),
+        ("zsh does not run a missing script as text", "zsh -onoclobber 'pi -p hello'"),
+        ("zsh -o takes -c as its value", "zsh -eo -c 'pi -p hello'"),
+        ("bash -o takes -c as its value", "bash -o -c 'pi -p hello'"),
+    ]:
+        case(name, command)
     case("killall regex vite", 'killall -m "vit.*"', True)
     case("killall bundle", "killall bundle", True)
     case("killall regex rails", 'killall -m "rail.*"', True)
@@ -1863,6 +2480,9 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("guard_attribution", "Codex trailer"),
         ("guard_memory", "shared deepen fetch"),
         ("guard_broad_kill", "substitution pgrep kill"),
+        ("guard_written_script", "incident heredoc script run directly"),
+        ("guard_disk_script", "disk script via bash"),
+        ("guard_inline_shell", "inline bash -c pkill"),
         ("guard_big_repo_reads", "webapp batch all objects"),
         ("guard_pi", "herdr pi start on DeepSeek"),
     ]:
