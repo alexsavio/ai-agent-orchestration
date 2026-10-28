@@ -1269,6 +1269,17 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("single dash noprofile", "bash -noprofile kills.sh"),
         ("single dash restricted", "bash -restricted kills.sh"),
         ("two o options in one group", "bash -oO pipefail extglob kills.sh"),
+        ("zsh option name attached", "zsh -oerrexit kills.sh"),
+        ("ksh option name attached", "ksh -oerrexit kills.sh"),
+        ("zsh attached option then inline pi", "zsh -opipefail -c 'pi -p hello'"),
+        ("ksh attached option then inline pi", "ksh -opipefail -c 'pi -p hello'"),
+        ("zsh attached option then inline kill", "zsh -eopipefail -c 'pkill -f vite'"),
+        ("zsh option name in the next word", "zsh -o pipefail -c 'pi -p hello'"),
+        ("ksh grouped option then its name", "ksh -eo errexit kills.sh"),
+        ("bash two letters then option name", "bash -oe pipefail -c 'pi -p hello'"),
+        ("sh two letters then option name", "sh -oe pipefail -c 'pi -p hello'"),
+        ("single dash rcfile", "bash -rcfile /dev/null kills.sh"),
+        ("single dash init-file", "bash -init-file /dev/null kills.sh"),
         ("single dash verbose", "bash -verbose kills.sh"),
         ("single dash protected", "bash -protected kills.sh"),
         ("verbose inline kill", "bash -verbose -c 'pkill -f vite'"),
@@ -1327,6 +1338,10 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     ):
         cut = guard.bounded(f"echo ok\n{before}{operator}{marker}m\npkill -f vite\n")
         assert cut == f"echo ok\n{before}", (before, operator, cut)
+    pieces = "\\\n".join(["m" * 100, "m" * 100, "m" * 57])
+    assert guard.bounded(f"echo ok\ncat <<{pieces}\npkill -f vite\n") == "echo ok\ncat "
+    operators = guard.bounded("cat <\\\n<x\n" * 70)
+    assert operators.count("<<") == guard.SCRIPT_HEREDOC_LIMIT, operators.count("<<")
     (scripts / "marker.sh").write_text(f"pkill -f vite\ncat <<{marker}m\nx\n")
     case("kill before a long marker", f"bash {scripts}/marker.sh", True)
     started = time.perf_counter()

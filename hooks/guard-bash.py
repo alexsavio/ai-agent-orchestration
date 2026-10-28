@@ -545,7 +545,16 @@ def word_substitutions(word):
             index += 1
 
 
-SHELL_OPTION_VALUES = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+SHELL_OPTION_VALUES = {
+    "-o",
+    "+o",
+    "-O",
+    "+O",
+    "--rcfile",
+    "--init-file",
+    "-rcfile",
+    "-init-file",
+}
 SHELL_SINGLE_DASH_FLAGS = {
     "-login",
     "-noediting",
@@ -577,7 +586,10 @@ def shell_args(words):
             command_mode = command_mode or "c" in word
             stdin_mode = stdin_mode or "s" in word
             check_only = check_only or (word[0] == "-" and "n" in word)
-            index += 1 + sum(c in "oO" for c in word[1:])
+            if os.path.basename(words[0]) in ("zsh", "ksh"):
+                index += 1 + (word[-1] in "oO")
+            else:
+                index += 1 + sum(c in "oO" for c in word[1:])
         elif word.startswith("--"):
             index += 1
         else:
@@ -966,6 +978,7 @@ def kill_words(entries, text):
 
 def bounded(code):
     """Cuts code at its SCRIPT_HEREDOC_LIMIT-th heredoc operator or at a marker over 256 characters; the heredoc matcher is quadratic on unterminated ones."""
+    code = re.sub(r"\\\n[ \t]*", "", code)
     long_marker = re.search(r"<<-?[ \t]*['\"]?\w{257}", code)
     if long_marker:
         code = code[: long_marker.start()]
