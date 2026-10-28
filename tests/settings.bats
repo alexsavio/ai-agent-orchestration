@@ -69,10 +69,12 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
 @test "an exported effort that is not empty or a level is an error; empty is valid" {
   every_value global >"$ORCH_CONFIG"
   for name in ORCH_COORDINATOR_EFFORT ORCH_ARCHITECT_EFFORT ORCH_WORKER_EFFORT ORCH_REVIEWER_EFFORT; do
-    run env "$name=bogus" python3 "$SETTINGS" print "$ORCH_CONFIG"
-    echo "$output"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"unknown value \"bogus\"; known: empty, low, medium, high, xhigh, max"* ]]
+    for bad in bogus High; do
+      run env "$name=$bad" python3 "$SETTINGS" print "$ORCH_CONFIG"
+      echo "$output"
+      [ "$status" -ne 0 ]
+      [[ "$output" == *"unknown value \"$bad\"; known: empty, low, medium, high, xhigh, max"* ]]
+    done
     run env "$name=" python3 "$SETTINGS" print "$ORCH_CONFIG"
     [ "$status" -eq 0 ]
     printf '%s\n' "$output" | grep -qxF "$name="

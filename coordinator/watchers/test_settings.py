@@ -1002,11 +1002,12 @@ class ProvidersTest(SettingsTest):
 
     def test_an_unknown_effort_level_is_an_error(self):
         for role in ("coordinator", "architect", "worker", "reviewer"):
-            with self.subTest(role):
-                self.assertIn(
-                    f'models.{role}_effort: unknown value "turbo"; known: empty, low, medium, high, xhigh, max',
-                    self.error(f'[models]\n{role}_effort = "turbo"\n'),
-                )
+            for bad in ("turbo", "High"):
+                with self.subTest(role=role, bad=bad):
+                    self.assertIn(
+                        f'models.{role}_effort: unknown value "{bad}"; known: empty, low, medium, high, xhigh, max',
+                        self.error(f'[models]\n{role}_effort = "{bad}"\n'),
+                    )
 
     def test_every_known_effort_level_is_accepted(self):
         for level in s.EFFORT_LEVELS:
@@ -1035,11 +1036,12 @@ class ProvidersTest(SettingsTest):
         for role in ("COORDINATOR", "ARCHITECT", "WORKER", "REVIEWER"):
             name = f"ORCH_{role}_EFFORT"
             with self.subTest(role):
-                with self.assertRaisesRegex(
-                    s.ConfigError,
-                    rf'models.{role.lower()}_effort \({name}\): unknown value "bogus"; known: empty, low',
-                ):
-                    self.resolve(**{name: "bogus"})
+                for bad in ("bogus", "High"):
+                    with self.assertRaisesRegex(
+                        s.ConfigError,
+                        rf'models.{role.lower()}_effort \({name}\): unknown value "{bad}"; known: empty, low',
+                    ):
+                        self.resolve(**{name: bad})
                 self.assertEqual(self.resolve(**{name: ""})[name], "")
                 self.assertEqual(self.resolve(**{name: "max"})[name], "max")
 

@@ -243,19 +243,26 @@ dispatch() {
 
 @test "every Claude start and recycle line passes --effort next to --model" {
   # shellcheck disable=SC2016 # The dollar signs are literal skill text.
-  grep -qF -- '${ORCH_ARCHITECT_EFFORT:+--effort $ORCH_ARCHITECT_EFFORT} --name' "$ROOT/skills/coordinate/references/recycle.md"
+  grep -qF -- '<effort flag> (architect: `ORCH_ARCHITECT_EFFORT`) --name' "$ROOT/skills/coordinate/references/recycle.md"
   # shellcheck disable=SC2016 # The dollar signs are literal skill text.
-  grep -qF -- '${ORCH_COORDINATOR_EFFORT:+--effort $ORCH_COORDINATOR_EFFORT} --name Coordinator' "$ROOT/skills/coordinate/references/recycle.md"
+  grep -qF -- '<effort flag> (Coordinator: `ORCH_COORDINATOR_EFFORT`) --name Coordinator' "$ROOT/skills/coordinate/references/recycle.md"
   # shellcheck disable=SC2016 # The backticks are literal skill text.
-  grep -qF -- 'adds `${ORCH_WORKER_EFFORT:+--effort $ORCH_WORKER_EFFORT}` after the model' "$ROOT/skills/architect/references/dispatch.md"
+  grep -qF -- 'adds `<effort flag>` after the model (worker: `ORCH_WORKER_EFFORT`;' "$ROOT/skills/architect/references/dispatch.md"
   # shellcheck disable=SC2016 # The backticks are literal skill text.
-  grep -qF -- 'with `${ORCH_ARCHITECT_EFFORT:+--effort $ORCH_ARCHITECT_EFFORT}`' "$ROOT/skills/architect/SKILL.md"
+  grep -qF -- 'with `<effort flag>` (architect: `ORCH_ARCHITECT_EFFORT`)' "$ROOT/skills/architect/SKILL.md"
   # shellcheck disable=SC2016 # The backticks are literal skill text.
-  grep -qF -- '(`${ORCH_REVIEWER_EFFORT:+--effort $ORCH_REVIEWER_EFFORT}` for a reviewer;' "$ROOT/skills/architect/references/dispatch.md"
+  grep -qF -- 'reviewer: `ORCH_REVIEWER_EFFORT`; nothing when the value is empty' "$ROOT/skills/architect/references/dispatch.md"
   for file in skills/architect/SKILL.md skills/coordinate/SKILL.md; do
     # shellcheck disable=SC2016 # The backticks are literal skill text.
     grep -qF -- 'empty means no `--effort`: the level saved in `~/.claude/settings.json` or the model default applies' "$ROOT/$file"
   done
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md; do
+    # shellcheck disable=SC2016 # The backticks are literal skill text.
+    grep -qF -- '`<effort flag>` is `--effort <value>` with the value `orch-settings` prints for that role'"'"'s `ORCH_…_EFFORT` (or the per-dispatch level), and nothing at all when it prints empty; the `ORCH_…` variables are not set in your shell, so write the value in' "$ROOT/$file"
+  done
+  # The ORCH_ variables are not set in an agent's shell, so no ${ORCH_…:+ form may be left.
+  run bash -c "grep -rnF '\${ORCH_' '$ROOT/skills' | grep -F ':+'"
+  [ "$status" -eq 1 ]
   # The names appear only in the "never as ..." prose lines.
   cd "$ROOT"
   run bash -c "grep -rn -e CLAUDE_CODE_EFFORT_LEVEL -e effortLevel skills docs install.sh hooks lib | sed 's/never as \`CLAUDE_CODE_EFFORT_LEVEL\` or \`effortLevel\`//' | grep -e CLAUDE_CODE_EFFORT_LEVEL -e effortLevel"
@@ -264,7 +271,7 @@ dispatch() {
 
 @test "a per-dispatch effort survives a worker recycle through the handoff" {
   # shellcheck disable=SC2016 # The backticks are literal skill text.
-  grep -qF -- '- **Effort:** the `--effort` level of the first start' "$ROOT/skills/architect/references/worker-recycle.md"
+  grep -qF -- '- **Effort:** the `--effort` level of the first start, from the dispatch note (you cannot see your own level), or empty when the first start passed no `--effort`; the architect fills it in when the worker leaves it out.' "$ROOT/skills/architect/references/worker-recycle.md"
   # shellcheck disable=SC2016 # The backticks are literal skill text.
   grep -qF -- "from the handoff's \`Effort:\` field, and nothing when that field is empty" "$ROOT/skills/architect/references/worker-recycle.md"
 }
