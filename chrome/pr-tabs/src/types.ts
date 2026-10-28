@@ -13,7 +13,7 @@ export type GroupId = number;
 export type PrKey = `${OrgName}/${RepoName}#${PrNumber}`;
 export type PrUrl = `https://github.com/${OrgName}/${RepoName}/pull/${PrNumber}`;
 export type HeadKey = `${string}:${BranchName}`;
-export type OwnerKey = HeadKey;
+export type OwnerKey = HeadKey | PrKey;
 export type PrStateName = "OPEN" | "CLOSED" | "MERGED";
 export type GroupColor = `${chrome.tabGroups.Color}`;
 export type Tab = chrome.tabs.Tab;
@@ -106,7 +106,7 @@ export interface PollBatch {
   nextCursor: number;
 }
 
-export interface PrBranch extends Pick<PrRef, "owner" | "repo"> {
+export interface PrBranch extends Pick<PrRef, "owner" | "repo" | "number"> {
   branch?: BranchName;
   headRepository?: HeadRepository | null;
 }
@@ -125,6 +125,8 @@ export interface BranchRef {
 }
 
 export interface PrRow {
+  readonly tabId: TabId;
+  readonly highlights?: PrHighlights;
   readonly key: PrKey;
   readonly label: string;
   readonly title: string;
@@ -132,17 +134,22 @@ export interface PrRow {
 }
 
 export interface GroupCount {
+  id: string;
   title: GroupTitle;
   color?: GroupColor;
   prs: Map<PrKey, PrRow>;
 }
 
 export interface GroupSummary {
+  id: string;
   title: GroupTitle;
   color?: GroupColor;
   count: number;
   prs: PrRow[];
 }
+
+export type GroupRows = Record<string, GroupSummary>;
+export type PrRows = Record<string, PrRow>;
 
 export type AgentState = "working" | "idle" | "done" | "waiting";
 
@@ -178,7 +185,21 @@ export interface OpenAllResult {
 }
 
 // Requests from the popup to the service worker.
-export type PlainRequestType = "summary" | "repos" | "openAll" | "checkNow" | "closeDuplicates";
+export type OpenBatchAction = "openAll" | "openReviews";
+
+export type MetadataRevision = number;
+
+export interface OpeningProgress {
+  readonly hydrating?: boolean;
+  readonly metadataRevision?: MetadataRevision;
+  readonly active: boolean;
+  readonly opened: number;
+  readonly planned: number;
+  readonly result?: Reply<"openAll">;
+}
+
+export type PlainRequestType =
+  "summary" | "repos" | OpenBatchAction | "openingProgress" | "checkNow" | "closeDuplicates";
 
 export interface PlainRequest<K extends PlainRequestType = PlainRequestType> {
   readonly type: K;
@@ -187,6 +208,19 @@ export interface PlainRequest<K extends PlainRequestType = PlainRequestType> {
 export interface PickRepoRequest {
   readonly type: "pickRepo";
   readonly repo: RepoName;
+}
+
+export type PrKeyAction = "focusPr" | "closePr";
+
+export interface PrKeyRequest<K extends PrKeyAction = PrKeyAction> {
+  readonly type: K;
+  readonly key: PrKey;
+}
+
+export type FocusPrRequest = PrKeyRequest<"focusPr">;
+
+export interface ClosePrRequest extends PrKeyRequest<"closePr"> {
+  readonly tabId: TabId;
 }
 
 export interface GoToRequest {
@@ -206,7 +240,13 @@ export interface FocusPaneRequest {
 }
 
 export type Request =
-  PlainRequest | PickRepoRequest | GoToRequest | PanesRequest | FocusPaneRequest;
+  | PlainRequest
+  | PickRepoRequest
+  | GoToRequest
+  | FocusPrRequest
+  | ClosePrRequest
+  | PanesRequest
+  | FocusPaneRequest;
 export type RequestType = Request["type"];
 export type RequestOf<K extends RequestType> = K extends PlainRequestType
   ? PlainRequest<K>
@@ -214,6 +254,7 @@ export type RequestOf<K extends RequestType> = K extends PlainRequestType
 
 export interface Failure {
   readonly error: string;
+  readonly tabsOpened?: number;
 }
 
 export interface Delivered {
@@ -241,7 +282,7 @@ export interface DuplicatesClosed {
 }
 
 export interface FocusedPane {
-  readonly pane: string;
+  readonly pane: string | null;
 }
 
 export interface Replies {
@@ -249,7 +290,11 @@ export interface Replies {
   readonly repos: RepoChoices;
   readonly pickRepo: Readonly<Record<string, never>>;
   readonly goTo: GoToResult;
+  readonly focusPr: Focusing;
+  readonly closePr: DuplicatesClosed;
   readonly openAll: OpenAllResult;
+  readonly openReviews: OpenAllResult;
+  readonly openingProgress: OpeningProgress;
   readonly checkNow: CheckResult;
   readonly closeDuplicates: DuplicatesClosed;
   readonly panes: PaneLookup;
@@ -357,11 +402,14 @@ export interface StatusLine {
   readonly text: string;
 }
 
+export type StatusRevision = number;
+
 export interface Status {
   statusText: ComputedRef<string>;
   isStatusError: ComputedRef<boolean>;
-  info: (text: string) => void;
-  error: (text: string) => void;
+  revision: Readonly<Ref<StatusRevision>>;
+  info: (text: string, revision?: StatusRevision) => void;
+  error: (text: string, revision?: StatusRevision) => void;
 }
 
 export interface ServiceWorker {
@@ -381,15 +429,21 @@ export interface GoToContext {
   ask: Ask;
   status: Pick<Status, "error">;
   picker: Pick<RepoPicker, "repo"> & { available: Readonly<Ref<boolean>> };
+  refresh: () => Promise<void>;
 }
+
+export type PrNavigationRequest = GoToRequest | FocusPrRequest;
 
 export interface GoTo {
   input: Ref<string>;
   busy: Readonly<Ref<boolean>>;
   go: () => Promise<void>;
+  focusPr: (key: PrKey) => Promise<void>;
 }
 
 export type PaneAvailability = "unchecked" | "checking" | "found" | "missing";
+
+export type PaneLoader = (heads: readonly BranchRef[]) => Promise<PaneLookup | undefined>;
 
 export interface Panes {
   checking: Readonly<Ref<boolean>>;
@@ -418,17 +472,24 @@ export interface SummaryList {
   refresh: () => Promise<void>;
 }
 
-export type TabActionType = "openAll" | "checkNow" | "closeDuplicates";
+export type TabActionType = OpenBatchAction | "checkNow" | "closeDuplicates";
 
 export interface TabActionContext {
   ask: Ask;
-  status: Pick<Status, "statusText" | "info" | "error">;
+  status: Pick<Status, "statusText" | "isStatusError" | "info" | "error" | "revision">;
   refresh: () => Promise<void>;
+}
+
+export type OpeningProgressObserver = (progress: OpeningProgress) => Promise<void>;
+
+export interface OpeningProgressContext extends TabActionContext {
+  localBusy: Readonly<Ref<boolean>>;
 }
 
 export interface TabActionSpec<K extends TabActionType> {
   request: PlainRequest<K>;
   pending: string;
+  refreshOnFailure?: boolean;
   report: (result: Replies[K]) => string;
 }
 
@@ -447,6 +508,12 @@ export interface GroupRow {
 }
 
 // Component props.
+export type ProgressMode = "determinate" | "indeterminate";
+
+export interface OpeningProgressProps {
+  progress: OpeningProgress;
+}
+
 export interface ActionButtonProps {
   label: string;
   hint: string;
@@ -474,13 +541,13 @@ export interface StatusLineProps {
 }
 
 export interface GroupListProps {
+  filtering?: boolean;
   groups: GroupSummary[];
   panes: Panes;
 }
 
 export interface GroupItemProps {
   group: GroupSummary;
-  index: number;
   panes: Panes;
 }
 
@@ -548,3 +615,60 @@ export interface CatalogEntry {
 }
 
 export type Labels<K extends PlainMessageKey> = Readonly<Record<K, string>>;
+
+export interface SearchPr {
+  label: string;
+  row: PrRow;
+  group: GroupSummary;
+  title: string;
+  repo: RepoName;
+  number: PrNumber;
+  branch: BranchName;
+  groupName: GroupTitle;
+}
+
+export interface FuzzyFilter {
+  groups: ComputedRef<GroupSummary[]>;
+  active: ComputedRef<boolean>;
+  count: ComputedRef<number>;
+  best: ComputedRef<PrKey | null>;
+}
+
+export interface PrSearchProps {
+  count: number;
+  active: boolean;
+}
+export interface PrSearchCommands {
+  go: [];
+  next: [];
+}
+export interface PrRowEvents {
+  go: [key: PrKey];
+  close: [key: PrKey, tabId: TabId];
+}
+export interface GroupListControl {
+  focusFirst: () => void;
+}
+export type CloseFocus = () => void;
+export interface PrCloseContext {
+  ask: Ask;
+  status: Pick<Status, "error">;
+  refresh: () => Promise<void>;
+}
+export interface PrClose {
+  close: (key: PrKey, tabId: TabId) => Promise<void>;
+}
+
+export type MatchRange = readonly [number, number];
+export interface Segment {
+  text: string;
+  matched: boolean;
+}
+export interface PrHighlights {
+  label: readonly MatchRange[];
+  title: readonly MatchRange[];
+  queryLength: number;
+}
+export interface TextSegmentProps {
+  segment: Segment;
+}

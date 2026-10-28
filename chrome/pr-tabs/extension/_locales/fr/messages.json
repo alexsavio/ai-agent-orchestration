@@ -271,6 +271,22 @@
       }
     }
   },
+  "errCouldntOpen": {
+    "message": "Impossible d'ouvrir : $ITEMS$",
+    "placeholders": {
+      "items": {
+        "content": "$1"
+      }
+    }
+  },
+  "errTooManyPrs": {
+    "message": "Trop de PR. Collez-en $MAX$ au plus à la fois.",
+    "placeholders": {
+      "max": {
+        "content": "$1"
+      }
+    }
+  },
   "errNoAnswer": {
     "message": "Aucune réponse du service worker d'Orch Tabs. Rechargez l'extension sur chrome://extensions."
   },
@@ -325,5 +341,58 @@
   },
   "agentWaiting": {
     "message": "en attente"
+  },
+  "openReviewsButton": {
+    "message": "Ouvrir revues"
+  },
+  "openReviewsHint": {
+    "message": "Ouvrir les PR dont ma revue est demandée"
+  },
+  "openingProgress": {
+    "message": "$OPENED$ sur $PLANNED$ ouvertes",
+    "placeholders": {
+      "opened": {
+        "content": "$1"
+      },
+      "planned": {
+        "content": "$2"
+      }
+    }
+  },
+  "pendingSearching": {
+    "message": "Recherche…"
+  },
+  "errPrTabGone": {
+    "message": "L’onglet de cette PR n’est plus ouvert."
+  },
+  "prSearchLabel": {
+    "message": "Rechercher un onglet PR"
+  },
+  "prSearchEmpty": {
+    "message": "Aucune PR correspondante"
+  },
+  "prSearchCount_one": {
+    "message": "$COUNT$ PR correspondante",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "prSearchCount_other": {
+    "message": "$COUNT$ PR correspondantes",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "closePrTab": {
+    "message": "Fermer l’onglet $PR$",
+    "placeholders": {
+      "pr": {
+        "content": "$1"
+      }
+    }
   }
 }

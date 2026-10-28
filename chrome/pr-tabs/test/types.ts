@@ -9,6 +9,8 @@ import type {
   GroupId,
   HostReply,
   HostRequest,
+  OpenBatchAction,
+  PrClose,
   PaneLookup,
   Panes,
   PlainRequest,
@@ -51,6 +53,7 @@ export interface World {
   nextId: TabId;
   alarmListener: (alarm: FiredAlarm) => void;
   installedListener: () => Promise<void>;
+  startupListener: () => Promise<void>;
 }
 
 // A fake namespace may only name members its chrome namespace has.
@@ -207,4 +210,20 @@ export interface FakePanes extends Omit<Panes, "checking" | "lookup"> {
   lookup: Ref<PaneLookup>;
   ensured: (readonly BranchRef[])[];
   focused: BranchRef[];
+}
+
+export interface OpeningBatchFixture {
+  pending: Promise<Reply<"openReviews">>;
+  firstOpened: Promise<void>;
+  release: () => void;
+  restore: () => void;
+}
+
+export type PendingOpeningReplies = Partial<Record<OpenBatchAction, Promise<Reply<"openAll">>>>;
+
+export interface CloseQueueFixture {
+  flow: PrClose;
+  held: PromiseWithResolvers<void>;
+  tabs: Set<TabId>;
+  sent: Request[];
 }
