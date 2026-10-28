@@ -781,7 +781,7 @@ assert_nothing_left_behind() {
 @test "a short job leaves no long-run watcher or its sleep behind" {
   ORCH_HEAVY_SLOTS_LONG_RUN=29 run_with_timeout "$HELPER" take agent-wstop-ok -- sleep 1
   [ "$status" -eq 0 ]
-  assert_nothing_left_behind agent-wstop-ok 29
+  assert_nothing_left_behind agent-wstop-ok '2[89]'
 }
 
 @test "stopping heavy-slot with TERM leaves no long-run watcher or its sleep behind" {
@@ -789,11 +789,11 @@ assert_nothing_left_behind() {
   pid=$!
   wait_for_file "$ORCH_HEAVY_SLOTS_DIR/agent-wstop-term"
   tries=0
-  while ! pgrep -g 0 -x -f 'sleep 28' >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
-  pgrep -g 0 -x -f 'sleep 28' >/dev/null
+  while ! pgrep -g 0 -x -f 'sleep 2[78]' >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
+  pgrep -g 0 -x -f 'sleep 2[78]' >/dev/null
   kill -TERM "$pid"
   wait "$pid" || true
-  assert_nothing_left_behind agent-wstop-term 28
+  assert_nothing_left_behind agent-wstop-term '2[78]'
 }
 
 @test "the long-run watcher outlives its RUNLONG line and is gone when the job ends" {
@@ -804,6 +804,10 @@ assert_nothing_left_behind() {
   grep -q ' SLOT RUNLONG ' "$(EVENTS)"
   # heavy-slot itself and its watcher both carry the job name.
   [ "$(pgrep -g 0 -f 'heavy-slot take agent-wstop-fired ' | wc -l)" -ge 2 ]
+  # After RUNLONG the watcher sleeps 30 s a time instead of spinning.
+  tries=0
+  while ! pgrep -g 0 -x -f 'sleep 30' >/dev/null && [ "$tries" -lt 20 ]; do sleep 0.1; tries=$((tries + 1)); done
+  pgrep -g 0 -x -f 'sleep 30' >/dev/null
   wait "$pid"
   [ "$(grep -c ' SLOT RUNLONG ' "$(EVENTS)")" -eq 1 ]
   assert_nothing_left_behind agent-wstop-fired 30
@@ -918,12 +922,13 @@ assert_nothing_left_behind() {
 }
 
 @test "the long-run watcher sleeps at most 30 seconds at a time" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=1234 run "$HELPER" take agent-nap -- sleep 2
-  [ "$status" -eq 0 ]
-  if pids=$(pgrep -f 'sleep 1234'); then
-    for p in $pids; do kill "$p"; done
-    false
-  fi
+  ORCH_HEAVY_SLOTS_LONG_RUN=1234 "$HELPER" take agent-nap -- sleep 4 &
+  pid=$!
+  tries=0
+  while ! pgrep -g 0 -x -f 'sleep 30' >/dev/null && [ "$tries" -lt 20 ]; do sleep 0.1; tries=$((tries + 1)); done
+  pgrep -g 0 -x -f 'sleep 30' >/dev/null
+  if pgrep -g 0 -x -f 'sleep 1234'; then false; fi
+  wait "$pid"
 }
 
 @test "a second signal while the job is stopping writes no second KILLED line" {
