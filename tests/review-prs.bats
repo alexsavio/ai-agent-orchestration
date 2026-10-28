@@ -292,12 +292,51 @@ dispatch() {
 
 @test "Claude worker starts carry --strict-mcp-config and the example allows haiku" {
   grep -qF 'claude = ["haiku", "sonnet", "opus", "fable"]' "$ROOT/config/orchestration.toml.example"
-  grep -qF -- '--model <model> --strict-mcp-config --resume' "$ROOT/skills/architect/references/dispatch.md"
-  grep -qF -- '--model <model> --strict-mcp-config`' "$ROOT/skills/architect/references/worker-recycle.md"
+  grep -qF -- '--model <model> <effort flag> --strict-mcp-config --resume' "$ROOT/skills/architect/references/dispatch.md"
+  grep -qF -- '--model <model> <effort flag> --strict-mcp-config`' "$ROOT/skills/architect/references/worker-recycle.md"
   # shellcheck disable=SC2016 # The backticks are literal skill text.
   grep -qF 'a Claude worker start adds `--strict-mcp-config`' "$ROOT/skills/architect/references/dispatch.md"
   run grep -rn -- '--strict-mcp-config' "$ROOT/skills/coordinate"
   [ "$status" -eq 1 ]
+}
+
+@test "every Claude start and recycle line pins the effort flag placeholder next to --model" {
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '$ORCH_ARCHITECT_MODEL <effort flag> --name "<architect name>"` (`<effort flag>` from `ORCH_ARCHITECT_EFFORT`)' "$ROOT/skills/coordinate/references/recycle.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '$ORCH_COORDINATOR_MODEL <effort flag> --name Coordinator --remote-control "Coordinator"` (`<effort flag>` from `ORCH_COORDINATOR_EFFORT`)' "$ROOT/skills/coordinate/references/recycle.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '`<effort flag>` after the model: worker `ORCH_WORKER_EFFORT`, reviewer `ORCH_REVIEWER_EFFORT`;' "$ROOT/skills/architect/references/dispatch.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- 'with `<effort flag>` (architect: `ORCH_ARCHITECT_EFFORT`)' "$ROOT/skills/architect/SKILL.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- 'nothing when the value is empty, so the saved level or the model default applies' "$ROOT/skills/architect/references/dispatch.md"
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md; do
+    # shellcheck disable=SC2016 # The backticks are literal skill text.
+    grep -qF -- 'empty means no `--effort`: the level saved in `~/.claude/settings.json` or the model default applies' "$ROOT/$file"
+  done
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md; do
+    # shellcheck disable=SC2016 # The backticks are literal skill text.
+    grep -qF -- '`<effort flag>` is `--effort <value>` with the value `orch-settings` prints for that role'"'"'s `ORCH_…_EFFORT` (or the per-dispatch level), and nothing at all when it prints empty; the `ORCH_…` variables are not set in your shell, so write the value in' "$ROOT/$file"
+  done
+  # The start command in each recycle line is one clean code span: a backtick or "(" inside it would end up in the shell line.
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  run grep -c -E '`herdr agent start [^`(]*<effort flag>[^`(]*`' "$ROOT/skills/coordinate/references/recycle.md"
+  [ "$output" -eq 2 ]
+  # The ORCH_ variables are not set in an agent's shell, so no ${ORCH_…:+ form may be left.
+  run bash -c "grep -rnF '\${ORCH_' '$ROOT/skills' | grep -F ':+'"
+  [ "$status" -eq 1 ]
+  # The names appear only in the "never as ..." prose lines.
+  cd "$ROOT"
+  run bash -c "grep -rn -e CLAUDE_CODE_EFFORT_LEVEL -e effortLevel skills docs install.sh hooks lib | sed 's/never as \`CLAUDE_CODE_EFFORT_LEVEL\` or \`effortLevel\`//' | grep -e CLAUDE_CODE_EFFORT_LEVEL -e effortLevel"
+  [ "$status" -eq 1 ]
+}
+
+@test "a per-dispatch effort survives a worker recycle through the handoff" {
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '- **Effort:** the `--effort` level of the first start, from the dispatch note (you cannot see your own level), or empty when the first start passed no `--effort`; the architect fills it in when the worker leaves it out.' "$ROOT/skills/architect/references/worker-recycle.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- "from the handoff's \`Effort:\` field, and nothing when that field is empty" "$ROOT/skills/architect/references/worker-recycle.md"
 }
 
 @test "recycle and re-home keep the first start's MCP choice; README, tier list and contributing agree" {

@@ -752,6 +752,8 @@ class PullsSettingsTest(SettingsTest):
 
 
 def example_value(setting):
+    if setting.choices and setting.kind == "str":
+        return setting.choices[0]
     if setting.choices:
         return list(setting.required) or setting.choices[:1]
     return {
@@ -1033,6 +1035,51 @@ class ProvidersTest(SettingsTest):
         )
         with self.assertRaisesRegex(s.ConfigError, 'unknown entry ""'):
             self.resolve(ORCH_PROVIDERS="claude,")
+
+    def test_an_unknown_effort_level_is_an_error(self):
+        for role in ("coordinator", "architect", "worker", "reviewer"):
+            for bad in ("turbo", "High"):
+                with self.subTest(role=role, bad=bad):
+                    self.assertIn(
+                        f'models.{role}_effort: unknown value "{bad}"; known: empty, low, medium, high, xhigh, max',
+                        self.error(f'[models]\n{role}_effort = "{bad}"\n'),
+                    )
+
+    def test_every_known_effort_level_is_accepted(self):
+        for level in s.EFFORT_LEVELS:
+            for role in ("coordinator", "architect", "worker", "reviewer"):
+                with self.subTest(role=role, level=level):
+                    path = self.write(
+                        "e.toml", f'[models]\n{role}_effort = "{level}"\n'
+                    )
+                    self.assertEqual(
+                        s.read_file(path, "global")[s.BY_KEY[f"models.{role}_effort"]],
+                        level,
+                    )
+
+    def test_every_effort_defaults_to_empty_so_no_saved_level_is_lowered(self):
+        for role in ("coordinator", "architect", "worker", "reviewer"):
+            with self.subTest(role):
+                self.assertEqual(s.BY_KEY[f"models.{role}_effort"].default, "")
+
+    def test_an_empty_effort_is_valid_in_the_file(self):
+        path = self.write("e.toml", '[models]\nworker_effort = ""\n')
+        self.assertEqual(
+            s.read_file(path, "global")[s.BY_KEY["models.worker_effort"]], ""
+        )
+
+    def test_an_exported_effort_is_checked_like_a_file_value(self):
+        for role in ("COORDINATOR", "ARCHITECT", "WORKER", "REVIEWER"):
+            name = f"ORCH_{role}_EFFORT"
+            with self.subTest(role):
+                for bad in ("bogus", "High"):
+                    with self.assertRaisesRegex(
+                        s.ConfigError,
+                        rf'models.{role.lower()}_effort \({name}\): unknown value "{bad}"; known: empty, low',
+                    ):
+                        self.resolve(**{name: bad})
+                self.assertEqual(self.resolve(**{name: ""})[name], "")
+                self.assertEqual(self.resolve(**{name: "max"})[name], "max")
 
     def test_one_codex_model_is_enough_and_serves_both_tiers(self):
         for worker, smart in (
