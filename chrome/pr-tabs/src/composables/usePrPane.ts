@@ -38,15 +38,11 @@ function availabilityOf(
     return "missing";
   }
 
-  if (checking) {
-    return "checking";
+  if (match !== undefined) {
+    return match ? "found" : "missing";
   }
 
-  if (match === undefined) {
-    return "unchecked";
-  }
-
-  return match ? "found" : "missing";
+  return checking ? "checking" : "unchecked";
 }
 
 function goLabelFor(availability: PaneAvailability, pr: string): string {
@@ -83,7 +79,9 @@ export function usePrPane(row: MaybeRefOrGetter<PrRow>, panes: Panes): PrPane {
 
   return {
     availability,
-    isGoVisible: computed(() => availability.value !== "unchecked"),
+    isGoVisible: computed(
+      () => availability.value === "found" || availability.value === "checking",
+    ),
     isGoDisabled: computed(() => availability.value !== "found"),
     isChecking: computed(() => availability.value === "checking"),
     goLabel: computed(() => goLabelFor(availability.value, toValue(row).label)),

@@ -6,6 +6,7 @@ import type { AgentState, PaneLookup, PrRow } from "#/types";
 import { fakePanes } from "#test/components/fakePanes";
 
 const ROW: PrRow = {
+  tabId: 7,
   key: "acme/webapp#7",
   label: "webapp#7",
   title: "Fix",
@@ -20,25 +21,31 @@ test("found, missing, checking and unchecked set the button", () => {
   const found = paneOf({ "acme/webapp:feature": { state: null } });
 
   assert.equal(found.availability.value, "found");
+  assert.equal(found.isGoVisible.value, true);
   assert.equal(found.isGoDisabled.value, false);
   assert.equal(found.goLabel.value, "Go to the Herdr pane for webapp#7");
 
   const missing = paneOf({ "acme/webapp:feature": null });
 
   assert.equal(missing.availability.value, "missing");
+  assert.equal(missing.isGoVisible.value, false);
   assert.equal(missing.isGoDisabled.value, true);
   assert.equal(missing.goLabel.value, "No Herdr pane has the branch of webapp#7 checked out");
 
   const checking = paneOf({}, true);
 
   assert.equal(checking.isChecking.value, true);
+  assert.equal(checking.isGoVisible.value, true);
   assert.equal(checking.isGoDisabled.value, true);
   assert.equal(checking.goLabel.value, "Looking for the Herdr pane of webapp#7…");
 
   const unchecked = paneOf({});
 
   assert.equal(unchecked.isGoVisible.value, false);
-  assert.equal(paneOf({}, false, { ...ROW, head: null }).availability.value, "missing");
+  const noHead = paneOf({}, false, { ...ROW, head: null });
+
+  assert.equal(noHead.availability.value, "missing");
+  assert.equal(noHead.isGoVisible.value, false);
 });
 
 test("each agent state shows a tag with its text, label and severity", () => {
@@ -77,4 +84,16 @@ test("the row follows a changed lookup", () => {
 
   assert.equal(pane.availability.value, "found");
   assert.equal(pane.state.value, "waiting");
+});
+
+test("cached pane matches and misses take precedence over unrelated loading", () => {
+  const found = paneOf({ "acme/webapp:feature": { state: "working" } }, true);
+  const missing = paneOf({ "acme/webapp:feature": null }, true);
+
+  assert.equal(found.availability.value, "found");
+  assert.equal(found.isGoDisabled.value, false);
+  assert.equal(found.isChecking.value, false);
+  assert.equal(missing.availability.value, "missing");
+  assert.equal(missing.isGoVisible.value, false);
+  assert.equal(missing.isChecking.value, false);
 });

@@ -151,6 +151,18 @@ export function isBareNumber(input: string): boolean {
   return /^\d+$/.test(input.trim());
 }
 
+export const MAX_TARGETS = 20;
+
+// The distinct items of a pasted list, split on commas, whitespace and new lines, in first-seen
+// order.
+export function splitTargets(input: string | undefined): string[] {
+  return [...new Set((input || "").split(/[\s,]+/).filter(Boolean))];
+}
+
+export function hasBareNumber(input: string): boolean {
+  return splitTargets(input).some(isBareNumber);
+}
+
 // The popup shows a repo dropdown only when there is a choice.
 export function showRepoPicker(rules: RepoRules): boolean {
   return effectiveRepos(rules).length >= 2;
@@ -263,9 +275,11 @@ export function groupColor(name: GroupTitle): GroupColor {
 }
 
 export function groupForPr(owners: Owners, pr: PrBranch): GroupPlacement {
-  const { owner, repo, branch = "", headRepository } = pr;
+  const { owner, repo, number, branch = "", headRepository } = pr;
   const repository = (headRepository?.nameWithOwner || `${owner}/${repo}`).toLowerCase();
-  const name = (headRepository !== null && owners[`${repository}:${branch}`]) || repo;
+  const statusKey = (`${owner}/${repo}`.toLowerCase() + `#${number}`) as PrKey;
+  const name =
+    (headRepository !== null && owners[`${repository}:${branch}`]) || owners[statusKey] || repo;
 
   return { name, color: groupColor(name) };
 }
@@ -378,7 +392,7 @@ export function planOpenAll(search: SearchResult, openKeys: Set<PrKey>, org: Org
 function groupSummary(counted: GroupCount): GroupSummary {
   const prs = [...counted.prs.values()];
 
-  return { title: counted.title, color: counted.color, count: prs.length, prs };
+  return { id: counted.id, title: counted.title, color: counted.color, count: prs.length, prs };
 }
 
 function byCountThenTitle(a: GroupSummary, b: GroupSummary): number {
@@ -404,11 +418,12 @@ export function prBranch(
   return { repo, branch: state.headRefName };
 }
 
-function prRow(pr: Pr, meta: Meta): PrRow {
+function prRow(pr: Pr, tabId: TabId, meta: Meta): PrRow {
   const state = meta[pr.key];
 
   return {
     key: pr.key,
+    tabId,
     label: `${pr.repo}#${pr.number}`,
     title: state?.title ?? "",
     head: prBranch(pr, state),
@@ -445,12 +460,13 @@ export function summarize(
     }
 
     const counted = byGroup.get(tab.groupId) ?? {
+      id: String(tab.groupId),
       title: group.title || getPlainMessage("untitledGroup"),
       color: group.color,
       prs: new Map(),
     };
 
-    counted.prs.set(pr.key, prRow(pr, meta));
+    counted.prs.set(pr.key, prRow(pr, tab.id, meta));
     byGroup.set(tab.groupId, counted);
   }
 
