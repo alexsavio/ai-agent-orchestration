@@ -183,8 +183,8 @@ No code starts until the Coordinator answers `LEGACY OK`. Other projects skip th
 ## Guardrails in every handoff
 
 - Workers do not call the `advisor` tool; architects and the Coordinator keep it. Each call re-reads the whole transcript uncached on the advisor model.
-- `/goal` is not part of the default worker brief. Use it only for a long job whose worker is known to stop early, and write the condition for the whole job the pane will do.
-  The goal is checked only when a turn ends. A prompt sent to a busy pane joins the running turn, so a goal set for one task is checked after all of them; once met it clears.
+- `/goal` is not part of the default worker brief. It is not shown to help yet; keep it for a long job whose worker is known to stop early, and write the condition for all the work you will send to that pane.
+- The goal is checked only when a turn ends. A prompt sent to a busy pane joins the running turn, so a goal set for one task is checked after all of them; once met it clears.
 - Prove the test **fails first**. Mutate one guard at a time and report which test caught it. A test that stays green under its own mutation pins nothing.
 - Run the linter **and** the formatter. Passing lint is not passing CI.
 - A pure refactor edits **no spec**, and the test count matches before and after.

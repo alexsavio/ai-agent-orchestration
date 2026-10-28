@@ -1211,4 +1211,5 @@ assert len(lines) == 1 and lines[0].startswith("ready:"), lines
 
 @test "the architect skill keeps /goal out of the default worker brief" {
   grep -qF 'is not part of the default worker brief' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'joins the running turn' "$ROOT/skills/architect/SKILL.md"
 }
