@@ -273,6 +273,13 @@ dispatch() {
   [ "$status" -eq 1 ]
 }
 
+@test "the reviewer start denies the file-edit tools and the template pins the findings table" {
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- 'a Claude reviewer start ends with `--disallowedTools Edit Write NotebookEdit`' "$ROOT/skills/architect/references/dispatch.md"
+  grep -qF -- 'Brief the reviewer with [references/reviewer.md](references/reviewer.md)' "$ROOT/skills/architect/SKILL.md"
+  grep -qF -- '| claim | file:line opened | verdict | evidence | rung | fix the author can apply |' "$ROOT/skills/architect/references/reviewer.md"
+}
+
 @test "a per-dispatch effort survives a worker recycle through the handoff" {
   # shellcheck disable=SC2016 # The backticks are literal skill text.
   grep -qF -- '- **Effort:** the `--effort` level of the first start, from the dispatch note (you cannot see your own level), or empty when the first start passed no `--effort`; the architect fills it in when the worker leaves it out.' "$ROOT/skills/architect/references/worker-recycle.md"
