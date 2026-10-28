@@ -141,21 +141,23 @@ emit_killed() {
 }
 
 watch_long() {
-  local pid=$1 end=$(( JOB_START + LONG_RUN )) left
+  local pid=$1 end=$(( JOB_START + LONG_RUN )) left fired=0
   trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM
   while is_pid_live "$pid"; do
     left=$(( end - $(date +%s) ))
-    if [ "$left" -le 0 ]; then
+    if [ "$left" -le 0 ] && [ "$fired" -eq 0 ]; then
       emit_event RUNLONG "$pid" "elapsed=$(job_elapsed)"
-      return 0
+      fired=1
     fi
+    [ "$fired" -eq 1 ] && left=30
     sleep "$(( left < 30 ? left : 30 ))" &
     wait $!
   done
 }
 
 # Killing the watcher alone leaves its foreground sleep behind, so the watcher runs the sleep in the
-# background and its TERM trap kills it.
+# background and its TERM trap kills it. After RUNLONG the watcher keeps running until the job ends or
+# stop_watch kills it, so stop_watch never signals a reaped pid.
 start_watch() {
   watch_long "$1" </dev/null >/dev/null 2>&1 &
   WATCH_PID=$!

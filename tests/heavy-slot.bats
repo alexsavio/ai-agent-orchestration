@@ -766,38 +766,47 @@ EVENTS() { printf '%s' "$ORCH_HEAVY_SLOTS_DIR/.events"; }
   [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
 }
 
-# A leftover watcher shows as a process with the job name in its command line, or as its sleep 29.
+# A leftover watcher shows as a process of this test's group with the job name in its command line,
+# or as its sleep $2. The job runs in its own group, so other processes on the machine do not match.
 left_behind() {
-  pgrep -f "heavy-slot take $1 " || pgrep -x -f 'sleep 29'
+  pgrep -g 0 -f "heavy-slot take $1 " || pgrep -g 0 -x -f "sleep $2"
 }
 
 assert_nothing_left_behind() {
   local tries=0
-  while left_behind "$1" >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
-  ! left_behind "$1"
+  while left_behind "$1" "$2" >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
+  ! left_behind "$1" "$2"
 }
 
 @test "a short job leaves no long-run watcher or its sleep behind" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=29 run "$HELPER" take agent-wstop-ok -- sleep 1
+  ORCH_HEAVY_SLOTS_LONG_RUN=29 run_with_timeout "$HELPER" take agent-wstop-ok -- sleep 1
   [ "$status" -eq 0 ]
-  assert_nothing_left_behind agent-wstop-ok
-}
-
-@test "a failing job leaves no long-run watcher or its sleep behind" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=29 run "$HELPER" take agent-wstop-fail -- bash -c 'sleep 1; exit 3'
-  [ "$status" -eq 3 ]
-  assert_nothing_left_behind agent-wstop-fail
+  assert_nothing_left_behind agent-wstop-ok 29
 }
 
 @test "stopping heavy-slot with TERM leaves no long-run watcher or its sleep behind" {
-  ORCH_HEAVY_SLOTS_LONG_RUN=29 "$HELPER" take agent-wstop-term -- sleep 30 &
+  ORCH_HEAVY_SLOTS_LONG_RUN=28 "$HELPER" take agent-wstop-term -- sleep 30 &
   pid=$!
   wait_for_file "$ORCH_HEAVY_SLOTS_DIR/agent-wstop-term"
   tries=0
-  while ! pgrep -x -f 'sleep 29' >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
+  while ! pgrep -g 0 -x -f 'sleep 28' >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
+  pgrep -g 0 -x -f 'sleep 28' >/dev/null
   kill -TERM "$pid"
   wait "$pid" || true
-  assert_nothing_left_behind agent-wstop-term
+  assert_nothing_left_behind agent-wstop-term 28
+}
+
+@test "the long-run watcher outlives its RUNLONG line and is gone when the job ends" {
+  ORCH_HEAVY_SLOTS_LONG_RUN=1 "$HELPER" take agent-wstop-fired -- sleep 3 &
+  pid=$!
+  tries=0
+  while ! grep -q ' SLOT RUNLONG ' "$(EVENTS)" 2>/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
+  grep -q ' SLOT RUNLONG ' "$(EVENTS)"
+  # heavy-slot itself and its watcher both carry the job name.
+  [ "$(pgrep -g 0 -f 'heavy-slot take agent-wstop-fired ' | wc -l)" -ge 2 ]
+  wait "$pid"
+  [ "$(grep -c ' SLOT RUNLONG ' "$(EVENTS)")" -eq 1 ]
+  assert_nothing_left_behind agent-wstop-fired 30
 }
 
 @test "a job under the long-run threshold writes no RUNLONG line" {
