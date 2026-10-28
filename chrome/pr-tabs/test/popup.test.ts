@@ -94,16 +94,22 @@ const ACTIONS: readonly ActionCase[] = [
 ];
 
 test("each button sends its own request, refreshes the summary and shows the result", async () => {
-  for (const action of ACTIONS) {
-    const { wrapper, sent } = await popup([], { [action.request.type]: action.reply });
+  vi.useFakeTimers();
 
-    await wrapper.find(action.button).trigger("click");
-    await flushPromises();
+  try {
+    for (const action of ACTIONS) {
+      const { wrapper, sent } = await popup([], { [action.request.type]: action.reply });
 
-    assert.deepEqual(sent, [action.request, { type: "summary" }], action.button);
-    assert.equal(wrapper.find("#status").text(), action.status);
+      await wrapper.find(action.button).trigger("click");
+      await flushPromises();
 
-    wrapper.unmount();
+      assert.deepEqual(sent, [action.request, { type: "summary" }], action.button);
+      assert.equal(wrapper.find("#status").text(), action.status);
+
+      wrapper.unmount();
+    }
+  } finally {
+    vi.useRealTimers();
   }
 });
 
