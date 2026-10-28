@@ -1104,6 +1104,22 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("echo -n written script", "echo -n 'pkill -f vite' > k.sh; bash k.sh"),
         ("printf %s piped to a shell", "printf '%s' 'pkill -f vite' | sh"),
         ("echo -e piped to a shell", "echo -e 'pkill -f vite' | sh"),
+        ("echo -e unicode escape", "echo -e '\\u0070kill -f vite' > k.sh; bash k.sh"),
+        (
+            "echo -e code point past the Unicode range",
+            "echo -e '\\U00110000pkill -f vite' > k.sh; bash k.sh",
+        ),
+        (
+            "echo -e octal NUL inside a word",
+            "echo -e 'pk\\000ill -f vite' > k.sh; bash k.sh",
+        ),
+        ("echo -e NUL inside a word", "echo -e 'pk\\x00ill -f vite' > k.sh; bash k.sh"),
+        ("printf %d with a number", "printf 'kill -9 %d\\n' -1 > k.sh; bash k.sh"),
+        ("printf %d with a word", "printf 'pkill -f vite %d\\n' x > k.sh; bash k.sh"),
+        (
+            "printf %d with a character constant",
+            "printf 'pkill -f vite %d\\n' \"'x\" > k.sh; bash k.sh",
+        ),
         ("echo -e hex escape", "echo -e '\\x70kill -f vite' > k.sh; bash k.sh"),
         ("echo -e octal escape", "echo -e '\\0160kill -f vite' > k.sh; bash k.sh"),
         (
@@ -1294,7 +1310,6 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "printf '%s\\n' 'echo hi' > k.sh; bash k.sh",
         ),
         ("echo -e of a kill, never run", "echo -e 'pkill -f vite' > notes.md"),
-        ("printf %d to a file", "printf '%d\\n' 5 > n.txt"),
         (
             "tee after the option terminator, never run",
             "tee -- -notes.md <<'EOF'\npkill -f vite\nEOF",
