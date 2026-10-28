@@ -25,9 +25,10 @@ fi
 if [ -n "$session_id" ]; then
   usage=$(echo "$input" | jq -c '{model: .model.id, cost_usd: .cost.total_cost_usd, seven_day_pct: .rate_limits.seven_day.used_percentage, seven_day_resets_at: .rate_limits.seven_day.resets_at} | with_entries(select(.value != null))' 2>/dev/null)
   if [ -n "$usage" ] && [ "$usage" != "{}" ]; then
+    tmp=
     { mkdir -p "$HOME/.claude/context-usage" && tmp=$(mktemp "$HOME/.claude/context-usage/.$session_id.usage.XXXXXX") \
       && printf '%s\n' "$usage" > "$tmp" && mv "$tmp" "$HOME/.claude/context-usage/$session_id.usage"; } 2>/dev/null \
-      || echo "statusline: cannot write $HOME/.claude/context-usage/$session_id.usage" >&2
+      || { [ -z "$tmp" ] || rm -f "$tmp"; echo "statusline: cannot write $HOME/.claude/context-usage/$session_id.usage" >&2; }
   fi
 fi
 

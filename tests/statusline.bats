@@ -396,3 +396,16 @@ JSON
   [ "$(cat "$sensor")" = 200000 ]
   rm -rf "$sensor_home"
 }
+
+@test "usage temp file is removed when the write fails after mktemp" {
+  mkdir -p "$BATS_TEST_TMPDIR/shim"
+  printf '#!/bin/sh\nexit 1\n' >"$BATS_TEST_TMPDIR/shim/mv"
+  chmod +x "$BATS_TEST_TMPDIR/shim/mv"
+  PATH="$BATS_TEST_TMPDIR/shim:$PATH" run /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"s9","workspace":{"current_dir":"/tmp"},"cost":{"total_cost_usd":1}}
+JSON
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"statusline: cannot write $HOME/.claude/context-usage/s9.usage"* ]] || return 1
+  [ ! -e "$(usage_file s9)" ]
+  [ "$(find "$HOME/.claude/context-usage" -name ".s9.usage.*" | wc -l | tr -d " ")" = 0 ]
+}
