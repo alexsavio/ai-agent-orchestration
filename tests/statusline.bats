@@ -334,6 +334,35 @@ plain_remotes() {
   plain_remotes ./a:b a/b:c c:foo
 }
 
+# Usage sensor: <session-id>.usage holds only the fields the input has.
+usage_file() { printf '%s' "$HOME/.claude/context-usage/$1.usage"; }
+
+@test "usage file holds model id, cost and the 7-day limit when present" {
+  run /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"s1","model":{"id":"claude-opus-5-5","display_name":"Opus 5.5"},"workspace":{"current_dir":"/tmp"},"cost":{"total_cost_usd":1.25},"rate_limits":{"seven_day":{"used_percentage":42.5,"resets_at":1893456000}}}
+JSON
+  [ "$status" -eq 0 ]
+  [ "$(jq -c . "$(usage_file s1)")" = '{"model":"claude-opus-5-5","cost_usd":1.25,"seven_day_pct":42.5,"seven_day_resets_at":1893456000}' ]
+  [ "$(find "$HOME/.claude/context-usage" -name ".*usage*" | wc -l | tr -d " ")" = 0 ]
+}
+
+@test "usage file leaves out rate_limits when the input has none, never writes 0" {
+  run /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"s2","model":{"id":"claude-sonnet-5-5"},"workspace":{"current_dir":"/tmp"},"cost":{"total_cost_usd":0}}
+JSON
+  [ "$status" -eq 0 ]
+  [ "$(jq -c 'keys' "$(usage_file s2)")" = '["cost_usd","model"]' ]
+  [ "$(jq '.cost_usd' "$(usage_file s2)")" = 0 ]
+}
+
+@test "usage file uses model.id, not display_name, and is absent when no field is present" {
+  run /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"s3","model":{"display_name":"Opus 5.5"},"workspace":{"current_dir":"/tmp"}}
+JSON
+  [ "$status" -eq 0 ]
+  [ ! -e "$(usage_file s3)" ]
+}
+
 @test "worker sensor writes window and model metadata and removes missing metadata" {
   sensor_home=$(mktemp -d)
   run env HOME="$sensor_home" /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
@@ -366,4 +395,17 @@ JSON
   [ "$old_window" = 1000000 ]
   [ "$(cat "$sensor")" = 200000 ]
   rm -rf "$sensor_home"
+}
+
+@test "usage temp file is removed when the write fails after mktemp" {
+  mkdir -p "$BATS_TEST_TMPDIR/shim"
+  printf '#!/bin/sh\nexit 1\n' >"$BATS_TEST_TMPDIR/shim/mv"
+  chmod +x "$BATS_TEST_TMPDIR/shim/mv"
+  PATH="$BATS_TEST_TMPDIR/shim:$PATH" run /bin/bash "$BATS_TEST_DIRNAME/../statusline-command.sh" <<'JSON'
+{"session_id":"s9","workspace":{"current_dir":"/tmp"},"cost":{"total_cost_usd":1}}
+JSON
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"statusline: cannot write $HOME/.claude/context-usage/s9.usage"* ]] || return 1
+  [ ! -e "$(usage_file s9)" ]
+  [ "$(find "$HOME/.claude/context-usage" -name ".s9.usage.*" | wc -l | tr -d " ")" = 0 ]
 }

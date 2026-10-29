@@ -1,6 +1,6 @@
 # Watchers and services
 
-The watchers write alerts to files. One notifier turns them into a feed at `~/.claude/coordinator/watchers/prod-context/coordinator-feed.log`. The Coordinator's Monitor prints only the lines that need action: `RECYCLE`, HOST danger, PR events, `WORKER` blocked, error or dead, and `HEARTBEAT STALE`.
+The watchers write alerts to files. One notifier turns them into a feed at `~/.claude/coordinator/watchers/prod-context/coordinator-feed.log`. The Coordinator's Monitor prints only the lines that need action: `RECYCLE`, HOST danger, PR events, `WORKER` blocked, error or dead, `HEARTBEAT STALE`, and heavy jobs that were killed or ran long (`SLOT KILLED`, `SLOT RUNLONG`).
 
 | Watcher | Watches |
 |---|---|

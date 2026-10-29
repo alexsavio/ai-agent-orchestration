@@ -26,13 +26,13 @@ Order, lowest first: the built-in default, `.orchestration.toml`, `.orchestratio
 
 ## 🧩 Worker families
 
-`[providers] enabled` turns worker families on and off. `claude` must be in the list: the Coordinator and the architects run on it. Left empty, it means `claude` and `codex`, plus `pi` or `cursor` when a model of that family is set. `orch-settings` prints the resolved list as `ORCH_PROVIDERS`.
+`[providers] enabled` turns worker families on and off. `claude` must be in the list: the Coordinator and the architects run on it. Left empty, it means `claude` and `codex`, plus `pi` or `cursor` when a model of that family (including `models.pi_models` for pi) is set. `orch-settings` prints the resolved list as `ORCH_PROVIDERS`.
 
 | Family | Model settings | Needed when on |
 |---|---|---|
 | `claude` | `models.coordinator`, `models.architect` | both |
 | `codex` | `models.codex_worker`, `models.codex_smart` | at least one; it then serves both tiers, and `orch-settings` prints it for both |
-| `pi` | `models.pi_worker`, `models.pi_smart` | neither; an empty tier is not used |
+| `pi` | `models.pi_worker`, `models.pi_smart`, `models.pi_models` | none of them; an empty tier is not used |
 | `cursor` | `models.cursor_worker`, `models.cursor_smart` | at least one; it then serves both tiers, and `orch-settings` prints it for both. Off until a model is set (unlike codex) |
 
 A family left out is never started: the installer does not ask for its models, architects do not pick it (a review falls back to a fresh Sonnet pane of the author's family (Opus for an Opus author), a stronger allowed tier only for credentials, security, shared config, money, installer or watchers, or a HIGH finding; with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code), `/review-prs` dispatches no Codex review, and `pi-start.sh` / `cursor-start.sh` refuse. Its model settings may stay empty. On a terminal run with `providers.enabled` empty, answering `-` to both Codex model questions writes `enabled = ["claude"]` (plus `"pi"` / `"cursor"` when a model of that family is set). A new family is one more entry in `PROVIDERS` in `lib/orch_settings.py`, with its model settings.
@@ -56,14 +56,21 @@ A family left out is never started: the installer does not ask for its models, a
 | `heavy_slots.max` | `ORCH_HEAVY_SLOTS_MAX` | `4` | Most heavy jobs at once on the machine |
 | `heavy_slots.dir` | `ORCH_HEAVY_SLOTS_DIR` | empty | Slot directory; empty means ~/.claude/heavy-slots |
 | `heavy_slots.kill_grace` | `ORCH_HEAVY_SLOTS_KILL_GRACE` | `10` | Seconds a stopped job gets before it is killed |
+| `heavy_slots.long_run` | `ORCH_HEAVY_SLOTS_LONG_RUN` | `1800` | Seconds a heavy job runs before one RUNLONG line reaches the feed; 0 turns it off |
 | `providers.enabled` | `ORCH_PROVIDERS` | empty | Worker families this machine uses (claude, codex, pi, cursor); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi or cursor when a model of that family is set. A family left out is never started or asked for, and its model settings may stay empty |
 | `providers.claude` | `ORCH_CLAUDE_TIERS` | `["haiku", "sonnet", "opus", "fable"]` | Claude worker tiers the architects may pick (haiku, sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings |
 | `models.coordinator` | `ORCH_COORDINATOR_MODEL` | `"claude-opus-5-5"` | Model of the Coordinator |
 | `models.architect` | `ORCH_ARCHITECT_MODEL` | `"claude-opus-5-5"` | Model of the architects |
+| `models.coordinator_effort` | `ORCH_COORDINATOR_EFFORT` | empty | Claude effort level of the Coordinator, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it |
+| `models.architect_effort` | `ORCH_ARCHITECT_EFFORT` | empty | Claude effort level of the architects, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it |
+| `models.worker_effort` | `ORCH_WORKER_EFFORT` | empty | Claude effort level of Claude workers (the architect may pick another level per dispatch), passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it |
+| `models.reviewer_effort` | `ORCH_REVIEWER_EFFORT` | empty | Claude effort level of Claude reviewers, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it |
 | `models.codex_worker` | `ORCH_CODEX_WORKER_MODEL` | `"<codex-worker-model>"` | Codex model for routine work; empty or a placeholder means codex_smart serves it too. With codex on, set at least one of the two |
 | `models.codex_smart` | `ORCH_CODEX_SMART_MODEL` | `"<codex-smart-model>"` | Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two |
+| `models.codex_smart_reasoning_effort` | `ORCH_CODEX_SMART_REASONING_EFFORT` | `"medium"` | Reasoning effort for Codex smart starts and resumes: one lowercase word (such as low, medium or high), passed as -c model_reasoning_effort=<value>; the routine worker tier keeps Codex's default |
 | `models.pi_worker` | `ORCH_PI_WORKER_MODEL` | empty | pi model for routine work as provider/model-id; empty means pi is not used on this machine |
 | `models.pi_smart` | `ORCH_PI_SMART_MODEL` | empty | pi model for hard work as provider/model-id; empty means pi is not used on this machine |
+| `models.pi_models` | `ORCH_PI_MODELS` | empty | More pi models as provider/model-id that the architect may pick per task, besides pi_worker and pi_smart; any of the three set turns pi on |
 | `models.cursor_worker` | `ORCH_CURSOR_WORKER_MODEL` | empty | Cursor CLI model for routine work (for example grok-4.7-medium); empty or a placeholder means cursor_smart serves it too. With cursor on, set at least one of the two |
 | `models.cursor_smart` | `ORCH_CURSOR_SMART_MODEL` | empty | Cursor CLI model for hard work (for example grok-4.7-high); empty or a placeholder means cursor_worker serves it too. With cursor on, set at least one of the two |
 | `remote_control.architects` | `ORCH_REMOTE_CONTROL_ARCHITECTS` | `true` | Give architect sessions Remote Control on start and recycle |
@@ -130,7 +137,7 @@ A family left out is never started: the installer does not ask for its models, a
 
 ### 🥧 pi workers
 
-`models.pi_worker` and `models.pi_smart` are `provider/model-id`, for example `lmstudio/qwen/qwen3.6-35b-a3b`; pi's `--model` accepts that form (`provider/id`, the model id may itself contain slashes). Check ids with `pi --list-models <provider>`. Both default to empty, and empty means pi is not used on this machine; `install.sh` does not ask for them and the architect does not stop on them.
+`models.pi_worker` and `models.pi_smart` are `provider/model-id`, for example `lmstudio/qwen/qwen3.6-35b-a3b`; pi's `--model` accepts that form (`provider/id`, the model id may itself contain slashes). Check ids with `pi --list-models <provider>`. `models.pi_models` is a list of more such ids (`pi_models = ["lmstudio/a", "lmstudio/b"]`; `ORCH_PI_MODELS` is comma-separated) that the architect may pick per task: `pi-start.sh` starts a model id only when it is exactly one entry of the list, and the DeepSeek rule below applies to it too. All three default to empty, and empty means pi is not used on this machine; `install.sh` does not ask for them and the architect does not stop on them.
 
 ### 🖱️ cursor workers (Grok)
 

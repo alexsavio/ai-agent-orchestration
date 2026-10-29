@@ -254,6 +254,7 @@ export type RequestOf<K extends RequestType> = K extends PlainRequestType
 
 export interface Failure {
   readonly error: string;
+  readonly tabsOpened?: number;
 }
 
 export interface Delivered {
@@ -428,6 +429,7 @@ export interface GoToContext {
   ask: Ask;
   status: Pick<Status, "error">;
   picker: Pick<RepoPicker, "repo"> & { available: Readonly<Ref<boolean>> };
+  refresh: () => Promise<void>;
 }
 
 export type PrNavigationRequest = GoToRequest | FocusPrRequest;
@@ -474,7 +476,7 @@ export type TabActionType = OpenBatchAction | "checkNow" | "closeDuplicates";
 
 export interface TabActionContext {
   ask: Ask;
-  status: Pick<Status, "statusText" | "info" | "error" | "revision">;
+  status: Pick<Status, "statusText" | "isStatusError" | "info" | "error" | "revision">;
   refresh: () => Promise<void>;
 }
 

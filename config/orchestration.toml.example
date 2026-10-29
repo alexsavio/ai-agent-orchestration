@@ -37,6 +37,8 @@ max = 4
 dir = ""
 # Seconds a stopped job gets before it is killed
 kill_grace = 10
+# Seconds a heavy job runs before one RUNLONG line reaches the feed; 0 turns it off
+long_run = 1800
 
 [providers]
 # Worker families this machine uses (claude, codex, pi, cursor); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi or cursor when a model of that family is set. A family left out is never started or asked for, and its model settings may stay empty
@@ -49,14 +51,26 @@ claude = ["haiku", "sonnet", "opus", "fable"]
 coordinator = "claude-opus-5-5"
 # Model of the architects
 architect = "claude-opus-5-5"
+# Claude effort level of the Coordinator, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it
+coordinator_effort = ""
+# Claude effort level of the architects, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it
+architect_effort = ""
+# Claude effort level of Claude workers (the architect may pick another level per dispatch), passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it
+worker_effort = ""
+# Claude effort level of Claude reviewers, passed as --effort at every start and recycle; empty passes no --effort, so the level saved in ~/.claude/settings.json or the model default applies, and a value overrides it
+reviewer_effort = ""
 # Codex model for routine work; empty or a placeholder means codex_smart serves it too. With codex on, set at least one of the two
 codex_worker = "<codex-worker-model>"
 # Codex model for hard work; empty or a placeholder means codex_worker serves it too. With codex on, set at least one of the two
 codex_smart = "<codex-smart-model>"
+# Reasoning effort for Codex smart starts and resumes: one lowercase word (such as low, medium or high), passed as -c model_reasoning_effort=<value>; the routine worker tier keeps Codex's default
+codex_smart_reasoning_effort = "medium"
 # pi model for routine work as provider/model-id; empty means pi is not used on this machine
 pi_worker = ""
 # pi model for hard work as provider/model-id; empty means pi is not used on this machine
 pi_smart = ""
+# More pi models as provider/model-id that the architect may pick per task, besides pi_worker and pi_smart; any of the three set turns pi on
+pi_models = []
 # Cursor CLI model for routine work (for example grok-4.7-medium); empty or a placeholder means cursor_smart serves it too. With cursor on, set at least one of the two
 cursor_worker = ""
 # Cursor CLI model for hard work (for example grok-4.7-high); empty or a placeholder means cursor_worker serves it too. With cursor on, set at least one of the two
