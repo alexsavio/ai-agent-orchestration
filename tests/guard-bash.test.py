@@ -1304,6 +1304,10 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             'printf \'echo "\\"\\n\' > m.sh; echo -e \'p"k"il\\x6c -f vite \\"\' >> m.sh; bash m.sh',
         ),
         (
+            "single-quoted kill word before a lone double quote",
+            r"""echo 'p'"'"'k'"'"'ill -f vite\n"' | sh""",
+        ),
+        (
             "zsh echo -E append reads nothing",
             "printf '\"\\x22\\\"\\n' > m.sh; echo -E 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
         ),
