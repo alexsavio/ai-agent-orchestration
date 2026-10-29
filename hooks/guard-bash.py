@@ -674,8 +674,8 @@ def shell_args(words):
 
 
 def clean(text):
-    """Replaces the marker bytes VARIANT and CUT, so text from a command or a file cannot fake one."""
-    return text.replace(VARIANT, "_").replace(CUT, "_")
+    """Replaces the marker bytes VARIANT, CUT and LARGE, so text from a command or a file cannot fake one."""
+    return text.replace(VARIANT, "_").replace(CUT, "_").replace(LARGE, "_")
 
 
 def heredoc_bodies(words):
@@ -699,7 +699,9 @@ PRINTF_CONVERSION = re.compile(
 INTEGER = re.compile(r"\s*([-+]?)(0[xX][0-9a-fA-F]+|\d+)")
 VARIANT = "\x1e"
 CUT = "\x1f"
+LARGE = "\x1d"
 PRINTF_TOO_LARGE_REASON = "printf output run by a shell is too large to check safely; write it to a file with a smaller format or remove the pipe to a shell."
+SCRIPT_TOO_LARGE_REASON = "script text run by a shell is more than 64 KB, too large to check safely; split the script or run a smaller file."
 
 
 def unescape(text, quotes=True):
@@ -781,7 +783,7 @@ def printf_text(format_, args, quotes=True):
 
 
 def echoed_text(words):
-    """Returns the text echo or printf writes: as written, with escapes read, and with the format filled in."""
+    """Returns the readings of the text echo or printf writes, one fixed slot each: as written, escapes read, escapes kept, and each argument on a line."""
     args = words[1:]
     texts = [clean(" ".join(args).replace("\\n", "\n"))]
     if os.path.basename(words[0]) == "printf":
@@ -796,8 +798,8 @@ def echoed_text(words):
     else:
         while args and ECHO_OPTIONS.match(args[0]):
             args = args[1:]
-        texts += [clean(" ".join(args)), clean(unescape(" ".join(args)))]
-    return VARIANT.join(dict.fromkeys(texts))
+        texts += [clean(unescape(" ".join(args))), clean(" ".join(args))]
+    return VARIANT.join(texts)
 
 
 def shell_programs(words):
@@ -1013,18 +1015,18 @@ SCRIPT_SCAN_BUDGET = 512 * 1024
 
 
 def joined(texts):
-    """Joins texts that may each hold VARIANT alternatives, so every alternative of every text lands in a joined piece."""
+    """Joins texts that may each hold VARIANT readings, slot by slot; a text without a slot gives its first reading."""
     parts = [text.split(VARIANT) for text in texts]
     return VARIANT.join(
-        "\n".join(part[min(i, len(part) - 1)] for part in parts)
+        "\n".join(part[i] if i < len(part) else part[0] for part in parts)
         for i in range(max(map(len, parts)))
     )
 
 
 def capped(text):
-    """Cuts each VARIANT piece of text at SCRIPT_SCAN_LIMIT and marks a cut piece with CUT."""
+    """Cuts each VARIANT piece of text at SCRIPT_SCAN_LIMIT and marks a cut piece with LARGE."""
     return VARIANT.join(
-        piece[:SCRIPT_SCAN_LIMIT] + (CUT if len(piece) > SCRIPT_SCAN_LIMIT else "")
+        piece[:SCRIPT_SCAN_LIMIT] + (LARGE if len(piece) > SCRIPT_SCAN_LIMIT else "")
         for piece in text.split(VARIANT)
     )
 
@@ -1159,7 +1161,7 @@ def stdin_program(words, where, pipeline, redirects, env, written):
             key = run_key(arg, where, env)
             if size < SCRIPT_SCAN_LIMIT:
                 parts.append(written_or_disk_text(key, written))
-                size += len(parts[-1]) + 1
+                size += max(map(len, parts[-1].split(VARIANT))) + 1
         return capped(joined(parts or [""]))
     return None
 
@@ -1247,18 +1249,20 @@ class ScanBudget(Exception):
     pass
 
 
-class PrintfCut(Exception):
+class TooLarge(Exception):
     pass
 
 
 def code_kills(code, cwd, disabled, depth, state):
     """True when code a shell runs kills broadly, directly or through code it runs in turn."""
     if CUT in code:
-        raise PrintfCut
+        raise TooLarge(PRINTF_TOO_LARGE_REASON)
+    if LARGE in code:
+        raise TooLarge(SCRIPT_TOO_LARGE_REASON)
     if VARIANT in code:
         return any(
             code_kills(piece, cwd, disabled, depth, state)
-            for piece in code.split(VARIANT)
+            for piece in dict.fromkeys(code.split(VARIANT))
         )
     code = bounded(code)
     state["left"] -= len(code)
@@ -1306,8 +1310,8 @@ def guard_script_kill(raw, cwd, disabled):
         for label, code, where, _ in runs(entries, disabled):
             if code_kills(code, where, disabled, 1, state):
                 return f"{BROAD_KILL_REASON} Found inside {label}."
-    except PrintfCut:
-        return PRINTF_TOO_LARGE_REASON
+    except TooLarge as exc:
+        return str(exc)
     except ScanBudget as exc:
         log_failure(exc, raw, "scan-budget")
     except Exception as exc:

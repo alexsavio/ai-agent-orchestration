@@ -1051,6 +1051,8 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     late.write_text("echo ok\n" * 12000 + "pkill -f vite\n")
     big = scripts / "big.sh"
     big.write_text('if [ -n "$X" ]; then echo "checking $X" >&5; fi\n' * 6000)
+    for name in ("a40.sh", "b40.sh"):
+        (scripts / name).write_text("echo ok\n" * 5000)
     many = scripts / "many.sh"
     many.write_text("cat <<EOF\n" * 6000)
     repro = "cat > repro.sh <<'EOF'\npkill -f vite\nEOF\n"
@@ -1257,6 +1259,31 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             + "\\n' > b.sh; cat a.sh b.sh | sh",
         ),
         ("printf zero flag on a pid", "printf 'kill -9 %05d\\n' -1 | sh"),
+        (
+            "printf left-justified width after a pid",
+            "printf 'kill -9 %-3dx\\n' -1 | sh",
+        ),
+        (
+            "append whose readings pair across texts",
+            'printf \'"\\x22\\"\\n\' > m.sh; printf \'p"k"ill -f vite \\"\\n\' >> m.sh; bash m.sh',
+        ),
+        (
+            "cat whose readings pair across texts",
+            'printf \'"\\x22\\"\\n\' > m.sh; printf \'p"k"ill -f vite \\"\\n\' > n.sh; cat m.sh n.sh | sh',
+        ),
+        (
+            "append of an echo whose readings pair across texts",
+            'printf \'"\\x22\\"\\n\' > m.sh; echo -e \'p"k"ill -f vite \\"\' >> m.sh; bash m.sh',
+        ),
+        ("cat of two disk files past the scan limit", "cat a40.sh b40.sh | sh"),
+        (
+            "append to a disk file past the scan limit",
+            "echo 'echo done' >> big.sh; bash big.sh",
+        ),
+        (
+            "append to a disk file past the scan limit, sourced",
+            "echo 'alias ll=ls' >> big.sh && source big.sh",
+        ),
         (
             "many appends past the scan limit, then run",
             "echo hi > a.sh; " + ("printf '" + PAD + "' >> a.sh; ") * 100 + "bash a.sh",
@@ -1566,6 +1593,8 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("printf separator byte inside a word", "printf 'p\\036kill -f vite\\n' | sh"),
         ("printf separator byte inside a pid", "printf 'kill -9 \\036-1\\n' | sh"),
         ("unit separator byte in a script on disk", "bash us.sh"),
+        ("cat of a file of 64 KB or more", "cat big.sh | sh"),
+        ("printf group separator byte, run", "printf 'echo \\035\\n' | sh"),
         ("echo separator byte after a kill word", "echo 'pkill\x1e -f vite' | sh"),
         (
             "printf argument separator byte after a kill word",
@@ -1587,6 +1616,19 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     assert not guard.evaluate(f"bash {scripts}/fan.sh", repo)
     cat_many = "cat " + f"{scripts}/big.sh " * 100 + "| bash"
     assert not guard.evaluate(cat_many, repo)
+    for command in (
+        "cat a40.sh b40.sh | sh",
+        "echo 'echo done' >> big.sh; bash big.sh",
+        "echo 'alias ll=ls' >> big.sh && source big.sh",
+    ):
+        reason = guard.evaluate(command, scripts)
+        assert reason and "script text" in reason and "printf" not in reason, reason
+    reason = guard.evaluate("printf '" + PAD + "%s\\n' " + "x " * 70 + "| sh", scripts)
+    assert reason and "printf output" in reason, reason
+    long_piece = guard.capped("a" * 200000 + guard.VARIANT + "b")
+    assert len(long_piece) == guard.SCRIPT_SCAN_LIMIT + 1 + 2, (
+        "capped keeps a long piece"
+    )
     assert time.perf_counter() - started < 3, "scan budget is not applied"
     assert not log_path.exists() or "scan-budget" not in log_path.read_text()
     for number in range(40):
