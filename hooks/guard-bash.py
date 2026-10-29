@@ -714,7 +714,7 @@ INTEGER = re.compile(r"\s*([-+]?)(0[xX][0-9a-fA-F]+|\d+)")
 QUOTING = str.maketrans("", "", "\"'\\")
 PRINTF_TOO_LARGE_REASON = "printf output run by a shell is too large to check safely; write it to a file with a smaller format or remove the pipe to a shell."
 SCRIPT_TOO_LARGE_REASON = "script text run by a shell is more than 64 KB, too large to check safely; split the script or run a smaller file."
-PANE_TOO_LARGE_REASON = "text typed into a pane is built by printf from more than 64 KB, too large to check safely; send a smaller text."
+PANE_TOO_LARGE_REASON = "printf output typed into a pane is more than 64 KB, too large to check safely; send a smaller text."
 
 
 def unescape(text, quotes=True):
