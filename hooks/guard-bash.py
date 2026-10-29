@@ -1974,11 +1974,12 @@ def guard_pi_text(text, where, disabled, depth, direct=True, strict=False):
         for stage in shell_segments(body):
             words, _ = unwrap(stage)
             if words and os.path.basename(words[0]) in ("echo", "printf"):
-                reason = guard_pi_text(
-                    echoed_text(words), where, disabled, depth + 1, strict=True
-                )
-                if reason:
-                    return reason
+                for reading in text_readings(echoed_text(words)):
+                    reason = guard_pi_text(
+                        str(reading), where, disabled, depth + 1, strict=True
+                    )
+                    if reason:
+                        return reason
     try:
         units = [segment for _, unit, _ in flow_units(text) for segment in unit]
     except ValueError:

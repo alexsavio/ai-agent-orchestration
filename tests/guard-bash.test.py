@@ -2683,6 +2683,44 @@ pkill -f vite
         "generated agent argument is not a command",
         'herdr pane run p "$(printf echo) $(printf agent)"',
     )
+    for name, command in (
+        (
+            "printf argument",
+            "herdr pane run w1:p2 \"$(printf '%s --yolo' cursor-agent)\"",
+        ),
+        (
+            "printf hex escape",
+            "herdr pane run w1:p2 \"$(printf 'cursor-agent\\x20--yolo')\"",
+        ),
+        (
+            "echo -e hex escape",
+            "herdr pane run w1:p2 \"$(echo -e 'cursor-agent\\x20--yolo')\"",
+        ),
+        (
+            "echo hex escape",
+            "herdr pane run w1:p2 \"$(echo 'cursor-agent\\x20--yolo')\"",
+        ),
+        (
+            "printf two arguments",
+            "herdr pane send-text w1:p2 \"$(printf '%s %s' agent --yolo)\"",
+        ),
+        (
+            "backtick printf argument",
+            "herdr pane run w1:p2 \"`printf '%s --yolo' cursor-agent`\"",
+        ),
+        ("pi printf argument", "herdr pane run w1:p2 \"$(printf '%s' pi)\""),
+        (
+            "pi printf argument with flag",
+            "herdr pane run w1:p2 \"$(printf '%s --provider x' pi)\"",
+        ),
+        ("pi printf hex escape", "herdr pane run w1:p2 \"$(printf 'p\\x69')\""),
+    ):
+        case(f"pane text reads every echo/printf reading: {name}", command, True)
+    for name, command in (
+        ("printf argument", "herdr pane run w1:p2 \"$(printf '%s' ls)\""),
+        ("echo", 'herdr pane run w1:p2 "$(echo hello)"'),
+    ):
+        case(f"pane text allows an ordinary substitution: {name}", command)
     for command in (
         "herdr agent list",
         "orch-agents",
