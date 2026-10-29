@@ -11,6 +11,7 @@ import { mountPopup } from "#test/components/mountPopup";
 import { createI18n } from "#test/i18n/catalog";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
@@ -94,6 +95,7 @@ const ACTIONS: readonly ActionCase[] = [
 ];
 
 test("each button sends its own request, refreshes the summary and shows the result", async () => {
+  vi.useFakeTimers();
   for (const action of ACTIONS) {
     const { wrapper, sent } = await popup([], { [action.request.type]: action.reply });
 
