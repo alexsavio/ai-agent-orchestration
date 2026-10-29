@@ -1284,6 +1284,14 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             'echo \'p"k"il\\x6c -f vite \\"\' | sh',
         ),
         (
+            "echo -E in a shell that prints the option and reads escapes",
+            "echo -E 'x\\0012pkill -f vite' | sh",
+        ),
+        (
+            "echo -n in a shell that prints the option and reads escapes",
+            "echo -n 'x\\0012pkill -f vite' | sh",
+        ),
+        (
             "append of a plain echo to a printf with a backslash quote",
             'printf \'echo "\\"\\n\' > m.sh; echo \'p"k"ill -f vite \\"\' >> m.sh; bash m.sh',
         ),
