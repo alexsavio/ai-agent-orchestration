@@ -33,6 +33,8 @@ import orch_settings as s
 values = {'str': 'from-file', 'int': 7, 'number': 7.5, 'bool': True, 'list': ['a', 'b'], 'json': [{'name': 'file'}], 'tables': [{'name': 'file'}]}
 def sample(setting):
     if setting.choices:
+        if setting.kind == 'str':
+            return setting.choices[0]
         return list(setting.required) or setting.choices[:1]
     if setting.pattern:
         return 'fromfile'  # one lowercase word, matching the pattern
@@ -57,24 +59,32 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   run load_settings global
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c .)" -eq "$(python3 "$SETTINGS" keys "$ORCH_CONFIG" | wc -w)" ]
+  # The Claude effort settings accept only a level or empty, the Codex one a lowercase word; every other setting gets env-<NAME>.
+  exported_value() { case "$1" in ORCH_CODEX_SMART_REASONING_EFFORT) printf 'envword' ;; *_EFFORT) printf 'xhigh' ;; *) printf 'env-%s' "$1" ;; esac; }
   for name in $(python3 "$SETTINGS" keys "$ORCH_CONFIG"); do
-    [[ "$output" != *"$name=env-$name"* ]]
-    if [ "$name" = ORCH_CODEX_SMART_REASONING_EFFORT ]; then
-      export "$name=envword"
-    else
-      export "$name=env-$name"
-    fi
+    [[ "$output" != *"$name=$(exported_value "$name")"* ]]
+    export "$name=$(exported_value "$name")"
   done
 
   run load_settings global
 
   [ "$status" -eq 0 ]
   for name in $(python3 "$SETTINGS" keys "$ORCH_CONFIG"); do
-    if [ "$name" = ORCH_CODEX_SMART_REASONING_EFFORT ]; then
-      printf '%s\n' "$output" | grep -qxF "$name=envword"
-    else
-      printf '%s\n' "$output" | grep -qxF "$name=env-$name"
-    fi
+    printf '%s\n' "$output" | grep -qxF "$name=$(exported_value "$name")"
+  done
+}
+
+@test "an exported effort that is not empty or a level is an error; empty is valid" {
+  every_value global >"$ORCH_CONFIG"
+  for name in ORCH_COORDINATOR_EFFORT ORCH_ARCHITECT_EFFORT ORCH_WORKER_EFFORT ORCH_REVIEWER_EFFORT; do
+    for bad in bogus High; do
+      run env "$name=$bad" python3 "$SETTINGS" print "$ORCH_CONFIG"
+      [ "$status" -ne 0 ]
+      [[ "$output" == *"unknown value \"$bad\"; known: empty, low, medium, high, xhigh, max"* ]]
+    done
+    run env "$name=" python3 "$SETTINGS" print "$ORCH_CONFIG"
+    [ "$status" -eq 0 ]
+    printf '%s\n' "$output" | grep -qxF "$name="
   done
 }
 
@@ -124,6 +134,29 @@ ORCH_PATH=$HOME/bin:/usr/bin" ] || { echo "$output"; false; }
   run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; ORCH_CODEX_SMART_REASONING_EFFORT="high xhigh"; orch_load_config' _ "$ROOT"
   [ "$status" -eq 2 ]
   printf '%s\n' "$output" | grep -qF "ORCH_CODEX_SMART_REASONING_EFFORT: must be one lowercase word"
+}
+
+@test "a bad Claude effort fails the shell loader with or without a config file, exported or not; a level and empty pass" {
+  for config in file none; do
+    if [ "$config" = file ]; then every_value global >"$ORCH_CONFIG"; else unset ORCH_CONFIG; fi
+    for name in ORCH_COORDINATOR_EFFORT ORCH_ARCHITECT_EFFORT ORCH_WORKER_EFFORT ORCH_REVIEWER_EFFORT; do
+      for bad in "high xhigh" High; do
+        # shellcheck disable=SC2016 # The child shell expands these.
+        run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; export "$2=$3"; orch_load_config' _ "$ROOT" "$name" "$bad"
+        [ "$status" -eq 2 ] || { echo "$config exported $name=$bad: $status"; false; }
+        printf '%s\n' "$output" | grep -qF "($name): unknown value"
+        # shellcheck disable=SC2016 # The child shell expands these.
+        run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; printf -v "$2" %s "$3"; orch_load_config' _ "$ROOT" "$name" "$bad"
+        [ "$status" -eq 2 ] || { echo "$config unexported $name=$bad: $status"; false; }
+        printf '%s\n' "$output" | grep -qF "($name): unknown value"
+      done
+      for good in xhigh ""; do
+        # shellcheck disable=SC2016 # The child shell expands these.
+        run bash -c '. "$1/coordinator/watchers/coord-lib.sh"; export "$2=$3"; orch_load_config' _ "$ROOT" "$name" "$good"
+        [ "$status" -eq 0 ] || { echo "$config good $name=$good: $status"; false; }
+      done
+    done
+  done
 }
 
 @test "an unexported good reasoning effort still wins over the file" {

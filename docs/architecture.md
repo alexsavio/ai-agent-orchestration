@@ -82,6 +82,8 @@ flowchart LR
 | Worker where Codex cannot do the step | Claude: the lightest allowed tier that does the task well (Haiku mechanical, Sonnet implementation and review, Opus hard, Fable only for the hardest); only tiers `providers.claude` allows |
 | Reviewer | The family that did not write the code |
 
+A Claude session also gets `--effort` from `ORCH_COORDINATOR_EFFORT`, `ORCH_ARCHITECT_EFFORT`, `ORCH_WORKER_EFFORT` or `ORCH_REVIEWER_EFFORT` when that is set (empty adds no flag, so the saved level or the model default applies); the architect may pick another level per dispatch.
+
 - The architect picks the family and tier per task without asking the user, and re-tiers at every dispatch.
 - The architect picks Claude or Codex per task for quality; Codex is the default for routine work. Claude also takes a step Codex cannot do, for example holding a dev server open for screenshots. `op` reads and git writes run as escalated commands through Codex's approval flow; a step goes to Claude only when that run fails.
 - pi is a third family, available only when its two model settings are filled in. DeepSeek (named in the provider or the model id) runs only in a repo whose `.orchestration.local.toml` sets `pi.deepseek = true`. pi has no native channel, so follow-ups go through `herdr agent prompt`.

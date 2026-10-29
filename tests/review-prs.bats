@@ -38,6 +38,10 @@ EOF
 case "$*" in
   'api user --jq .login') echo reviewer ;;
   'api repos/acme/app/pulls/7 --jq .base.ref') [ -z "${BASE_READ_FAILS:-}" ] || exit 1; echo main ;;
+  'api repos/acme/app/pulls/7 --jq [.head.repo.owner.login // "-", .head.repo.name // "-", .head.ref // "-"] | @tsv')
+    [ -z "${HEAD_READ_FAILS:-}" ] || exit 1
+    printf '%s\t%s\t%s\n' "${HEAD_OWNER:-alexsavio}" "${HEAD_REPO:-ai-agent-orchestration}" "${HEAD_REF:-feat/usage-ledger}"
+    ;;
   *'/reviews'*)
     r() { printf '{"id":%s,"user":{"login":"reviewer"},"commit_id":"%s","state":"APPROVED","submitted_at":"%s","html_url":"https://github.com/acme/app/pull/7#review-%s"}' "$1" "$SHA" "$2" "$1"; }
     old=""
@@ -68,12 +72,63 @@ dispatch() {
     git -C "$TMP/app" remote add origin https://github.com/acme/app.git
     mkdir -p "$TMP/fetch-ok"
     # shellcheck disable=SC2016 # The stub's own text.
-    printf '#!/usr/bin/env bash\ncase "$*" in *" fetch -q "*) exit 0 ;; esac\nPATH=${PATH#"%s":} exec git "$@"\n' "$TMP/fetch-ok" >"$TMP/fetch-ok/git"
+    cat >"$TMP/fetch-ok/git" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *'fetch -q -- https://github.com/alexsavio/'*' refs/heads/'*)
+    printf '%s\n' "$*" >>"$TMP/fetch.calls"
+    [ -n "${FORK_FETCH_FAILS:-}" ] && exit 1
+    args=()
+    for arg in "$@"; do
+      case "$arg" in https://github.com/alexsavio/*.git) arg="file://$FORK_ORIGIN" ;; esac
+      args+=("$arg")
+    done
+    PATH=${PATH#"$TMP/fetch-ok":} exec git "${args[@]}"
+    ;;
+  *" fetch -q "*) exit 0 ;;
+esac
+PATH=${PATH#"$TMP/fetch-ok":} exec git "$@"
+EOF
     chmod +x "$TMP/fetch-ok/git"
     export PATH="$TMP/fetch-ok:$PATH"
   fi
   run env ORCH_CONFIG="$TMP/none.toml" bash "$ROOT/$SKILL_DIR/scripts/dispatch.sh" \
     https://github.com/acme/app/pull/7 7 'Fix it' author "$SHA" review rev7 "$TMP/app" acme/app
+}
+
+fork_head_missing_from_pull_ref() {
+  git clone -q "$TMP/app" "$TMP/fork-source"
+  printf 'fork head\n' >"$TMP/fork-source/fork.txt"
+  git -C "$TMP/fork-source" add fork.txt
+  git -C "$TMP/fork-source" -c user.email=test@example.invalid -c user.name=test commit -qm fork-head
+  git -C "$TMP/fork-source" branch -M feat/usage-ledger
+  git init --bare -q "$TMP/fork.git"
+  git -C "$TMP/fork.git" symbolic-ref HEAD refs/heads/feat/usage-ledger
+  git -C "$TMP/fork.git" fetch -q "$TMP/fork-source" feat/usage-ledger:feat/usage-ledger
+  FORK_ORIGIN="$TMP/fork.git"
+  SHA=$(git -C "$TMP/fork-source" rev-parse HEAD)
+  export FORK_ORIGIN SHA
+}
+
+@test "dispatch fetches the fork head when pull head is stale" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  dispatch
+  [ "$status" -eq 0 ]
+  grep -q 'fetch -q -- https://github.com/alexsavio/ai-agent-orchestration.git refs/heads/feat/usage-ledger' "$TMP/fetch.calls"
+  [ "$(dispatch_state)" = 'False "done"' ]
+}
+
+@test "dispatch reports HEAD FAILED and releases its claim when neither head fetch provides it" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  FORK_FETCH_FAILS=1 dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" "HEAD FAILED $SHA not fetchable from pull/7/head or alexsavio/ai-agent-orchestration:feat/usage-ledger"
+  contains "$output" "RELEASED $SHA"
+  [ "$(dispatch_state)" = 'True null' ]
 }
 
 @test "dispatch closes the finished review pane through close-pane.sh" {
@@ -204,9 +259,10 @@ dispatch() {
   prompt=$(cat "$TMP/review.prompt")
   contains "$prompt" '"event":"APPROVE|REQUEST_CHANGES|COMMENT"'
   contains "$prompt" '"comments":[{"path":"...","line":123,"side":"RIGHT","body":"..."}]'
-  contains "$prompt" 'mktemp -d'
-  contains "$prompt" 'review.json'
-  contains "$prompt" "gh api repos/acme/app/pulls/7/reviews --input \"\$review_json\""
+  contains "$prompt" 'gh api -X POST repos/acme/app/pulls/7/reviews --input -'
+  contains "$prompt" 'quoted heredoc'
+  not_contains "$prompt" 'mktemp'
+  not_contains "$prompt" 'review_dir'
   contains "$prompt" 'APPROVE|COMMENT|REQUEST_CHANGES'
 }
 
@@ -292,12 +348,68 @@ dispatch() {
 
 @test "Claude worker starts carry --strict-mcp-config and the example allows haiku" {
   grep -qF 'claude = ["haiku", "sonnet", "opus", "fable"]' "$ROOT/config/orchestration.toml.example"
-  grep -qF -- '--model <model> --strict-mcp-config --resume' "$ROOT/skills/architect/references/dispatch.md"
-  grep -qF -- '--model <model> --strict-mcp-config`' "$ROOT/skills/architect/references/worker-recycle.md"
+  grep -qF -- '--model <model> <effort flag> --strict-mcp-config --resume' "$ROOT/skills/architect/references/dispatch.md"
+  grep -qF -- '--model <model> <effort flag> --strict-mcp-config`' "$ROOT/skills/architect/references/worker-recycle.md"
   # shellcheck disable=SC2016 # The backticks are literal skill text.
   grep -qF 'a Claude worker start adds `--strict-mcp-config`' "$ROOT/skills/architect/references/dispatch.md"
   run grep -rn -- '--strict-mcp-config' "$ROOT/skills/coordinate"
   [ "$status" -eq 1 ]
+}
+
+@test "every Claude start and recycle line pins the effort flag placeholder next to --model" {
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '$ORCH_ARCHITECT_MODEL <effort flag> --name "<architect name>"` (`<effort flag>` from `ORCH_ARCHITECT_EFFORT`)' "$ROOT/skills/coordinate/references/recycle.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '$ORCH_COORDINATOR_MODEL <effort flag> --name Coordinator --remote-control "Coordinator"` (`<effort flag>` from `ORCH_COORDINATOR_EFFORT`)' "$ROOT/skills/coordinate/references/recycle.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '`<effort flag>` after the model: worker `ORCH_WORKER_EFFORT`, reviewer `ORCH_REVIEWER_EFFORT`;' "$ROOT/skills/architect/references/dispatch.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- 'with `<effort flag>` (architect: `ORCH_ARCHITECT_EFFORT`)' "$ROOT/skills/architect/SKILL.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- 'nothing when the value is empty, so the saved level or the model default applies' "$ROOT/skills/architect/references/dispatch.md"
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md; do
+    # shellcheck disable=SC2016 # The backticks are literal skill text.
+    grep -qF -- 'empty means no `--effort`: the level saved in `~/.claude/settings.json` or the model default applies' "$ROOT/$file"
+  done
+  for file in skills/architect/SKILL.md skills/coordinate/SKILL.md; do
+    # shellcheck disable=SC2016 # The backticks are literal skill text.
+    grep -qF -- '`<effort flag>` is `--effort <value>` with the value `orch-settings` prints for that role'"'"'s `ORCH_…_EFFORT` (or the per-dispatch level), and nothing at all when it prints empty; the `ORCH_…` variables are not set in your shell, so write the value in' "$ROOT/$file"
+  done
+  # The start command in each recycle line is one clean code span: a backtick or "(" inside it would end up in the shell line.
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  run grep -c -E '`herdr agent start [^`(]*<effort flag>[^`(]*`' "$ROOT/skills/coordinate/references/recycle.md"
+  [ "$output" -eq 2 ]
+  # The ORCH_ variables are not set in an agent's shell, so no ${ORCH_…:+ form may be left.
+  run bash -c "grep -rnF '\${ORCH_' '$ROOT/skills' | grep -F ':+'"
+  [ "$status" -eq 1 ]
+  # The names appear only in the "never as ..." prose lines.
+  cd "$ROOT"
+  run bash -c "grep -rn -e CLAUDE_CODE_EFFORT_LEVEL -e effortLevel skills docs install.sh hooks lib | sed 's/never as \`CLAUDE_CODE_EFFORT_LEVEL\` or \`effortLevel\`//' | grep -e CLAUDE_CODE_EFFORT_LEVEL -e effortLevel"
+  [ "$status" -eq 1 ]
+}
+
+@test "the reviewer start is a worker start with the file-edit deny last" {
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- 'A Claude reviewer start is a worker start with the deny last: `... -- --model <model> <effort flag> --strict-mcp-config --disallowedTools "Edit(./**)" NotebookEdit`' "$ROOT/skills/architect/references/dispatch.md"
+}
+
+@test "the gate item 7 points to the reviewer template" {
+  grep -qF -- 'Brief the reviewer with [references/reviewer.md](references/reviewer.md)' "$ROOT/skills/architect/SKILL.md"
+}
+
+@test "the reviewer template pins the findings table header" {
+  grep -qF -- '| claim | file:line opened | verdict | evidence | rung | fix the author can apply |' "$ROOT/skills/architect/references/reviewer.md"
+}
+
+@test "the reviewer template says the tool block is a tripwire, not a sandbox" {
+  grep -qF -- 'this is a tripwire, not a sandbox' "$ROOT/skills/architect/references/reviewer.md"
+}
+
+@test "a per-dispatch effort survives a worker recycle through the handoff" {
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- '- **Effort:** the `--effort` level of the first start, from the dispatch note (you cannot see your own level), or empty when the first start passed no `--effort`; the architect fills it in when the worker leaves it out.' "$ROOT/skills/architect/references/worker-recycle.md"
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- "from the handoff's \`Effort:\` field, and nothing when that field is empty" "$ROOT/skills/architect/references/worker-recycle.md"
 }
 
 @test "recycle and re-home keep the first start's MCP choice; README, tier list and contributing agree" {
@@ -400,8 +512,8 @@ present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", 
 calls = []
 def fake_gh(*args):
     calls.append(args)
-    assert args == ("pr", "view", url, "--json", "state,reviewRequests"), args
-    return json.dumps({"state": "OPEN", "reviewRequests": [{"login": "reviewer"}]})
+    assert args[:2] == ("api", "graphql"), args
+    return json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "s", "reviewRequests": {"nodes": [{"requestedReviewer": {"login": "reviewer"}}]}, "myReviews": {"nodes": []}}}})
 prs.gh = fake_gh
 prs.viewer_login = lambda: "reviewer"
 lines, retained = prs.changes(present, {})
@@ -411,6 +523,93 @@ lines, retained = prs.changes(retained, present)
 assert lines == [], lines
 assert retained == {}, retained
 assert len(calls) == 1, calls
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a moved PR missing from one poll is kept" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="new", conflict=False)}
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "new", "reviewRequests": {"nodes": []}, "myReviews": {"nodes": [{"commit": {"oid": "old"}}]}}}})
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [], lines
+assert retained == {url: dict(present[url], misses=1)}, retained
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a per-PR read clears an open PR only when it is not moved" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="head", conflict=False)}
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "head", "reviewRequests": {"nodes": []}, "myReviews": {"nodes": [{"commit": {"oid": "head"}}]}}}})
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [f"cleared: {url} — t (no longer requesting you)"], lines
+assert retained == {}, retained
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a completed dispatch on the current head confirms departure" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="head", conflict=False)}
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "head", "reviewRequests": {"nodes": []}, "myReviews": {"nodes": [{"commit": {"oid": "old"}}]}}}})
+prs.read_dispatched = lambda: {url: {"heads": {"head": {"state": "done"}}}}
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [f"cleared: {url} — t (no longer requesting you)"], lines
+assert retained == {}, retained
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "an empty poll after non-empty keeps every moved PR" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+urls = [f"https://github.com/acme/app/pull/{n}" for n in (7, 8)]
+present = {url: dict(title=url[-1], draft=False, author="a", ci="SUCCESS", sha="new", conflict=False) for url in urls}
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "new", "reviewRequests": {"nodes": []}, "myReviews": {"nodes": [{"commit": {"oid": "old"}}]}}}})
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [], lines
+assert retained == {url: dict(present[url], misses=1) for url in urls}, retained
+' "$ROOT/$SKILL_DIR/scripts"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "an unreadable dispatch ledger does not confirm a departure" {
+  # shellcheck disable=SC2016 # Python source.
+  run python3 -c '
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import prs
+url = "https://github.com/acme/app/pull/7"
+present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="head", conflict=False)}
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "head", "reviewRequests": {"nodes": []}, "myReviews": {"nodes": [{"commit": {"oid": "head"}}]}}}})
+prs.read_dispatched = lambda: (_ for _ in ()).throw(OSError("partial ledger"))
+lines, retained = prs.changes(present, {}, "reviewer")
+assert lines == [], lines
+assert retained == {url: dict(present[url], misses=1)}, retained
 ' "$ROOT/$SKILL_DIR/scripts"
   echo "$output"
   [ "$status" -eq 0 ]
@@ -441,7 +640,7 @@ sys.path.insert(0, sys.argv[1])
 import prs
 url = "https://github.com/acme/app/pull/7"
 present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
-prs.gh = lambda *args: json.dumps({"state": "OPEN", "reviewRequests": [{"slug": "core"}]})
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "OPEN", "headRefOid": "s", "reviewRequests": {"nodes": [{"requestedReviewer": {"slug": "core"}}]}, "myReviews": {"nodes": []}}}})
 lines, retained = prs.changes(present, {}, "reviewer")
 assert lines == [], lines
 assert retained[url]["misses"] == 1, retained
@@ -502,7 +701,7 @@ sys.path.insert(0, sys.argv[1])
 import prs
 url = "https://github.com/acme/app/pull/7"
 present = {url: dict(title="t", draft=False, author="a", ci="SUCCESS", sha="s", conflict=False)}
-prs.gh = lambda *args: json.dumps({"state": "MERGED", "reviewRequests": []})
+prs.gh = lambda *args: json.dumps({"data": {"resource": {"state": "MERGED", "headRefOid": "s", "reviewRequests": {"nodes": []}, "myReviews": {"nodes": []}}}})
 lines, state = prs.changes(present, {}, "reviewer")
 assert lines == [f"merged: {url} — t"], lines
 assert state == {}, state
@@ -752,8 +951,13 @@ fork_layout() {
   cat >"$BIN/git" <<GIT
 #!/usr/bin/env bash
 case "\$*" in
-  *' cat-file -e '*) exit 1 ;;
-  *' fetch -q '*) printf '%s\n' "\$*" >>"$TMP/fetch.calls"; [ "\$5" = upstream ]; exit ;;
+  *' cat-file -e '*) [ -e "$TMP/pull-head-fetched" ] || exit 1 ;;
+  *' fetch -q '*)
+    printf '%s\n' "\$*" >>"$TMP/fetch.calls"
+    [ "\$5" = upstream ] || exit
+    [ "\$6" != pull/7/head ] || : >"$TMP/pull-head-fetched"
+    exit 0
+    ;;
 esac
 exec "$real_git" "\$@"
 GIT
@@ -767,6 +971,46 @@ GIT
   dispatch
   not_contains "$output" 'RELEASED'
   grep -qF -- "-C $TMP/app fetch -q upstream pull/7/head" "$TMP/fetch.calls"
+}
+
+@test "dispatch fetches a leading-dot fork repository name" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  HEAD_REPO=.github dispatch
+  [ "$status" -eq 0 ]
+  grep -q 'fetch -q -- https://github.com/alexsavio/.github.git refs/heads/feat/usage-ledger' "$TMP/fetch.calls"
+}
+
+@test "dispatch rejects an option-like fork branch without fetching it" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  HEAD_REF=--upload-pack=x dispatch
+  [ "$status" -ne 0 ]
+  [ ! -e "$TMP/fetch.calls" ]
+  contains "$output" "HEAD FAILED $SHA not fetchable from pull/7/head or alexsavio/ai-agent-orchestration:--upload-pack=x"
+  contains "$output" "RELEASED $SHA"
+}
+
+@test "dispatch rejects a dot-dot fork repository without fetching it" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  HEAD_REPO=.. dispatch
+  [ "$status" -ne 0 ]
+  [ ! -e "$TMP/fetch.calls" ]
+  contains "$output" "HEAD FAILED $SHA not fetchable from pull/7/head or alexsavio/..:feat/usage-ledger"
+  contains "$output" "RELEASED $SHA"
+}
+
+@test "dispatch preserves null fork metadata fields in HEAD FAILED output" {
+  stub_review_tools
+  : >"$TMP/none.toml"
+  fork_head_missing_from_pull_ref
+  HEAD_OWNER=- HEAD_REPO=- dispatch
+  [ "$status" -ne 0 ]
+  contains "$output" "HEAD FAILED $SHA not fetchable from pull/7/head or -/-:feat/usage-ledger"
 }
 
 @test "a fork review reads its instructions from the upstream base, whether or not the head is cached" {
@@ -1207,4 +1451,9 @@ assert len(lines) == 1 and lines[0].startswith("ready:"), lines
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["queue"], "codex is off" in d["note"])')" = "[] True" ]
   [ ! -e "$TMP/gh.called" ]
+}
+
+@test "the architect skill keeps /goal out of the default worker brief" {
+  grep -qF 'is not part of the default worker brief' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'joins the running turn' "$ROOT/skills/architect/SKILL.md"
 }
