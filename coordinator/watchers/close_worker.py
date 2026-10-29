@@ -109,7 +109,12 @@ def facts(pane, caller_pane, caller_workspace):
     }
 
 
-RESUME = {"claude": "claude --resume", "codex": "codex resume"}
+RESUME = {
+    "claude": "claude --resume",
+    "codex": "codex resume",
+    "cursor": "cursor-agent --resume",
+    "cursor-agent": "cursor-agent --resume",
+}
 
 
 def recovery_line(found, task, report, now):

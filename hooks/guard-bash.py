@@ -1734,6 +1734,7 @@ HERDR_PAIRS = (
     ("pane", "run"),
     ("pane", "send-text"),
 )
+CURSOR_REASON = "Cursor starts only through ~/.claude/coordinator/cursor-start.sh <name> <pane> <worker|smart>; the provider and model come from settings."
 PI_INFO_FLAGS = {"--list-models", "--help", "-h", "--version", "-v"}
 
 
@@ -1759,12 +1760,20 @@ def pi_kind(args):
 
 
 def guard_pi(executable, args, where=".", disabled=()):
-    """A pi start outside the start step (which runs herdr outside this hook), or DeepSeek named in a pi or herdr start."""
+    """Enforce the pi and Cursor launchers and model restrictions on agent starts."""
+    if executable in ("cursor-agent", "agent"):
+        return None if pi_info(args) else CURSOR_REASON
+    if executable == "cursor":
+        if args[:1] != ["agent"]:
+            return None
+        return None if pi_info(args[1:]) else CURSOR_REASON
     if executable == "herdr":
         pair, rest = herdr_subcommand(args)
         text = " ".join(rest[1:][1 if rest[1:2] == ["--"] else 0 :])
         if pair == ("agent", "start"):
             kinds = pi_kind(args)
+            if "cursor" in kinds:
+                return CURSOR_REASON
             agent_args = rest[rest.index("--") + 1 :] if "--" in rest else []
             if "codex" in kinds and (
                 codex_widened(agent_args)
@@ -1802,7 +1811,7 @@ def guard_pi(executable, args, where=".", disabled=()):
 
 
 def pi_candidates(words, wrapped):
-    """The herdr and pi calls of a stage, also behind a wrapper with unparsed options."""
+    """Agent calls of a stage, including herdr and pi behind unparsed wrapper options."""
     found = [words] + (
         [
             words[i:]
@@ -1815,7 +1824,9 @@ def pi_candidates(words, wrapped):
     return [
         candidate
         for candidate in found
-        if candidate and os.path.basename(candidate[0]) in ("herdr", "pi")
+        if candidate
+        and os.path.basename(candidate[0])
+        in ("herdr", "pi", "cursor", "cursor-agent", "agent")
     ]
 
 
@@ -1824,6 +1835,16 @@ def guard_pi_text(text, where, disabled, depth, direct=True, strict=False):
     Strict mode (text typed into a pane) also denies every pi run that is not an info flag."""
     if depth >= 3 or "guard_pi" in disabled:
         return None
+    if strict and text.lstrip().startswith(("$(", "`")):
+        body = next(word_substitutions(text), "")
+        for stage in shell_segments(body):
+            words, _ = unwrap(stage)
+            if words and os.path.basename(words[0]) in ("echo", "printf"):
+                reason = guard_pi_text(
+                    echoed_text(words), where, disabled, depth + 1, strict=True
+                )
+                if reason:
+                    return reason
     try:
         units = [segment for _, unit, _ in flow_units(text) for segment in unit]
     except ValueError:
@@ -1892,7 +1913,7 @@ def evaluate_words(words, where, command, disabled, pipeline):
     elif executable == "gh":
         args = unwrap_gh(args)
         guards = (guard_attribution,)
-    elif executable in ("herdr", "pi"):
+    elif executable in ("herdr", "pi", "cursor", "cursor-agent", "agent"):
         return (
             None
             if "guard_pi" in disabled

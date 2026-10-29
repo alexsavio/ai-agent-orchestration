@@ -971,11 +971,19 @@ class ProvidersTest(SettingsTest):
         path = self.write("g.toml", text)
         return s.resolved_global(path, environ)
 
-    def test_the_default_is_claude_and_codex_plus_pi_where_a_pi_model_is_set(self):
+    def test_the_default_is_claude_and_codex_plus_pi_or_cursor_where_a_model_is_set(
+        self,
+    ):
         self.assertEqual(self.resolve()["ORCH_PROVIDERS"], "claude,codex")
         self.assertEqual(
             self.resolve('[models]\npi_smart = "lmstudio/q"\n')["ORCH_PROVIDERS"],
             "claude,codex,pi",
+        )
+        self.assertEqual(
+            self.resolve('[models]\ncursor_worker = "grok-4.7-medium"\n')[
+                "ORCH_PROVIDERS"
+            ],
+            "claude,codex,cursor",
         )
         self.assertEqual(
             s.required_models(self.resolve()),
@@ -1030,7 +1038,7 @@ class ProvidersTest(SettingsTest):
 
     def test_an_unknown_provider_is_an_error(self):
         self.assertIn(
-            'providers.enabled: unknown entry "gemini"; known: claude, codex, pi',
+            'providers.enabled: unknown entry "gemini"; known: claude, codex, pi, cursor',
             self.error('[providers]\nenabled = ["claude", "gemini"]\n'),
         )
         with self.assertRaisesRegex(s.ConfigError, 'unknown entry ""'):
@@ -1104,6 +1112,47 @@ class ProvidersTest(SettingsTest):
             self.assertEqual(s.fill_models(values), [kept])
             self.assertEqual(s.tier_model(values, "ORCH_CODEX_WORKER_MODEL"), model)
             self.assertEqual(s.tier_model(values, "ORCH_CODEX_SMART_MODEL"), model)
+
+    def test_one_cursor_model_is_enough_and_serves_both_tiers(self):
+        for worker, smart in (
+            ("grok-w", ""),
+            ("", "grok-s"),
+        ):
+            values = self.resolve(
+                '[providers]\nenabled = ["claude", "cursor"]\n'
+                f'[models]\ncursor_worker = "{worker}"\ncursor_smart = "{smart}"\n'
+                'codex_worker = ""\ncodex_smart = ""\n'
+            )
+            model = worker if s.filled(worker) else smart
+            kept = (
+                "ORCH_CURSOR_WORKER_MODEL"
+                if s.filled(worker)
+                else "ORCH_CURSOR_SMART_MODEL"
+            )
+            self.assertEqual(values["ORCH_PROVIDERS"], "claude,cursor")
+            self.assertEqual(
+                s.required_models(values),
+                ["ORCH_COORDINATOR_MODEL", "ORCH_ARCHITECT_MODEL", kept],
+            )
+            self.assertEqual(s.tier_model(values, "ORCH_CURSOR_WORKER_MODEL"), model)
+            self.assertEqual(s.tier_model(values, "ORCH_CURSOR_SMART_MODEL"), model)
+
+    def test_cursor_listed_without_models_requires_both(self):
+        values = self.resolve(
+            '[providers]\nenabled = ["claude", "cursor"]\n'
+            '[models]\ncursor_worker = ""\ncursor_smart = ""\n'
+            'codex_worker = ""\ncodex_smart = ""\n'
+        )
+        self.assertEqual(values["ORCH_PROVIDERS"], "claude,cursor")
+        self.assertEqual(
+            s.required_models(values),
+            [
+                "ORCH_COORDINATOR_MODEL",
+                "ORCH_ARCHITECT_MODEL",
+                "ORCH_CURSOR_WORKER_MODEL",
+                "ORCH_CURSOR_SMART_MODEL",
+            ],
+        )
 
     def test_print_shows_the_shared_review_settings_from_default_file_and_environment(
         self,

@@ -70,10 +70,13 @@ def _r(key, env, kind, default, doc, **kw):
 
 
 class Provider:
-    """A worker family and its model settings; need is "all", "one" (that model serves every tier) or "none" (on by default only when a model is set)."""
+    """A worker family and its model settings; need is "all", "one" (that model serves every tier) or "none" (models optional).
+    default_on controls an empty providers.enabled: True means always on; False means on only when a model is set.
+    When default_on is omitted, need != "none" means True (claude, codex) and need == "none" means False (pi)."""
 
-    def __init__(self, name, models, need="all"):
+    def __init__(self, name, models, need="all", default_on=None):
         self.name, self.models, self.need = name, models, need
+        self.default_on = (need != "none") if default_on is None else default_on
 
 
 PROVIDERS = [
@@ -81,6 +84,13 @@ PROVIDERS = [
     Provider("codex", ["ORCH_CODEX_WORKER_MODEL", "ORCH_CODEX_SMART_MODEL"], "one"),
     Provider(
         "pi", ["ORCH_PI_WORKER_MODEL", "ORCH_PI_SMART_MODEL", "ORCH_PI_MODELS"], "none"
+    ),
+    # Cursor CLI (Grok and other Cursor models). Off by default until a model is set, unlike codex.
+    Provider(
+        "cursor",
+        ["ORCH_CURSOR_WORKER_MODEL", "ORCH_CURSOR_SMART_MODEL"],
+        "one",
+        default_on=False,
     ),
 ]
 REQUIRED_PROVIDERS = ["claude"]
@@ -203,7 +213,7 @@ SETTINGS = [
         "ORCH_PROVIDERS",
         "list",
         [],
-        "Worker families this machine uses (claude, codex, pi); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi when a pi model is set. A family left out is never started or asked for, and its model settings may stay empty",
+        "Worker families this machine uses (claude, codex, pi, cursor); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi or cursor when a model of that family is set. A family left out is never started or asked for, and its model settings may stay empty",
         sep=",",
         choices=[p.name for p in PROVIDERS],
         required=REQUIRED_PROVIDERS,
@@ -309,6 +319,20 @@ SETTINGS = [
         [],
         "More pi models as provider/model-id that the architect may pick per task, besides pi_worker and pi_smart; any of the three set turns pi on",
         sep=",",
+    ),
+    _g(
+        "models.cursor_worker",
+        "ORCH_CURSOR_WORKER_MODEL",
+        "str",
+        "",
+        "Cursor CLI model for routine work (for example grok-4.7-medium); empty or a placeholder means cursor_smart serves it too. With cursor on, set at least one of the two",
+    ),
+    _g(
+        "models.cursor_smart",
+        "ORCH_CURSOR_SMART_MODEL",
+        "str",
+        "",
+        "Cursor CLI model for hard work (for example grok-4.7-high); empty or a placeholder means cursor_worker serves it too. With cursor on, set at least one of the two",
     ),
     _g(
         "remote_control.architects",
@@ -750,7 +774,7 @@ def enabled_providers(values):
         return [
             p.name
             for p in PROVIDERS
-            if p.need != "none" or any(filled(values.get(m, "")) for m in p.models)
+            if p.default_on or any(filled(values.get(m, "")) for m in p.models)
         ]
     names = text.split(setting.sep)
     problem = list_problem(setting, names)
