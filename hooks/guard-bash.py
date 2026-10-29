@@ -673,16 +673,30 @@ def shell_args(words):
     return command_mode, stdin_mode, check_only, operands
 
 
-def clean(text):
-    """Replaces the marker bytes VARIANT, CUT and LARGE, so text from a command or a file cannot fake one."""
-    return text.replace(VARIANT, "_").replace(CUT, "_").replace(LARGE, "_")
+class ScriptText(str):
+    """Shell source with separate readings and truncation metadata; literal bytes stay intact."""
+
+    def __new__(cls, readings, too_large=None):
+        text = super().__new__(cls, readings[0])
+        text.readings = tuple(map(str, readings))
+        text.too_large = too_large or next(
+            (
+                item.too_large
+                for item in readings
+                if isinstance(item, cls) and item.too_large
+            ),
+            None,
+        )
+        return text
+
+
+def text_readings(text):
+    return text.readings if isinstance(text, ScriptText) else (text,)
 
 
 def heredoc_bodies(words):
     return [
-        clean(words[i + 1])
-        for i in range(len(words) - 1)
-        if words[i] == "--guard-heredoc"
+        words[i + 1] for i in range(len(words) - 1) if words[i] == "--guard-heredoc"
     ]
 
 
@@ -698,9 +712,6 @@ PRINTF_CONVERSION = re.compile(
 )
 INTEGER = re.compile(r"\s*([-+]?)(0[xX][0-9a-fA-F]+|\d+)")
 QUOTING = str.maketrans("", "", "\"'\\")
-VARIANT = "\x1e"
-CUT = "\x1f"
-LARGE = "\x1d"
 PRINTF_TOO_LARGE_REASON = "printf output run by a shell is too large to check safely; write it to a file with a smaller format or remove the pipe to a shell."
 SCRIPT_TOO_LARGE_REASON = "script text run by a shell is more than 64 KB, too large to check safely; split the script or run a smaller file."
 
@@ -752,7 +763,7 @@ def printf_value(flags, width, precision, conversion, arg):
 
 def printf_text(format_, args, quotes=True):
     """Returns the text printf writes for a format and its arguments, and the arguments left over when a conversion is not modelled.
-    Output past SCRIPT_SCAN_LIMIT is cut and ends in CUT."""
+    Output past SCRIPT_SCAN_LIMIT is cut and carries truncation metadata."""
     out, used, modelled, size = [], 0, True, 0
 
     def append(text):
@@ -766,11 +777,11 @@ def printf_text(format_, args, quotes=True):
         for match in PRINTF_CONVERSION.finditer(format_):
             place, flags, width, precision, conversion = match.groups(default="")
             if append(unescape(format_[position : match.start()], quotes)):
-                return clean("".join(out)) + CUT, False
+                return ScriptText(["".join(out)], PRINTF_TOO_LARGE_REASON), False
             position = match.end()
             if conversion == "%":
                 if append("%"):
-                    return clean("".join(out)) + CUT, False
+                    return ScriptText(["".join(out)], PRINTF_TOO_LARGE_REASON), False
                 continue
             if place and len(place) < 10:
                 used = max(int(place[:-1]) - 1, 0)
@@ -787,11 +798,11 @@ def printf_text(format_, args, quotes=True):
                 modelled = False
                 value = arg
             if append(value):
-                return clean("".join(out)) + CUT, False
+                return ScriptText(["".join(out)], PRINTF_TOO_LARGE_REASON), False
         if append(unescape(format_[position:], quotes)):
-            return clean("".join(out)) + CUT, False
+            return ScriptText(["".join(out)], PRINTF_TOO_LARGE_REASON), False
         if used >= len(args) or used == start:
-            return clean("".join(out)), modelled
+            return "".join(out), modelled
 
 
 def echoed_text(words):
@@ -802,7 +813,7 @@ def echoed_text(words):
     words and reads escapes; printf reads \\" \\' \\?).
     A text that does not parse falls back to fallback_stages, a word check that ignores quote characters and backslashes."""
     args = words[1:]
-    texts = [clean(" ".join(args).replace("\\n", "\n"))]
+    texts = [" ".join(args).replace("\\n", "\n")]
     if os.path.basename(words[0]) == "printf":
         while args[:1] == ["--"] or args[:1] == ["-v"]:
             args = args[2:] if args[0] == "-v" else args[1:]
@@ -810,30 +821,30 @@ def echoed_text(words):
             for quotes in (True, False):
                 text, modelled = printf_text(args[0], args[1:], quotes)
                 texts.append(text)
-            texts.append(texts[0] if modelled else clean("\n".join(args[1:])))
+            texts.append(texts[0] if modelled else "\n".join(args[1:]))
             texts.append(texts[1])
     else:
         options = ""
         while args and ECHO_OPTIONS.match(args[0]):
             options += args[0]
             args = args[1:]
-        plain, read = clean(" ".join(args)), clean(unescape(" ".join(args), False))
-        printed = clean(unescape(" ".join(words[1:]), False))
+        plain, read = " ".join(args), unescape(" ".join(args), False)
+        printed = unescape(" ".join(words[1:]), False)
         texts += [read if "e" in options else plain, read, plain, printed]
-    return VARIANT.join(texts)
+    return ScriptText(texts)
 
 
 def shell_programs(words):
     """Returns the code a shell runs: its -c program, else its stdin heredoc unless a script file is named; for ksh, also an operand it cannot open as a file."""
     name = os.path.basename(words[0]) if words else ""
     if name == "eval":
-        return [clean(" ".join(words[1:]))]
+        return [" ".join(words[1:])]
     if name not in SHELL_EXECUTABLES:
         return []
     heredocs = heredoc_bodies(words)
     command_mode, stdin_mode, _, operands = shell_args(words)
     if command_mode or (name == "ksh" and operands and not stdin_mode):
-        return [clean(operand) for operand in operands[:1]]
+        return operands[:1]
     return heredocs if stdin_mode or not operands else []
 
 
@@ -1040,19 +1051,27 @@ SCRIPT_SCAN_BUDGET = 512 * 1024
 
 
 def joined(texts):
-    """Joins texts that may each hold VARIANT readings, slot by slot; a text without a slot gives its first reading."""
-    parts = [text.split(VARIANT) for text in texts]
-    return VARIANT.join(
-        "\n".join(part[i] if i < len(part) else part[0] for part in parts)
-        for i in range(max(map(len, parts)))
+    """Joins readings slot by slot; a text without a slot gives its first reading."""
+    parts = [text_readings(text) for text in texts]
+    return ScriptText(
+        [
+            "\n".join(part[i] if i < len(part) else part[0] for part in parts)
+            for i in range(max(map(len, parts)))
+        ],
+        SCRIPT_TOO_LARGE_REASON
+        if any(isinstance(text, ScriptText) and text.too_large for text in texts)
+        else None,
     )
 
 
 def capped(text):
-    """Cuts each VARIANT piece of text at SCRIPT_SCAN_LIMIT and marks a cut piece with LARGE."""
-    return VARIANT.join(
-        piece[:SCRIPT_SCAN_LIMIT] + (LARGE if len(piece) > SCRIPT_SCAN_LIMIT else "")
-        for piece in text.split(VARIANT)
+    """Caps each reading and records truncation separately from shell source."""
+    pieces = text_readings(text)
+    return ScriptText(
+        [piece[:SCRIPT_SCAN_LIMIT] for piece in pieces],
+        SCRIPT_TOO_LARGE_REASON
+        if any(len(piece) > SCRIPT_SCAN_LIMIT for piece in pieces)
+        else getattr(text, "too_large", None),
     )
 
 
@@ -1086,7 +1105,7 @@ def script_text(path):
             data = handle.read(SCRIPT_SCAN_LIMIT)
     except OSError:
         return None
-    return None if b"\0" in data else clean(data.decode("utf-8", "replace"))
+    return None if b"\0" in data else data.decode("utf-8", "replace")
 
 
 def runs_as_shell(code):
@@ -1166,7 +1185,7 @@ def stdin_program(words, where, pipeline, redirects, env, written):
     """The code a shell without a script operand reads from a here-string, a file or the pipe before it."""
     for op, target in redirects:
         if op == "<<<":
-            return clean(target)
+            return target
         if op == "<":
             return written_or_disk_text(run_key(target, where, env), written)
     if len(pipeline) < 2:
@@ -1186,7 +1205,7 @@ def stdin_program(words, where, pipeline, redirects, env, written):
             key = run_key(arg, where, env)
             if size < SCRIPT_SCAN_LIMIT:
                 parts.append(written_or_disk_text(key, written))
-                size += max(map(len, parts[-1].split(VARIANT))) + 1
+                size += max(map(len, text_readings(parts[-1]))) + 1
         return capped(joined(parts or [""]))
     return None
 
@@ -1280,14 +1299,12 @@ class TooLarge(Exception):
 
 def code_kills(code, cwd, disabled, depth, state):
     """True when code a shell runs kills broadly, directly or through code it runs in turn."""
-    if CUT in code:
-        raise TooLarge(PRINTF_TOO_LARGE_REASON)
-    if LARGE in code:
-        raise TooLarge(SCRIPT_TOO_LARGE_REASON)
-    if VARIANT in code:
+    if isinstance(code, ScriptText):
+        if code.too_large:
+            raise TooLarge(code.too_large)
         return any(
             code_kills(piece, cwd, disabled, depth, state)
-            for piece in dict.fromkeys(code.split(VARIANT))
+            for piece in dict.fromkeys(code.readings)
         )
     code = bounded(code)
     state["left"] -= len(code)

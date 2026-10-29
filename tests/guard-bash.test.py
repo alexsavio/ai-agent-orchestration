@@ -1044,6 +1044,26 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         (scripts / fixture).write_text(text)
     (scripts / "rs.sh").write_text("killall \x1e node\n")
     (scripts / "us.sh").write_text("echo \x1f\n")
+    for marker in ("\x1d", "\x1e", "\x1f"):
+        name = f"kill{marker}.sh"
+        reference = f"bash ./{name}"
+        (scripts / name).write_text("pkill -f vite\n")
+        (scripts / f"ref{marker}.sh").write_text(reference + "\n")
+        for label, command in (
+            ("inline", f"bash -c {shlex.quote(reference)}"),
+            ("disk", f"bash ./ref{marker}.sh"),
+            ("printf", f"printf '%s\\n' {shlex.quote(reference)} | sh"),
+            (
+                "written",
+                f"echo {shlex.quote(reference)} > marker-ref.sh; bash marker-ref.sh",
+            ),
+        ):
+            case(
+                f"literal marker filename {ord(marker):x} via {label}",
+                command,
+                True,
+                scripts,
+            )
     (scripts / "dash").mkdir()
     (scripts / "dash" / "-").write_text("pkill -f vite\n")
     (scripts / "bin.sh").write_bytes(b"#!/bin/bash\npkill -f vite\n\0")
@@ -1767,7 +1787,7 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         assert reason and "script text" in reason and "printf" not in reason, reason
     reason = guard.evaluate("printf '" + PAD + "%s\\n' " + "x " * 70 + "| sh", scripts)
     assert reason and "printf output" in reason, reason
-    assert guard.echoed_text(["echo", "\\x70"]).split(guard.VARIANT) == [
+    assert list(guard.echoed_text(["echo", "\\x70"]).readings) == [
         "\\x70",
         "\\x70",
         "p",
@@ -1775,30 +1795,32 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         "p",
     ], "echo without -e: slot 1 keeps the text, slots 2 and 4 read it"
     for options in (["-e"], ["-Ee"], ["-n", "-e"], ["-e", "-n"]):
-        slots = guard.echoed_text(["echo", *options, "\\x70"]).split(guard.VARIANT)
+        slots = guard.echoed_text(["echo", *options, "\\x70"]).readings
         assert slots[1] == "p", f"echo {options}: slot 1 reads"
-    slots = guard.echoed_text(["echo", "-E", "\\x70"]).split(guard.VARIANT)
-    assert slots[1:3] == ["\\x70", "p"], "echo -E: slot 1 keeps the text, slot 2 reads"
-    assert (
-        guard.echoed_text(["echo", "-n", "\\x70"]).split(guard.VARIANT)[4] == "-n p"
-    ), "echo slot 4 keeps the option words"
-    assert guard.echoed_text(["printf", 'x\\"y']).split(guard.VARIANT) == [
+    slots = guard.echoed_text(["echo", "-E", "\\x70"]).readings
+    assert slots[1:3] == ("\\x70", "p"), "echo -E: slot 1 keeps the text, slot 2 reads"
+    assert guard.echoed_text(["echo", "-n", "\\x70"]).readings[4] == "-n p", (
+        "echo slot 4 keeps the option words"
+    )
+    assert list(guard.echoed_text(["printf", 'x\\"y']).readings) == [
         'x\\"y',
         'x"y',
         'x\\"y',
         'x\\"y',
         'x"y',
     ], "printf: slots 1 and 4 read the quote, slot 3 keeps the text"
-    pairs = guard.joined(["a\x1eb\x1ec\x1ed", "x\x1ey\x1ez"]).split(guard.VARIANT)
-    assert pairs == ["a\nx", "b\ny", "c\nz", "d\nx"], "a missing slot reads the first"
-    long_piece = guard.capped("a" * 200000 + guard.VARIANT + "b")
-    assert len(long_piece) == guard.SCRIPT_SCAN_LIMIT + 1 + 2, (
-        "capped keeps a long piece"
-    )
+    pairs = guard.joined(
+        [guard.ScriptText(["a", "b", "c", "d"]), guard.ScriptText(["x", "y", "z"])]
+    ).readings
+    assert pairs == ("a\nx", "b\ny", "c\nz", "d\nx"), "a missing slot reads the first"
+    long_piece = guard.capped(guard.ScriptText(["a" * 200000, "b"]))
+    assert long_piece.readings == ("a" * guard.SCRIPT_SCAN_LIMIT, "b")
+    assert long_piece.too_large == guard.SCRIPT_TOO_LARGE_REASON
     with patch.object(guard, "printf_value", wraps=guard.printf_value) as conversion:
         text, modelled = guard.printf_text("%1$s" * 10000, ["x" * 60000])
     assert conversion.call_count == 2, "printf must stop converting at the size limit"
-    assert text == "x" * guard.SCRIPT_SCAN_LIMIT + guard.CUT and not modelled
+    assert text == "x" * guard.SCRIPT_SCAN_LIMIT and not modelled
+    assert text.too_large == guard.PRINTF_TOO_LARGE_REASON
     text, modelled = guard.printf_text("x" * guard.SCRIPT_SCAN_LIMIT, [])
     assert len(text) == guard.SCRIPT_SCAN_LIMIT and modelled
     for format_ in (
@@ -1806,7 +1828,8 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         "x" * guard.SCRIPT_SCAN_LIMIT + "%%",
     ):
         text, modelled = guard.printf_text(format_, [])
-        assert text == "x" * guard.SCRIPT_SCAN_LIMIT + guard.CUT and not modelled
+        assert text == "x" * guard.SCRIPT_SCAN_LIMIT and not modelled
+        assert text.too_large == guard.PRINTF_TOO_LARGE_REASON
     assert time.perf_counter() - started < 3, "scan budget is not applied"
     assert not log_path.exists() or "scan-budget" not in log_path.read_text()
     for number in range(40):
