@@ -84,13 +84,11 @@ Check `test "${HERDR_ENV:-}" = 1` first. Inside Herdr, load the `herdr` skill an
 
 Before opening or creating a worker worktree, starting an agent, sending a brief, checking progress, or re-homing a Claude worker, read [references/dispatch.md](references/dispatch.md) and follow its complete command walkthrough. Always pass `--workspace`, check for an already-open path, choose the model explicitly, name the report path in every brief, and verify that a dispatch landed.
 
-**The layout is one Herdr workspace per initiative, with one worktree under it per agent:**
-
-
+**The layout is one Herdr workspace per initiative, with one worktree under it per agent** (illustration: [references/background.md](references/background.md)).
 
 Never move a worker's pane into another workspace as a tab. `pane move` closes the worker's own worktree workspace.
 
-**HARD RULE — tag every worker with its owner, in the same step that opens its workspace:** `herdr workspace report-metadata <worker-workspace-id> --source orchestrate --token owner="$HERDR_WORKSPACE_ID"`. The tree above is drawn from that tag, not from where the workspace sits. Herdr's Spaces panel always groups by git repo, so every worktree of a repo lands under that repo's first workspace whichever architect opened it. If Herdr Radar is installed (optional; `$ORCH_RADAR_PATH`), its Agents panel hangs each workspace under its `owner`, gives every group its own colour and a stripe down its left edge. An untagged worker shows up under the wrong architect. Re-tag it whenever a worker changes hands. Before reporting a dispatch done, confirm it: `herdr workspace get <worker-workspace-id>` shows `tokens.owner` equal to your workspace id.
+**HARD RULE — tag every worker with its owner, in the same step that opens its workspace:** `herdr workspace report-metadata <worker-workspace-id> --source orchestrate --token owner="$HERDR_WORKSPACE_ID"`. The tree is drawn from that tag, not from where the workspace sits. Herdr's Spaces panel always groups by git repo, so every worktree of a repo lands under that repo's first workspace whichever architect opened it. If Herdr Radar is installed (optional; `$ORCH_RADAR_PATH`), its Agents panel hangs each workspace under its `owner`, gives every group its own colour and a stripe down its left edge. An untagged worker shows up under the wrong architect. Re-tag it whenever a worker changes hands. Before reporting a dispatch done, confirm it: `herdr workspace get <worker-workspace-id>` shows `tokens.owner` equal to your workspace id.
 
 **Tag your own pane as the architect, once, when you start orchestrating:** `herdr pane report-metadata "$HERDR_PANE_ID" --source orchestrate --token role=architect`. Radar puts that pane first in its group, above any other pane in your workspace and above your workers, whatever their activity.
 
@@ -209,7 +207,7 @@ and never leave a pane spinning.
 Each round the worker polls its PR for new threads and for CI; verifies every review-bot claim against the
 code before accepting it (a bot is the most skeptical source, and is wrong often enough to matter);
 fixes what is real and proves the fix; replies with file:line evidence to what is not; replies to and
-resolves every thread either way; fixes CI, running the linter **and** the formatter; and re-requests
+resolves every thread either way; fixes CI; and re-requests
 the bot review after each push. If the bot review is a Copilot error ("Copilot encountered an error
 and was unable to review this pull request. You can try again by re-requesting a review."), do **not**
 re-request it: treat that PR as having no Copilot review.
@@ -248,14 +246,12 @@ Before you report a task complete, every line must hold:
 
 When something fails the gate, it goes back to the pane that owns the branch. You do not fix it.
 
-Report what actually happened: a survived mutation, a skipped check, a claim you could not verify.
+Report what actually happened: a survived mutation, a skipped check, a claim you could not verify, a claim that was disproved and how.
 
 
 ## Verification
 
 **A claim that affects an architectural decision must be independently verified before you act on it.** Agents and review bots state false things confidently — a missed directory in a grep becomes "this does not exist". Check it yourself, then decide.
-
-Report outcomes faithfully: if a mutation survived, say so; if a step was skipped, say so; if a claim was disproved, say which and how.
 
 ## Quota
 
