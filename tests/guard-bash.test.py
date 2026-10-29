@@ -1308,6 +1308,14 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             r"""echo 'p'"'"'k'"'"'ill -f vite\n"' | sh""",
         ),
         (
+            "backslash in a kill word of a text that does not parse",
+            r"""echo 'p\kill -f vite\n"' | sh""",
+        ),
+        (
+            "backslash in a kill word of an echo -e text that does not parse",
+            r"""echo -e 'p\kill -f vite\n"' | sh""",
+        ),
+        (
             "zsh echo -E append reads nothing",
             "printf '\"\\x22\\\"\\n' > m.sh; echo -E 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
         ),

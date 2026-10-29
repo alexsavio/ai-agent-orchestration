@@ -697,7 +697,7 @@ PRINTF_CONVERSION = re.compile(
     r"%(\d+\$)?([-+ #0]*)(\*|\d+)?(\.\*|\.\d*)?[hlLjqtz]*([a-zA-Z%])"
 )
 INTEGER = re.compile(r"\s*([-+]?)(0[xX][0-9a-fA-F]+|\d+)")
-QUOTES = str.maketrans("", "", "\"'")
+QUOTING = str.maketrans("", "", "\"'\\")
 VARIANT = "\x1e"
 CUT = "\x1f"
 LARGE = "\x1d"
@@ -788,7 +788,7 @@ def echoed_text(words):
     The readings are best-effort: they cover the common bash, zsh and sh readings, not every option of every shell.
     0 as written; 1 bash-like (echo reads escapes with -e; printf reads \\" \\' \\?); 2 zsh-like (echo reads escapes; printf keeps
     \\" \\' \\?); 3 nothing read (echo) or each argument on a line (printf). A text that does not parse falls back to
-    fallback_stages, a word check that ignores quotes."""
+    fallback_stages, a word check that ignores quote characters and backslashes."""
     args = words[1:]
     texts = [clean(" ".join(args).replace("\\n", "\n"))]
     if os.path.basename(words[0]) == "printf":
@@ -865,9 +865,9 @@ def shell_program_kills(stages, depth):
 
 
 def fallback_stages(text):
-    """Words of a text that does not parse, split at shell operators with quotes dropped, so p"k"ill still reads as pkill."""
+    """Words of a text that does not parse, split at shell operators with quote characters and backslashes dropped, so p"k"ill and p\\kill read as pkill."""
     return [
-        unwrap(part.translate(QUOTES).split())
+        unwrap(part.translate(QUOTING).split())
         for part in re.split(r"[;&|()\n`]|\$\(", text)
     ]
 
