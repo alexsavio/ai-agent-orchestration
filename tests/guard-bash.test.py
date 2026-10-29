@@ -1773,6 +1773,9 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         assert slots[1] == "p", f"echo {options}: slot 1 reads"
     slots = guard.echoed_text(["echo", "-E", "\\x70"]).split(guard.VARIANT)
     assert slots[1:3] == ["\\x70", "p"], "echo -E: slot 1 keeps the text, slot 2 reads"
+    assert (
+        guard.echoed_text(["echo", "-n", "\\x70"]).split(guard.VARIANT)[4] == "-n p"
+    ), "echo slot 4 keeps the option words"
     assert guard.echoed_text(["printf", 'x\\"y']).split(guard.VARIANT) == [
         'x\\"y',
         'x"y',
