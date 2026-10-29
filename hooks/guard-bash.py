@@ -867,7 +867,7 @@ def shell_program_kills(stages, depth):
 def fallback_stages(text):
     """Words of a text that does not parse, split at shell operators with quotes dropped, so p"k"ill still reads as pkill."""
     return [
-        unwrap([word for word in part.translate(QUOTES).split() if word])
+        unwrap(part.translate(QUOTES).split())
         for part in re.split(r"[;&|()\n`]|\$\(", text)
     ]
 
