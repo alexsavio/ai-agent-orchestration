@@ -697,6 +697,7 @@ PRINTF_CONVERSION = re.compile(
     r"%(\d+\$)?([-+ #0]*)(\*|\d+)?(\.\*|\.\d*)?[hlLjqtz]*([a-zA-Z%])"
 )
 INTEGER = re.compile(r"\s*([-+]?)(0[xX][0-9a-fA-F]+|\d+)")
+QUOTES = str.maketrans("", "", "\"'")
 VARIANT = "\x1e"
 CUT = "\x1f"
 LARGE = "\x1d"
@@ -783,10 +784,11 @@ def printf_text(format_, args, quotes=True):
 
 
 def echoed_text(words):
-    """Returns the readings of the text echo or printf writes, one fixed slot each, and slot i is the same shell in both:
-    0 as written, 1 bash (echo reads escapes only with -e; printf reads \\" \\' \\?), 2 zsh, sh and dash (echo reads escapes
-    even with -E, which sh prints; printf keeps \\" \\' \\?), 3 nothing read (echo) or each argument on a line (printf).
-    No shell's echo reads \\" \\' \\?."""
+    """Returns the readings of the text echo or printf writes, one fixed slot each, so an append or cat pairs slot with slot.
+    The readings are best-effort: they cover the common bash, zsh and sh readings, not every option of every shell.
+    0 as written; 1 bash-like (echo reads escapes with -e; printf reads \\" \\' \\?); 2 zsh-like (echo reads escapes; printf keeps
+    \\" \\' \\?); 3 nothing read (echo) or each argument on a line (printf). A text that does not parse falls back to
+    fallback_stages, a word check that ignores quotes."""
     args = words[1:]
     texts = [clean(" ".join(args).replace("\\n", "\n"))]
     if os.path.basename(words[0]) == "printf":
@@ -863,7 +865,11 @@ def shell_program_kills(stages, depth):
 
 
 def fallback_stages(text):
-    return [unwrap(part.split()) for part in re.split(r"[;&|()\n`]|\$\(", text)]
+    """Words of a text that does not parse, split at shell operators with quotes dropped, so p"k"ill still reads as pkill."""
+    return [
+        unwrap([word for word in part.translate(QUOTES).split() if word])
+        for part in re.split(r"[;&|()\n`]|\$\(", text)
+    ]
 
 
 def ps_lists_processes(args):

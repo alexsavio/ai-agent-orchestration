@@ -1304,6 +1304,58 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             'printf \'echo "\\"\\n\' > m.sh; echo -e \'p"k"il\\x6c -f vite \\"\' >> m.sh; bash m.sh',
         ),
         (
+            "zsh echo -E append reads nothing",
+            "printf '\"\\x22\\\"\\n' > m.sh; echo -E 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
+        ),
+        (
+            "zsh echo -E cat reads nothing",
+            "printf '\"\\x22\\\"\\n' > m.sh; echo -E 'p\"k\"ill -f vite \\x27' > n.sh; cat m.sh n.sh | sh",
+        ),
+        (
+            "zsh echo -nE append reads nothing",
+            "printf '\"\\x22\\\"\\n' > m.sh; echo -nE 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo octal without a leading zero append",
+            "printf '\"\\x22\\\"\\n' > m.sh; echo 'p\"k\"ill -f vite \\47' >> m.sh; bash m.sh",
+        ),
+        (
+            "sh heredoc writes and runs a script",
+            "sh <<'EOF'\nprintf 'echo \"\\\"\\n' > m.sh; echo 'p\"k\"il\\x6c -f vite' >> m.sh\nsh m.sh\nEOF",
+        ),
+        (
+            "sh heredoc writes two scripts and cats them",
+            "sh <<'EOF'\nprintf 'echo \"\\\"\\n' > m.sh; echo 'p\"k\"il\\x6c -f vite' > n.sh\ncat m.sh n.sh | sh\nEOF",
+        ),
+        (
+            "echo -eE append, bash takes the last option",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -eE 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo -e -E append, bash takes the last option",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -e -E 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo -e octal without a leading zero append",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -e 'p\"k\"ill -f vite \\47' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo without -e whose escape bash keeps, append",
+            "printf 'echo \"\\\"\\n' > m.sh; echo 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo -Ee append, last option wins",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -Ee 'p\"k\"il\\x6c -f vite' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo -e -n append, second option word",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -e -n 'p\"k\"il\\x6c -f vite' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo -n -e append, first option word",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -n -e 'p\"k\"il\\x6c -f vite' >> m.sh; bash m.sh",
+        ),
+        (
             "append of a plain echo to a printf with a backslash quote",
             'printf \'echo "\\"\\n\' > m.sh; echo \'p"k"ill -f vite \\"\' >> m.sh; bash m.sh',
         ),
@@ -1625,6 +1677,18 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("echo -e of a kill, never run", "echo -e 'pkill -f vite' > notes.md"),
         ("overwrite of a script on disk", "echo 'echo hi' > kills.sh; bash kills.sh"),
         ("echo a lone dash", "echo - hi | sh"),
+        (
+            "echo of an unterminated quote piped to a shell",
+            "echo 'echo \"unterminated' | sh",
+        ),
+        (
+            "echo of an apostrophe piped to a shell",
+            "echo 'say \"it'\"'\"'s\" done' | sh",
+        ),
+        (
+            "echo of a sentence with an apostrophe piped to a shell",
+            'echo "don\'t wait for me" | sh',
+        ),
         ("wide printf padding piped to a shell", "printf 'echo %70000s\\n' x | sh"),
         (
             "big printf to a file, never run",
