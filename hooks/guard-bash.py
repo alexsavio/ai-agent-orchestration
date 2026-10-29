@@ -1343,7 +1343,7 @@ def code_kills(code, cwd, disabled, depth, state):
 
 def guard_script_kill(raw, cwd, disabled):
     """Denies a broad kill in code a command runs: inline shell text, shell stdin, a script it writes or a script on disk.
-    An error or an exhausted budget ends only this scan; the other guards still run."""
+    An exhausted budget denies unscanned shell code; other scan errors are logged."""
     try:
         entries = command_entries(raw, cwd)
     except ValueError:
@@ -1364,6 +1364,7 @@ def guard_script_kill(raw, cwd, disabled):
         return str(exc)
     except ScanBudget as exc:
         log_failure(exc, raw, "scan-budget")
+        return "script scan budget exhausted with shell code left unchecked; split the command into smaller scripts."
     except Exception as exc:
         log_failure(exc, raw, "scan-error")
     return None

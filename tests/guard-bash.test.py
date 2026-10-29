@@ -1869,8 +1869,17 @@ pkill -f vite
     for number in range(40):
         (scripts / f"bulk{number}.sh").write_text("echo ok\n" * 7500)
     bulk = "; ".join(f"bash {scripts}/bulk{number}.sh" for number in range(40))
-    assert not guard.evaluate(bulk, repo)
+    assert "budget exhausted" in guard.evaluate(bulk, repo)
     assert "scan-budget" in log_path.read_text()
+    harmless = "echo -e '" + "echo \\x41\\x42 " * 4000 + "'"
+    exhausted = (harmless + " | sh; ") * 3
+    reason = guard.evaluate(exhausted + "printf 'pkill -f vite\\n' | sh", scripts)
+    assert reason and "budget exhausted" in reason, reason
+    assert not guard.evaluate((harmless + " >> run.log; ") * 3, scripts)
+    assert not guard.evaluate((harmless + " | wc -c; ") * 3, scripts)
+    with patch.object(guard.time, "monotonic", side_effect=[0, 6]):
+        reason = guard.evaluate("echo hi | sh", scripts)
+    assert reason and "budget exhausted" in reason, reason
     log_before = log_path.read_text()
     saved_runs = guard.runs
 
@@ -1991,7 +2000,7 @@ pkill -f vite
     guard.SCRIPT_SCAN_SECONDS = -1
     try:
         result, new_log = logged(f"bash {scripts}/kills.sh", repo)
-        assert not result and "scan-budget" in new_log, (result, new_log)
+        assert result and "budget exhausted" in result and "scan-budget" in new_log, (result, new_log)
         result, new_log = logged(f"bash {scripts}/kills.sh; git stash", wt)
         assert result and "scan-budget" in new_log, (result, new_log)
     finally:
