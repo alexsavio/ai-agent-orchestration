@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ["ORCH_ENV"] = "none"
 
@@ -28,7 +29,7 @@ def git(path, *args):
     ).stdout.strip()
 
 
-def hook(command, cwd):
+def hook(command, cwd, timeout=20):
     payload = json.dumps(
         {"tool_name": "Bash", "cwd": str(cwd), "tool_input": {"command": command}}
     )
@@ -38,7 +39,7 @@ def hook(command, cwd):
             input=payload,
             capture_output=True,
             text=True,
-            timeout=20,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(HOOK, "timeout", "", "guard timed out")
@@ -938,6 +939,7 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         "killall puma",
     ):
         case(command, command, True)
+    PAD = ": " + "x" * 1000 + "\\n"
     scripts = root / "scripts"
     scripts.mkdir()
     killing = scripts / "kills.sh"
@@ -1040,6 +1042,29 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     }
     for fixture, text in fixtures.items():
         (scripts / fixture).write_text(text)
+    (scripts / "rs.sh").write_text("killall \x1e node\n")
+    (scripts / "us.sh").write_text("echo \x1f\n")
+    (scripts / "seen-safe.sh").write_text("echo safe\n")
+    for marker in ("\x1d", "\x1e", "\x1f"):
+        name = f"kill{marker}.sh"
+        reference = f"bash ./{name}"
+        (scripts / name).write_text("pkill -f vite\n")
+        (scripts / f"ref{marker}.sh").write_text(reference + "\n")
+        for label, command in (
+            ("inline", f"bash -c {shlex.quote(reference)}"),
+            ("disk", f"bash ./ref{marker}.sh"),
+            ("printf", f"printf '%s\\n' {shlex.quote(reference)} | sh"),
+            (
+                "written",
+                f"echo {shlex.quote(reference)} > marker-ref.sh; bash marker-ref.sh",
+            ),
+        ):
+            case(
+                f"literal marker filename {ord(marker):x} via {label}",
+                command,
+                True,
+                scripts,
+            )
     (scripts / "dash").mkdir()
     (scripts / "dash" / "-").write_text("pkill -f vite\n")
     (scripts / "bin.sh").write_bytes(b"#!/bin/bash\npkill -f vite\n\0")
@@ -1048,6 +1073,8 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     late.write_text("echo ok\n" * 12000 + "pkill -f vite\n")
     big = scripts / "big.sh"
     big.write_text('if [ -n "$X" ]; then echo "checking $X" >&5; fi\n' * 6000)
+    for name in ("a40.sh", "b40.sh"):
+        (scripts / name).write_text("echo ok\n" * 5000)
     many = scripts / "many.sh"
     many.write_text("cat <<EOF\n" * 6000)
     repro = "cat > repro.sh <<'EOF'\npkill -f vite\nEOF\n"
@@ -1096,6 +1123,416 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "tee -- -guard.sh <<'EOF'\nkill -9 -1\nEOF\nsh -- -guard.sh",
         ),
         ("printf %s written script", "printf '%s' 'pkill -f vite' > k.sh; bash k.sh"),
+        ("printf %q followed by a literal", "printf '%qkill -f vite\\n' p | sh"),
+        (
+            "echo last -eE flag keeps escapes in a paired append",
+            r"""printf 'echo "\x22\n' > m.sh; echo -eE 'echo "\x22"
+pkill -f vite
+# "' >> m.sh; bash m.sh""",
+        ),
+        (
+            "echo last separate -E flag keeps escapes in a paired append",
+            r"""printf 'echo "\x22\n' > m.sh; echo -e -E 'echo "\x22"
+pkill -f vite
+# "' >> m.sh; bash m.sh""",
+        ),
+        (
+            "decoded reading revisits a rewritten disk script",
+            r"""echo -e '\0145cho "pkill -f vite" > seen-safe.sh; bash seen-safe.sh' | sh""",
+        ),
+        (
+            "printf %b preserves quote escapes",
+            r"""printf '%b\n' 'echo \"\n\x70kill -f vite\n\"' | sh""",
+        ),
+        ("echo after a lone dash", "echo - 'pkill -f vite' | sh"),
+        (
+            "printf format reuse past the scan budget",
+            "printf '"
+            + "#" * 4000
+            + "%s\\n' "
+            + "a " * 150
+            + "| sh; echo 'pkill -f vite' | sh",
+        ),
+        (
+            "printf reused format, kill argument past the cut",
+            "printf '"
+            + " " * 4000
+            + "%s\\n' "
+            + "a " * 99
+            + "'pkill -f vite' "
+            + "a " * 50
+            + "| sh",
+        ),
+        ("printf argument position 2", "printf 'kill -9 %2$s\\n' x -1 | sh"),
+        (
+            "printf arguments swapped by position",
+            "printf '%2$s %1$s\\n' -1 'kill -9' | sh",
+        ),
+        (
+            "printf one argument repeated past the cut",
+            "printf '" + "%1$s" * 100 + "' " + "a" * 60000 + " | sh; bash kills.sh",
+        ),
+        ("printf %d with a leading blank", "printf 'kill -9 %d\\n' ' -1' | sh"),
+        ("printf width splits a word", "printf 'pkill%2s-f vite\\n' | sh"),
+        ("printf width splits a pid", "printf 'kill -9%3d\\n' -1 | sh"),
+        (
+            "printf width splits a word in a written script",
+            "printf 'pkill%2s-f vite\\n' > k.sh; bash k.sh",
+        ),
+        (
+            "printf position too long to read",
+            "printf '%" + "9" * 4301 + "$s\\n' x; bash kills.sh",
+        ),
+        (
+            "printf kill built from format and argument past the cut",
+            "printf '" + PAD + "p%s\\n' " + "x " * 70 + "'kill -f vite' | sh",
+        ),
+        (
+            "printf kill built from two arguments past the cut",
+            "printf '" + PAD + "%s%s\\n' " + "true '' " * 70 + "pk 'ill -f vite' | sh",
+        ),
+        (
+            "printf %b kill past the cut",
+            "printf '" + PAD + "%b\\n' " + "true " * 70 + "'\\160kill -f vite' | sh",
+        ),
+        (
+            "printf long width splits a word",
+            "printf 'pkill%99999999999s-f vite\\n' | sh",
+        ),
+        (
+            "printf width of thousands of digits splits a word",
+            "printf 'pkill%" + "9" * 4301 + "s-f vite\\n' | sh",
+        ),
+        (
+            "printf long position, kill in an argument",
+            "printf '%9999999999$s' x 'pkill -f vite' | sh",
+        ),
+        (
+            "printf cut text written, then catted to a shell",
+            "printf '" + PAD + "%s\\n' " + "x " * 70 + " > big.txt; cat big.txt | sh",
+        ),
+        (
+            "printf cut text written, appended to, then run",
+            "printf '"
+            + PAD
+            + "%s\\n' "
+            + "x " * 70
+            + " > big.sh; echo done >> big.sh; bash big.sh",
+        ),
+        (
+            "append whose printf text has a lone quote",
+            "echo 'p\"k\"ill -f vite' > a.sh; printf '%1$s%1$s\\n' '\"' >> a.sh; bash a.sh",
+        ),
+        (
+            "cat of a printf text with a lone quote",
+            "printf 'p\"k\"ill -f vite\\n%1$s%1$s\\n' '\"' > a.sh; echo hi > b.sh; cat a.sh b.sh | sh",
+        ),
+        (
+            "printf cut text written and run",
+            "printf '" + PAD + "%s\\n' " + "x " * 70 + "> big.sh; bash big.sh",
+        ),
+        (
+            "printf quote escape leaves a lone quote",
+            'printf \'p"k"ill -f vite\\n\\"\\n\' | sh',
+        ),
+        (
+            "printf single quote escape leaves a lone quote",
+            "printf 'p\"k\"ill -f vite\\n\\'\"'\"'\\n' | sh",
+        ),
+        (
+            "printf cut inside a quoted argument",
+            "printf 'p\"k\"ill -f vite\\n%s\\n' \"'" + "x" * 70000 + "'\" | sh",
+        ),
+        ("printf precision on a number", "printf 'kill -9 %.2d\\n' -1 | sh"),
+        ("printf single quote escape", "printf \"p\\'\\'kill -f vite\\n\" | sh"),
+        (
+            "printf escape makes the variant byte",
+            "printf 'killall \\036 \\156ode\\n' | sh",
+        ),
+        (
+            "echo -e hex escape makes the variant byte",
+            "echo -e 'killall \\x1e \\x6eode' | sh",
+        ),
+        (
+            "echo -e variant byte in a written script",
+            "echo -e 'killall \\x1e \\x6eode' > w.sh; bash w.sh",
+        ),
+        (
+            "printf variant byte in kill arguments",
+            "printf 'kill -9 \\036 -1\\n' > w.sh; zsh w.sh",
+        ),
+        (
+            "quote kill found only in the kept escape reading",
+            'printf \'p"\\x6b"ill -f vite\\n\\"\\n\' | sh',
+        ),
+        (
+            "single quote kill found only in the kept escape reading",
+            "printf 'p\"\\x6b\"ill -f vite\\n\\'\"'\"'\\n' | sh",
+        ),
+        (
+            "cat of a lone quote script and a quoted kill",
+            "printf '\\\"\\n' > a.sh; echo 'p\"k\"ill -f vite' > b.sh; cat a.sh b.sh | sh",
+        ),
+        (
+            "kept escape reading before a conversion",
+            'printf \'p"\\x6b"ill -f vite\\n\\"%s\\n\' x | sh',
+        ),
+        ("printf width of a kill word", "printf 'pk%1sll -f vite\\n' i | sh"),
+        ("printf width of a pid", "printf 'kill -9 -%1d\\n' 1 | sh"),
+        (
+            "append wrapped across readings",
+            "printf '\"\\x22\\\"\\n' > a.sh; printf 'p\"\\x6b\"ill -f vite\\n' >> a.sh; bash a.sh",
+        ),
+        ("separator byte typed in a heredoc", "bash <<'EOF'\nkillall \x1e node\nEOF"),
+        ("separator byte typed in eval", "eval 'killall \x1e node'"),
+        ("separator byte typed in bash -c", "bash -c 'killall \x1e node'"),
+        ("separator byte typed in a here-string", "bash <<< 'killall \x1e node'"),
+        ("separator byte in a script on disk", "bash rs.sh"),
+        ("separator byte typed in echo", "echo 'killall \x1e node' | sh"),
+        (
+            "separator byte typed in a printf argument",
+            "printf '%f\\n' 'killall \x1e node' | sh",
+        ),
+        (
+            "cat of two files past the scan limit",
+            "printf ': "
+            + "x" * 40000
+            + "\\n' > a.sh; printf ': "
+            + "x" * 40000
+            + "\\n' > b.sh; cat a.sh b.sh | sh",
+        ),
+        ("printf zero flag on a pid", "printf 'kill -9 %05d\\n' -1 | sh"),
+        (
+            "printf left-justified width after a pid",
+            "printf 'kill -9 %-3dx\\n' -1 | sh",
+        ),
+        (
+            "append whose readings pair across texts",
+            'printf \'"\\x22\\"\\n\' > m.sh; printf \'p"k"ill -f vite \\"\\n\' >> m.sh; bash m.sh',
+        ),
+        (
+            "cat whose readings pair across texts",
+            'printf \'"\\x22\\"\\n\' > m.sh; printf \'p"k"ill -f vite \\"\\n\' > n.sh; cat m.sh n.sh | sh',
+        ),
+        (
+            "append of an echo whose readings pair across texts",
+            'printf \'"\\x22\\"\\n\' > m.sh; echo -e \'p"k"ill -f vite \\"\' >> m.sh; bash m.sh',
+        ),
+        (
+            "echo -e keeps a backslash quote the shell keeps",
+            'echo -e \'p"k"il\\x6c -f vite \\"\' | sh',
+        ),
+        (
+            "echo keeps a backslash quote the shell keeps",
+            'echo \'p"k"il\\x6c -f vite \\"\' | sh',
+        ),
+        (
+            "echo -E in a shell that prints the option and reads escapes",
+            "echo -E 'x\\0012pkill -f vite' | sh",
+        ),
+        (
+            "echo -n in a shell that prints the option and reads escapes",
+            "echo -n 'x\\0012pkill -f vite' | sh",
+        ),
+        (
+            "echo -e kill before a hex quote escape",
+            "echo -e 'p\"k\"ill -f vite\\n\\x27' | sh",
+        ),
+        (
+            "append of an echo -e with an escape to a printf that pairs across texts",
+            'printf \'"\\x22\\"\\n\' > m.sh; echo -e \'p"k"il\\x6c -f vite \\"\' >> m.sh; bash m.sh',
+        ),
+        (
+            "append of an echo -e with an escape to a printf with a backslash quote",
+            'printf \'echo "\\"\\n\' > m.sh; echo -e \'p"k"il\\x6c -f vite \\"\' >> m.sh; bash m.sh',
+        ),
+        (
+            "single-quoted kill word before a lone double quote",
+            r"""echo 'p'"'"'k'"'"'ill -f vite\n"' | sh""",
+        ),
+        (
+            "backslash in a kill word of a text that does not parse",
+            r"""echo 'p\kill -f vite\n"' | sh""",
+        ),
+        (
+            "backslash in a kill word of an echo -e text that does not parse",
+            r"""echo -e 'p\kill -f vite\n"' | sh""",
+        ),
+        (
+            "zsh echo -E append reads nothing",
+            "printf '\"\\x22\\\"\\n' > m.sh; echo -E 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
+        ),
+        (
+            "zsh echo -E cat reads nothing",
+            "printf '\"\\x22\\\"\\n' > m.sh; echo -E 'p\"k\"ill -f vite \\x27' > n.sh; cat m.sh n.sh | sh",
+        ),
+        (
+            "zsh echo -nE append reads nothing",
+            "printf '\"\\x22\\\"\\n' > m.sh; echo -nE 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo octal without a leading zero append",
+            "printf '\"\\x22\\\"\\n' > m.sh; echo 'p\"k\"ill -f vite \\47' >> m.sh; bash m.sh",
+        ),
+        (
+            "sh heredoc writes and runs a script",
+            "sh <<'EOF'\nprintf 'echo \"\\\"\\n' > m.sh; echo 'p\"k\"il\\x6c -f vite' >> m.sh\nsh m.sh\nEOF",
+        ),
+        (
+            "sh heredoc writes two scripts and cats them",
+            "sh <<'EOF'\nprintf 'echo \"\\\"\\n' > m.sh; echo 'p\"k\"il\\x6c -f vite' > n.sh\ncat m.sh n.sh | sh\nEOF",
+        ),
+        (
+            "echo -eE append, bash takes the last option",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -eE 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo -e -E append, bash takes the last option",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -e -E 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo -e octal without a leading zero append",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -e 'p\"k\"ill -f vite \\47' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo without -e whose escape bash keeps, append",
+            "printf 'echo \"\\\"\\n' > m.sh; echo 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
+        ),
+        (
+            "plain echo append, the escape read in the zsh reading alone",
+            "printf 'echo \\\"\\n' > m.sh; echo '\\x70kill -f vite # \"' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo -e piped to a shell, the text no shell reads is the only kill",
+            "echo -e ''\"'\"'\\\\pkill -f vite\\47' | sh",
+        ),
+        (
+            "echo -e append to a printf quote, the unread text is the only kill",
+            "echo -e \"'pkill -f vite\" >> m.sh; printf '\\47\\n' >> m.sh; sh m.sh",
+        ),
+        (
+            "macOS sh append, echo escapes read with a printf quote read",
+            "printf 'echo \"\\\"\\n' > m.sh; echo '\\x70kill -f vite # \"' >> m.sh; sh m.sh",
+        ),
+        (
+            "append of a plain echo to a printf with a backslash quote",
+            'printf \'echo "\\"\\n\' > m.sh; echo \'p"k"ill -f vite \\"\' >> m.sh; bash m.sh',
+        ),
+        (
+            "append of an echo with an escape to a printf that pairs across texts",
+            'printf \'"\\x22\\"\\n\' > m.sh; echo \'p"k"il\\x6c -f vite \\"\' >> m.sh; bash m.sh',
+        ),
+        (
+            "cat of a printf and an echo whose readings pair across texts",
+            'printf \'"\\x22\\"\\n\' > m.sh; echo \'p"k"ill -f vite \\"\' > n.sh; cat m.sh n.sh | sh',
+        ),
+        (
+            "cat of a printf and a heredoc whose readings pair across texts",
+            "printf 'echo \"\\\"\\n' > m.sh; cat > q.sh <<'EOF'\np\"k\"ill -f vite\nEOF\ncat m.sh q.sh | sh",
+        ),
+        (
+            "heredoc append to a printf whose readings pair across texts",
+            "printf 'echo \"\\\"\\n' > m.sh; cat >> m.sh <<'EOF'\np\"k\"ill -f vite\nEOF\nbash m.sh",
+        ),
+        (
+            "repeated echo text and a script, each under the scan budget alone",
+            "echo '" + "\n".join([": " + "x" * 1000] * 180) + "' | sh; bash kills.sh",
+        ),
+        ("cat of two disk files past the scan limit", "cat a40.sh b40.sh | sh"),
+        (
+            "append to a disk file past the scan limit",
+            "echo 'echo done' >> big.sh; bash big.sh",
+        ),
+        (
+            "append to a disk file past the scan limit, sourced",
+            "echo 'alias ll=ls' >> big.sh && source big.sh",
+        ),
+        (
+            "many appends past the scan limit, then run",
+            "echo hi > a.sh; " + ("printf '" + PAD + "' >> a.sh; ") * 100 + "bash a.sh",
+        ),
+        (
+            "tee --append to a script on disk",
+            "tee --append kills.sh <<'EOF'\necho done\nEOF\nbash kills.sh",
+        ),
+        (
+            "tee combined option append",
+            "tee -ia kills.sh <<'EOF'\necho done\nEOF\nbash kills.sh",
+        ),
+        (
+            "append of a kill to a clean script",
+            "echo 'pkill -f vite' >> clean.sh; bash clean.sh",
+        ),
+        ("printf grouping flag", 'printf "%\'s %\'s" pkill "-f vite" | sh'),
+        (
+            "printf escaped positional dollars",
+            'printf "%2\\$s %1\\$s" "-f vite" pkill | sh',
+        ),
+        (
+            "printf unknown percent before conversion",
+            "printf '%! %s' pkill '-f vite' | sh",
+        ),
+        (
+            "printf unknown percent after conversion",
+            "printf '%s %!' pkill '-f vite' | sh",
+        ),
+        ("printf length modifier", "printf 'kill -9 %ld\\n' -1 | sh"),
+        ("printf argument position", "printf '%1$s' 'pkill -f vite' | sh"),
+        ("printf %d with leading zeros", "printf 'kill -9 %d\\n' -01 | sh"),
+        ("printf %d with a decimal point", "printf 'kill -9 %d\\n' -1.0 | sh"),
+        (
+            "printf quote escape in the format",
+            "env printf 'p\\\"\\\"kill -f vite\\n' | sh",
+        ),
+        (
+            "printf width past the scan budget",
+            "printf 'pkill -f vite\\n%600000s' x | sh",
+        ),
+        (
+            "printf precision past the scan budget",
+            "printf 'pkill -f vite\\n%.600000d' 1 | sh",
+        ),
+        (
+            "printf width too big to build",
+            "printf '%9223372036854775807s' x; bash kills.sh",
+        ),
+        ("append to a script on disk", "echo 'echo done' >> kills.sh; bash kills.sh"),
+        ("append then shell stdin", "echo 'echo done' >> kills.sh; sh < kills.sh"),
+        (
+            "tee append to a script on disk",
+            "tee -a kills.sh <<'EOF'\necho done\nEOF\nbash kills.sh",
+        ),
+        (
+            "append after a written kill",
+            "echo 'pkill -f vite' > w.sh; echo 'echo done' >> w.sh; bash w.sh",
+        ),
+        (
+            "printf width argument before the kill line",
+            "printf '%*s\\nkill -9 %s\\n' 1 x -1 | sh",
+        ),
+        (
+            "printf argument position on its own line",
+            "printf '%1$s\\n' 'pkill -f vite' | sh",
+        ),
+        ("printf %d with a hex number", "printf 'kill -9 %d\\n' -0x1 | sh"),
+        (
+            "wrapper alone piped to a shell, then a script",
+            "command | sh; bash kills.sh",
+        ),
+        ("printf by path", "/usr/bin/printf '%s' 'pkill -f vite' | sh"),
+        ("echo -E piped to a shell", "echo -E 'pkill -f vite' | sh"),
+        (
+            "printf octal escape without a leading zero",
+            "printf '\\160kill -f vite\\n' | sh",
+        ),
+        ("printf octal newline", "printf 'echo hi\\12pkill -f vite\\n' | sh"),
+        ("printf one-digit hex newline", "printf 'echo hi\\xapkill -f vite\\n' | sh"),
+        ("printf flag on %s", "printf '%-s' 'pkill -f vite' | sh"),
+        ("printf width argument taken in place", "printf 'kill -9 %*s\\n' 0 -1 | sh"),
+        (
+            "printf format without conversions and an argument",
+            "printf 'pkill -f vite\\n' x | sh",
+        ),
         (
             "printf format with the kill operand as an argument",
             "printf 'kill -9 %s\\n' -1 > k.sh; bash k.sh",
@@ -1310,24 +1747,157 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "printf '%s\\n' 'echo hi' > k.sh; bash k.sh",
         ),
         ("echo -e of a kill, never run", "echo -e 'pkill -f vite' > notes.md"),
+        ("overwrite of a script on disk", "echo 'echo hi' > kills.sh; bash kills.sh"),
+        ("echo a lone dash", "echo - hi | sh"),
+        (
+            "echo of a backslash quote inside a kill word, piped to a shell",
+            "echo 'p\\\"kill -f vite' | sh",
+        ),
+        (
+            "echo of an unterminated quote piped to a shell",
+            "echo 'echo \"unterminated' | sh",
+        ),
+        (
+            "echo of an apostrophe piped to a shell",
+            "echo 'say \"it'\"'\"'s\" done' | sh",
+        ),
+        (
+            "echo of a sentence with an apostrophe piped to a shell",
+            'echo "don\'t wait for me" | sh',
+        ),
+        ("wide printf padding piped to a shell", "printf 'echo %70000s\\n' x | sh"),
+        (
+            "big printf to a file, never run",
+            "printf '" + PAD + "%s\\n' " + "x " * 70 + "> big.txt",
+        ),
+        (
+            "big printf to a pipe that is no shell",
+            "printf '" + PAD + "%s\\n' " + "x " * 70 + "| wc -l",
+        ),
+        (
+            "big printf written, script run is another file",
+            "printf '" + PAD + "%s\\n' " + "x " * 70 + "> big.txt; bash clean.sh",
+        ),
+        (
+            "printf width and precision",
+            "printf '%-10s|%5d|%.2s\\n' a 3 xyz > table.txt",
+        ),
+        ("printf separator byte inside a word", "printf 'p\\036kill -f vite\\n' | sh"),
+        ("printf separator byte inside a pid", "printf 'kill -9 \\036-1\\n' | sh"),
+        ("unit separator byte in a script on disk", "bash us.sh"),
+        ("cat of a file of 64 KB or more", "cat big.sh | sh"),
+        ("printf group separator byte, run", "printf 'echo \\035\\n' | sh"),
+        ("echo separator byte after a kill word", "echo 'pkill\x1e -f vite' | sh"),
+        (
+            "printf argument separator byte after a kill word",
+            "printf '%f\\n' 'pkill\x1e -f vite' | sh",
+        ),
+        ("printf unit separator byte, run", "printf 'echo \\037\\n' | sh"),
+        (
+            "printf unit separator byte in a written script, run",
+            "printf 'echo \\037\\n' > a.sh; bash a.sh",
+        ),
         (
             "tee after the option terminator, never run",
             "tee -- -notes.md <<'EOF'\npkill -f vite\nEOF",
         ),
     ]:
         case(name, command, False, scripts)
+    zeros = "0" * 65536
+    for command, deny in (
+        ("printf '%" + zeros + "!'", False),
+        ("printf '%" + zeros + "!' > out.txt; pkill -f vite", True),
+        ("printf '%" + zeros + "!' | wc -c", False),
+        ("echo '%" + zeros + "!' > out.txt", False),
+    ):
+        start = time.perf_counter()
+        result = hook(command, scripts, timeout=1)
+        elapsed = time.perf_counter() - start
+        assert result.returncode == (2 if deny else 0), (result, elapsed)
+        assert elapsed < 1, f"64 KB zero format took {elapsed:.3f}s"
+        print(f"64 KB zero format {command[:12]!r}: {elapsed:.3f}s")
     started = time.perf_counter()
     log_path = Path.home() / ".claude/hooks/guard-bash.log"
     assert not guard.evaluate(f"bash {scripts}/fan.sh", repo)
     cat_many = "cat " + f"{scripts}/big.sh " * 100 + "| bash"
     assert not guard.evaluate(cat_many, repo)
+    for command in (
+        "cat a40.sh b40.sh | sh",
+        "echo 'echo done' >> big.sh; bash big.sh",
+        "echo 'alias ll=ls' >> big.sh && source big.sh",
+    ):
+        reason = guard.evaluate(command, scripts)
+        assert reason and "script text" in reason and "printf" not in reason, reason
+    reason = guard.evaluate("printf '" + PAD + "%s\\n' " + "x " * 70 + "| sh", scripts)
+    assert reason and "printf output" in reason, reason
+    assert list(guard.echoed_text(["echo", "\\x70"]).readings) == [
+        "\\x70",
+        "\\x70",
+        "p",
+        "\\x70",
+        "p",
+    ], "echo without -e: slot 1 keeps the text, slots 2 and 4 read it"
+    for options in (["-e"], ["-Ee"], ["-n", "-e"], ["-e", "-n"]):
+        slots = guard.echoed_text(["echo", *options, "\\x70"]).readings
+        assert slots[1] == "p", f"echo {options}: slot 1 reads"
+    slots = guard.echoed_text(["echo", "-E", "\\x70"]).readings
+    assert slots[1:3] == ("\\x70", "p"), "echo -E: slot 1 keeps the text, slot 2 reads"
+    for options in (["-eE"], ["-e", "-E"], ["-E", "-e", "-E"]):
+        assert guard.echoed_text(["echo", *options, "\\x70"]).readings[1] == "\\x70", (
+            f"echo {options}: the final -E disables bash escapes"
+        )
+    assert guard.echoed_text(["echo", "-n", "\\x70"]).readings[4] == "-n p", (
+        "echo slot 4 keeps the option words"
+    )
+    assert list(guard.echoed_text(["printf", 'x\\"y']).readings) == [
+        'x\\"y',
+        'x"y',
+        'x\\"y',
+        'x\\"y',
+        'x"y',
+        'x\\"y',
+    ], "printf: slots 1 and 4 read the quote, slot 3 keeps the text"
+    assert guard.printf_text("%%", [])[1]
+    assert guard.printf_text("%'s", ["echo hi"]) == ("echo hi", True)
+    assert not guard.printf_text("%! %s", ["echo hi"])[1]
+    assert not guard.printf_text("%s %!", ["echo hi"])[1]
+    pairs = guard.joined(
+        [guard.ScriptText(["a", "b", "c", "d"]), guard.ScriptText(["x", "y", "z"])]
+    ).readings
+    assert pairs == ("a\nx", "b\ny", "c\nz", "d\nx"), "a missing slot reads the first"
+    long_piece = guard.capped(guard.ScriptText(["a" * 200000, "b"]))
+    assert long_piece.readings == ("a" * guard.SCRIPT_SCAN_LIMIT, "b")
+    assert long_piece.too_large == guard.SCRIPT_TOO_LARGE_REASON
+    with patch.object(guard, "printf_value", wraps=guard.printf_value) as conversion:
+        text, modelled = guard.printf_text("%1$s" * 10000, ["x" * 60000])
+    assert conversion.call_count == 2, "printf must stop converting at the size limit"
+    assert text == "x" * guard.SCRIPT_SCAN_LIMIT and not modelled
+    assert text.too_large == guard.PRINTF_TOO_LARGE_REASON
+    text, modelled = guard.printf_text("x" * guard.SCRIPT_SCAN_LIMIT, [])
+    assert len(text) == guard.SCRIPT_SCAN_LIMIT and modelled
+    for format_ in (
+        "x" * (guard.SCRIPT_SCAN_LIMIT + 1),
+        "x" * guard.SCRIPT_SCAN_LIMIT + "%%",
+    ):
+        text, modelled = guard.printf_text(format_, [])
+        assert text == "x" * guard.SCRIPT_SCAN_LIMIT and not modelled
+        assert text.too_large == guard.PRINTF_TOO_LARGE_REASON
     assert time.perf_counter() - started < 3, "scan budget is not applied"
     assert not log_path.exists() or "scan-budget" not in log_path.read_text()
     for number in range(40):
         (scripts / f"bulk{number}.sh").write_text("echo ok\n" * 7500)
     bulk = "; ".join(f"bash {scripts}/bulk{number}.sh" for number in range(40))
-    assert not guard.evaluate(bulk, repo)
+    assert "budget exhausted" in guard.evaluate(bulk, repo)
     assert "scan-budget" in log_path.read_text()
+    harmless = "echo -e '" + "echo \\x41\\x42 " * 4000 + "'"
+    exhausted = (harmless + " | sh; ") * 3
+    reason = guard.evaluate(exhausted + "printf 'pkill -f vite\\n' | sh", scripts)
+    assert reason and "budget exhausted" in reason, reason
+    assert not guard.evaluate((harmless + " >> run.log; ") * 3, scripts)
+    assert not guard.evaluate((harmless + " | wc -c; ") * 3, scripts)
+    with patch.object(guard.time, "monotonic", side_effect=[0, 6]):
+        reason = guard.evaluate("echo hi | sh", scripts)
+    assert reason and "budget exhausted" in reason, reason
     log_before = log_path.read_text()
     saved_runs = guard.runs
 
@@ -1448,7 +2018,10 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     guard.SCRIPT_SCAN_SECONDS = -1
     try:
         result, new_log = logged(f"bash {scripts}/kills.sh", repo)
-        assert not result and "scan-budget" in new_log, (result, new_log)
+        assert result and "budget exhausted" in result and "scan-budget" in new_log, (
+            result,
+            new_log,
+        )
         result, new_log = logged(f"bash {scripts}/kills.sh; git stash", wt)
         assert result and "scan-budget" in new_log, (result, new_log)
     finally:
