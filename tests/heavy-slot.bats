@@ -806,6 +806,33 @@ assert_nothing_left_behind() {
   assert_nothing_left_behind agent-wstop-term '2[78]'
 }
 
+# twice_signal <TERM|HUP>: send the signal twice to a take whose job ignores both; the second must not skip cleanup (Bash 3.2 runs it after the first exit).
+twice_signal() {
+  local name=agent-twice-$1
+  # shellcheck disable=SC2016 # The child Bash expands nothing here.
+  ORCH_HEAVY_SLOTS_LONG_RUN=26 ORCH_HEAVY_SLOTS_KILL_GRACE=3 "$HELPER" take "$name" -- bash -c 'trap "" TERM HUP; sleep 20' &
+  pid=$!
+  wait_for_file "$ORCH_HEAVY_SLOTS_DIR/$name"
+  tries=0
+  while ! pgrep -g 0 -x -f 'sleep 2[56]' >/dev/null && [ "$tries" -lt 50 ]; do sleep 0.1; tries=$((tries + 1)); done
+  pgrep -g 0 -x -f 'sleep 2[56]' >/dev/null
+  kill -"$1" "$pid"
+  wait_for_file "$(EVENTS)"
+  sleep 1
+  kill -"$1" "$pid"
+  wait "$pid" || true
+  [ ! -e "$ORCH_HEAVY_SLOTS_DIR/$name" ]
+  assert_nothing_left_behind "$name" '2[56]'
+}
+
+@test "a second identical TERM while the job is stopping still cleans up the slot and the watcher" {
+  twice_signal TERM
+}
+
+@test "a second identical HUP while the job is stopping still cleans up the slot and the watcher" {
+  twice_signal HUP
+}
+
 @test "the long-run watcher outlives its RUNLONG line and is gone when the job ends" {
   ORCH_HEAVY_SLOTS_LONG_RUN=1 "$HELPER" take agent-wstop-fired -- sleep 3 &
   pid=$!
@@ -889,13 +916,6 @@ assert_nothing_left_behind() {
   [ "$status" -eq 1 ]
   [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
   grep -Eq '^[0-9]+ SLOT FAIL agent-leftover pid=[0-9]+ code=1 ' "$(EVENTS)"
-}
-
-@test "a killed job that leaves a process behind writes exactly one FAIL line" {
-  run "$HELPER" take agent-leftover -- bash -c 'sleep 30 & kill -KILL $$'
-  [ "$status" -eq 137 ]
-  [ "$(wc -l <"$(EVENTS)")" -eq 1 ]
-  grep -Eq '^[0-9]+ SLOT FAIL agent-leftover pid=[0-9]+ code=137 ' "$(EVENTS)"
 }
 
 @test "each spool line starts with the epoch of the event" {

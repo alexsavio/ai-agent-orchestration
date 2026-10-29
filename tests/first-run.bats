@@ -103,6 +103,32 @@ EOF
   [ "$(config_get ORCH_PROVIDERS)" = claude,pi ]
 }
 
+@test "both Codex answers empty with a cursor model set write claude and cursor" {
+  fresh_install
+  config_set ORCH_CURSOR_WORKER_MODEL grok-fixture
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude,cursor ]
+}
+
+@test "both Codex answers empty with only cursor placeholders leave cursor off" {
+  fresh_install
+  config_set ORCH_CURSOR_WORKER_MODEL '<cursor-worker-model>'
+  config_set ORCH_CURSOR_SMART_MODEL '<cursor-smart-model>'
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude ]
+}
+
+@test "both Codex answers empty with a cursor placeholder and usable smart model enable cursor" {
+  fresh_install
+  config_set ORCH_CURSOR_WORKER_MODEL '<cursor-worker-model>'
+  config_set ORCH_CURSOR_SMART_MODEL grok-fixture
+  on_tty $'-\n-\n-\n-\n-'
+  [ "$status" -eq 0 ]
+  [ "$(config_get ORCH_PROVIDERS)" = claude,cursor ]
+}
+
 @test "one Codex answer empty and the other set leaves providers.enabled empty and no Codex key to fill" {
   fresh_install
   on_tty $'-\ngpt-x\n-\n-\n-'

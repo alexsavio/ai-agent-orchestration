@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live view of the user to-do list with Ignore and Reminder buttons under every item."""
+"""Live view of the user to-do list with Dismiss and Reminder buttons under every item."""
 
 import codecs
 import fcntl
@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "watchers"))
 import feed_attach  # noqa: E402
 import todo_answers  # noqa: E402
+import todo_popup  # noqa: E402
 from reminder_picker import (  # noqa: E402
     PICK_KEYS,
     RESET,
@@ -57,16 +58,17 @@ TODO = Path(configured_output() or COORDINATOR / "user-todo.md")
 HIDDEN = TODO.with_name("user-todo-state.json")
 FEED = feed_attach.FEED
 HIDE_AFTER = 30
+WRITE_TIMEOUT = 3
 TARGET = re.compile(r"->\s*(\S.*?)\s*$")
 AGE_PREFIX = re.compile(r"\[(?:now|\d+[mhd])\] ")
 MOUSE = re.compile(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
 BUTTONS = (
-    ("i", "ignore", "Ignore"),
+    ("d", "dismiss", "Dismiss"),
     ("r", "remind", "Reminder"),
 )
 CANCEL = ("r", "cancel", "Cancel reminder")
 GUTTER = 2
-FOOTER = "↑↓ or 1-9 select · i ignore · r reminder · s show reminders"
+FOOTER = "↑↓ or 1-9 select · d dismiss · r reminder · s show reminders"
 SHOW_HINT = "s show reminders"
 CLOSE_HINT = "Esc/q close"
 DEMO = [
@@ -118,7 +120,7 @@ def atomic_write(path, data):
 def feed_line(owner, text, now):
     clean = " ".join("".join(c for c in text if c.isprintable() or c == " ").split())
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now))
-    return f"{stamp} todo: TODO IGNORED {'_'.join(owner.split())}: {clean} (start)\n"
+    return f"{stamp} todo: TODO DISMISSED {'_'.join(owner.split())}: {clean} (start)\n"
 
 
 def key_action(action, rows, index):
@@ -148,18 +150,20 @@ def mono():
 
 
 class Hidden:
-    """Ignored items and reminders, keyed by owner and item text."""
+    """Dismissed items and reminders, keyed by owner and item text."""
 
     def __init__(self, path, feed, clock=None):
         self.path, self.feed, self.clock = Path(path), Path(feed), clock or wall
-        self.ignored, self.later = set(), {}
+        self.dismissed, self.later = set(), {}
         self.flagged = set()
         self.reload()
 
     def reload(self):
         try:
             data = json.loads(self.path.read_text())
-            self.ignored = set(data.get("ignored", []))
+            self.dismissed = set(data.get("dismissed", [])) | set(
+                data.get("ignored", [])
+            )
             self.later = {k: float(v) for k, v in data.get("later", {}).items()}
         except (OSError, ValueError, AttributeError, TypeError):
             pass
@@ -168,7 +172,8 @@ class Hidden:
         atomic_write(
             self.path,
             json.dumps(
-                {"ignored": sorted(self.ignored), "later": self.later}, sort_keys=True
+                {"dismissed": sorted(self.dismissed), "later": self.later},
+                sort_keys=True,
             ),
         )
 
@@ -178,10 +183,10 @@ class Hidden:
         fcntl.flock(stream, fcntl.LOCK_EX)
         return stream
 
-    def ignore(self, owner, text):
+    def dismiss(self, owner, text):
         with self.lock():
             self.reload()
-            self.ignored.add(key(owner, text))
+            self.dismissed.add(key(owner, text))
             self.later.pop(key(owner, text), None)
             self.save()
         try:
@@ -210,7 +215,7 @@ class Hidden:
         for owner, text in items:
             k = key(owner, text)
             note = ""
-            if k in self.ignored:
+            if k in self.dismissed:
                 continue
             if k in self.later:
                 if now < self.later[k]:
@@ -233,12 +238,12 @@ class Hidden:
         return shown
 
     def open_count(self, items):
-        return sum(key(*item) not in self.ignored for item in items)
+        return sum(key(*item) not in self.dismissed for item in items)
 
     def hidden_count(self, items):
         now = self.clock()
         return sum(
-            key(*item) not in self.ignored and self.later.get(key(*item), 0) > now
+            key(*item) not in self.dismissed and self.later.get(key(*item), 0) > now
             for item in items
         )
 
@@ -471,8 +476,8 @@ def act(hidden, rows, items, action, index, run_jump=jump, until=None):
     owner, text = rows[index][:2]
     if action == "focus":
         return run_jump(f"{text} -> {owner}")
-    if action == "ignore":
-        fed = hidden.ignore(owner, text)
+    if action == "dismiss":
+        fed = hidden.dismiss(owner, text)
         return "removed; it returns only if its text changes" + (
             "" if fed else " (feed not written)"
         )
@@ -768,14 +773,22 @@ class App:
                 and self.rows[self.selected][3] != ""
             )
 
+    def escape(self):
+        if self.picker and "answer" in self.picker:
+            self.status = "answer cancelled"
+        self.closing = self.popup and self.picker is None
+        self.picker = None
+        if not self.closing:
+            self.refresh()
+
     def feed(self, data):
         self.last_input = self.clock()
         tokens, self.buf = split_input(self.buf + data)
         for token in tokens:
-            if token == "\x1b" and self.picker and "answer" in self.picker:
-                self.picker = None
-                self.status = "answer cancelled"
-                self.refresh()
+            if token in ("\x1b", "\x1b[27u", "\x1b[27;1u", "\x1b[27;1;27~"):
+                self.escape()
+                if self.closing:
+                    return
                 continue
             events = input_events(
                 token, self.hits, self.picker and self.picker["mode"]
@@ -789,15 +802,33 @@ class App:
 
     def lone_escape(self):
         if self.buf == "\x1b":
-            if self.picker and "answer" in self.picker:
-                self.status = "answer cancelled"
-            self.closing = self.popup and self.picker is None
-            self.buf, self.picker = "", None
-            self.refresh()
+            self.buf = ""
+            self.escape()
 
 
 ENTER = "\033[?1000h\033[?1006h\033[?25l"
 LEAVE = "\033[?1000l\033[?1006l\033[?25h"
+
+
+class BoundedOut:
+    """Terminal output that raises TimeoutError when the terminal stops draining."""
+
+    def __init__(self, fd, timeout=WRITE_TIMEOUT):
+        self.fd, self.timeout = fd, timeout
+
+    def write(self, text):
+        data = text.encode()
+        deadline = time.monotonic() + self.timeout
+        while data:
+            try:
+                data = data[os.write(self.fd, data) :]
+            except BlockingIOError:
+                left = deadline - time.monotonic()
+                if left <= 0 or not select.select([], [self.fd], [], left)[1]:
+                    raise TimeoutError("terminal output is not draining")
+
+    def flush(self):
+        pass
 
 
 def stop(*_):
@@ -805,6 +836,8 @@ def stop(*_):
 
 
 def main():
+    if "--open-popup" in sys.argv[1:]:
+        return todo_popup.open_popup()
     demo = "--demo" in sys.argv[1:]
     popup = "--popup" in sys.argv[1:]
     scratch = Path(tempfile.mkdtemp(prefix="user-todo-demo.")) if demo else None
@@ -814,33 +847,55 @@ def main():
         else Hidden(HIDDEN, FEED)
     )
     fd = sys.stdin.fileno()
+    out = BoundedOut(sys.__stdout__.fileno())
+    blocking = os.get_blocking(out.fd)
+    parent = os.getppid()
     previous = {
         number: signal.signal(number, stop)
         for number in (signal.SIGTERM, signal.SIGHUP)
     }
     old = None
     try:
+        if popup:
+            todo_popup.register()
         old = termios.tcgetattr(fd)
         tty.setcbreak(fd)
-        sys.stdout.write(ENTER)
-        sys.stdout.flush()
-        app = App(hidden, demo, sys.stdout, os.get_terminal_size, popup=popup)
-        decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
-        while not app.closing:
-            app.tick()
-            ready, _, _ = select.select([fd], [], [], 0.3 if app.buf == "\x1b" else 1)
-            if not ready:
-                app.lone_escape()
-                continue
-            data = os.read(fd, 64)
-            if not data:
-                break
-            app.feed(decoder.decode(data))
+        os.set_blocking(out.fd, False)
+        try:
+            out.write(ENTER)
+            app = App(hidden, demo, out, os.get_terminal_size, popup=popup)
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
+            next_pane_check = 0
+            pane = os.environ.get("HERDR_PANE_ID") if popup else None
+            while not app.closing and os.getppid() == parent:
+                if pane and mono() >= next_pane_check:
+                    if not todo_popup.pane_exists(pane):
+                        break
+                    next_pane_check = mono() + 3
+                app.tick()
+                ready, _, _ = select.select(
+                    [fd], [], [], 0.3 if app.buf == "\x1b" else 1
+                )
+                if not ready:
+                    app.lone_escape()
+                    continue
+                data = os.read(fd, 64)
+                if not data:
+                    break
+                app.feed(decoder.decode(data))
+        except OSError:
+            pass
     finally:
         if old is not None:
-            sys.stdout.write(LEAVE)
-            sys.stdout.flush()
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            for restore in (
+                lambda: out.write(LEAVE),
+                lambda: termios.tcsetattr(fd, termios.TCSANOW, old),
+            ):
+                try:
+                    restore()
+                except (OSError, ValueError):
+                    pass
+            os.set_blocking(out.fd, blocking)
         for number, handler in previous.items():
             signal.signal(number, handler)
         if scratch:
@@ -848,4 +903,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

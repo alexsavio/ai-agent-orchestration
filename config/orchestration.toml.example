@@ -41,7 +41,7 @@ kill_grace = 10
 long_run = 1800
 
 [providers]
-# Worker families this machine uses (claude, codex, pi); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi when a pi model is set. A family left out is never started or asked for, and its model settings may stay empty
+# Worker families this machine uses (claude, codex, pi, cursor); claude is required, the Coordinator and the architects run on it. Empty means claude and codex, plus pi or cursor when a model of that family is set. A family left out is never started or asked for, and its model settings may stay empty
 enabled = []
 # Claude worker tiers the architects may pick (haiku, sonnet, opus, fable); at least one. The Coordinator and architect models are their own settings
 claude = ["haiku", "sonnet", "opus", "fable"]
@@ -71,6 +71,10 @@ pi_worker = ""
 pi_smart = ""
 # More pi models as provider/model-id that the architect may pick per task, besides pi_worker and pi_smart; any of the three set turns pi on
 pi_models = []
+# Cursor CLI model for routine work (for example grok-4.7-medium); empty or a placeholder means cursor_smart serves it too. With cursor on, set at least one of the two
+cursor_worker = ""
+# Cursor CLI model for hard work (for example grok-4.7-high); empty or a placeholder means cursor_worker serves it too. With cursor on, set at least one of the two
+cursor_smart = ""
 
 [remote_control]
 # Give architect sessions Remote Control on start and recycle
