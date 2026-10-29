@@ -2728,6 +2728,35 @@ pkill -f vite
     ):
         case(f"pane text reads every echo/printf reading: {name}", command, True)
     for name, command in (
+        ("echo -n escape", "herdr pane run w1:p2 \"$(echo -n 'p\\x69')\""),
+        ("printf quotes kept", 'herdr pane run w1:p2 "$(printf \'\\";p\\x69;\\"\')"'),
+    ):
+        case(f"pane text reads reading 2: {name}", command, True)
+    for name, command in (
+        (
+            "reading 0 only: escapes break the parse",
+            "herdr pane run w1:p2 \"$(echo -e 'p\\0151\\x22\\npi')\"",
+        ),
+        (
+            "reading 3 only: nothing read",
+            'herdr pane run w1:p2 "$(echo -ne \'pi --yolo\\" --yolo\\x22\')"',
+        ),
+    ):
+        case(f"pane text reads reading 0 and 3: {name}", command, True)
+    big = "a" * 66000
+    # A printf cut at 64 KB fails closed, so the harmless last row is denied on purpose.
+    for name, command in (
+        ("printf argument", f"herdr pane run w1:p2 \"$(printf '%s;p\\x69' {big})\""),
+        ("printf %b pi", f"herdr pane run w1:p2 \"$(printf '%b' '{big};p\\x69')\""),
+        (
+            "printf %b cursor",
+            f"herdr pane run w1:p2 \"$(printf '%b' '{big};cursor-agent\\x20--yolo')\"",
+        ),
+        ("send-text", f"herdr pane send-text w1:p2 \"$(printf '%s;p\\x69' {big})\""),
+        ("harmless text", f"herdr pane run w1:p2 \"$(printf '%s' {big})\""),
+    ):
+        case(f"pane text cut at 64 KB fails closed: {name}", command, True)
+    for name, command in (
         ("printf argument", "herdr pane run w1:p2 \"$(printf '%s' ls)\""),
         ("echo", 'herdr pane run w1:p2 "$(echo hello)"'),
     ):
