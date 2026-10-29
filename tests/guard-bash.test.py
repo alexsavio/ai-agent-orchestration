@@ -1476,6 +1476,16 @@ pkill -f vite
             "printf unknown percent after conversion",
             "printf '%s %!' pkill '-f vite' | sh",
         ),
+        ("printf two grouping flags", "printf \"%''s %s %s\" kill -9 -1 | sh"),
+        ("printf unmodelled conversion joins arguments", "printf '%z' kill -9 -1 | sh"),
+        (
+            "printf unclosed zero width",
+            "printf '%" + "0" * 28 + "!' pkill | sh",
+        ),
+        (
+            "state seen restored after the readings",
+            'bash -c \'echo "echo safe > kills.sh; bash kills.sh" | sh; bash -c "bash kills.sh"\'',
+        ),
         ("printf length modifier", "printf 'kill -9 %ld\\n' -1 | sh"),
         ("printf argument position", "printf '%1$s' 'pkill -f vite' | sh"),
         ("printf %d with leading zeros", "printf 'kill -9 %d\\n' -01 | sh"),
@@ -1859,6 +1869,7 @@ pkill -f vite
     ], "printf: slots 1 and 4 read the quote, slot 3 keeps the text"
     assert guard.printf_text("%%", [])[1]
     assert guard.printf_text("%'s", ["echo hi"]) == ("echo hi", True)
+    assert guard.printf_text("%''s", ["echo hi"]) == ("echo hi", True)
     assert not guard.printf_text("%! %s", ["echo hi"])[1]
     assert not guard.printf_text("%s %!", ["echo hi"])[1]
     pairs = guard.joined(
