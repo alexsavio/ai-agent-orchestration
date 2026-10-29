@@ -2062,6 +2062,54 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("number before spaced redirect is a target", "kill -TERM 12345 >/dev/null"),
     ]:
         case(name, command)
+    for executable in (
+        "cursor-agent",
+        "agent",
+        "/opt/bin/cursor-agent",
+        "/opt/bin/agent",
+    ):
+        for flag in ("--list-models", "--help", "--version"):
+            case(f"cursor info {executable} {flag}", f"{executable} {flag}")
+            case(
+                f"cursor pane info {executable} {flag}",
+                f"herdr pane run w1:p2 '{executable} {flag}'",
+            )
+        for args in ("", " --model x --yolo", " -f", " -p hi"):
+            command = executable + args
+            case(f"cursor executable {command}", command, True)
+            for wrapper in ("command", "exec", "sudo", "nohup", "xargs", "env FOO=1"):
+                case(f"cursor {wrapper} {command}", f"{wrapper} {command}", True)
+            case(f"cursor eval {command}", f"eval '{command}'", True)
+            for verb in ("run", "send-text"):
+                case(
+                    f"cursor pane {verb} {command}",
+                    f"herdr pane {verb} w1:p2 '{command}'",
+                    True,
+                )
+        case(
+            f"cursor substitution {executable}",
+            f"herdr pane run w1:p2 \"$(printf '{executable} --yolo')\"",
+            True,
+        )
+    case(
+        "generated agent argument is not a command",
+        'herdr pane run p "$(printf echo) $(printf agent)"',
+    )
+    for command in (
+        "herdr agent list",
+        "orch-agents",
+        "ssh-agent -s",
+        "echo agent",
+        "printf '%s' cursor-agent",
+        "~/.claude/coordinator/cursor-start.sh w p worker",
+        "~/.claude/coordinator/cursor-start.sh w p smart --no-trust",
+    ):
+        for wrapper in ("", "command ", "env FOO=1 ", "sudo ", "nohup ", "xargs "):
+            case(f"cursor command position {wrapper}{command}", wrapper + command)
+            case(
+                f"cursor pane command position {wrapper}{command}",
+                f"herdr pane run w1:p2 '{wrapper}{command}'",
+            )
     for name, command in [
         (
             "cursor start",

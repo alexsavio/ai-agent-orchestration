@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Starts a Cursor CLI worker in an existing herdr pane:
-#   cursor-start.sh <agent-name> <pane-id> <worker|smart> [extra cursor-agent args]
+#   cursor-start.sh <agent-name> <pane-id> <worker|smart> [--no-trust]
 # The model comes from models.cursor_worker or models.cursor_smart (Cursor CLI model ids, e.g. grok-4.7-medium).
-# Always passes --trust so a fresh worktree does not block on the workspace trust prompt.
+# --no-trust leaves workspace trust prompts enabled for foreign PR reviews.
 case ${ZSH_EVAL_CONTEXT:-} in *:file*) echo "run it, do not source it" >&2; return 1 ;; esac
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
@@ -10,18 +10,19 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")" && pwd)"
 . "$root/watchers/coord-lib.sh"
 
-[ $# -ge 3 ] || { echo "usage: cursor-start.sh <agent-name> <pane-id> <worker|smart> [extra cursor-agent args]" >&2; exit 2; }
+[ $# -ge 3 ] || { echo "usage: cursor-start.sh <agent-name> <pane-id> <worker|smart> [--no-trust]" >&2; exit 2; }
 name=$1 pane=$2 tier=$3
 shift 3
 case "$tier" in worker | smart) ;; *) echo "cursor-start.sh: tier must be worker or smart, not '$tier'" >&2; exit 2 ;; esac
-for arg in "$@"; do
-  case "$(printf '%s' "$arg" | tr '[:upper:]' '[:lower:]')" in
-    --model | --model=* | --trust | -f | --force | --yolo | --resume | --resume=* | --continue | -c)
-      echo "cursor-start.sh: '$arg' is not allowed in extra args; the model and --trust come from the cursor settings" >&2
-      exit 2
-      ;;
-  esac
-done
+trust=(--trust)
+if [ $# -gt 0 ]; then
+  if [ $# -eq 1 ] && [ "$1" = --no-trust ]; then
+    trust=()
+  else
+    echo "cursor-start.sh: takes no extra arguments except --no-trust" >&2
+    exit 2
+  fi
+fi
 
 orch_load_config
 setting=ORCH_CURSOR_WORKER_MODEL
@@ -45,4 +46,4 @@ case "$model" in "" | "<"*">") echo "$not_configured" >&2; exit 1 ;; esac
 herdr_bin=${ORCH_HERDR_BIN:-herdr}
 orch_need_cmd "$herdr_bin"
 
-exec "$herdr_bin" agent start "$name" --kind cursor --pane "$pane" -- --model "$model" --trust "$@"
+exec "$herdr_bin" agent start "$name" --kind cursor --pane "$pane" -- --model "$model" ${trust[@]+"${trust[@]}"}

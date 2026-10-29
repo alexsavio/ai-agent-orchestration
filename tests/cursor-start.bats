@@ -52,17 +52,38 @@ teardown() {
 }
 
 @test "extra args cannot change the model or trust" {
-  for arg in --model --model=x --trust -f --force --yolo --resume --continue; do
+  for arg in --model --model=x --trust -f --force --yolo --resume --continue -pf -fw --approve-mcps --print --workspace --plugin-dir --unknown; do
     run "$SCRIPT" w1 pane1 worker "$arg"
     [ "$status" -eq 2 ]
+    [[ "$output" == *"takes no extra arguments except --no-trust"* ]] || false
   done
   [ ! -e "$HERDR_CALLS" ]
 }
 
-@test "other extra args pass through" {
+@test "sandbox disabling is refused" {
   run "$SCRIPT" w1 pane1 worker --sandbox disabled
-  [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind cursor --pane pane1 -- --model grok-4.7-medium --trust --sandbox disabled" ]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"takes no extra arguments except --no-trust"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "no-trust leaves workspace trust under review for either tier" {
+  for tier in worker smart; do
+    run /bin/bash "$SCRIPT" w1 pane1 "$tier" --no-trust
+    [ "$status" -eq 0 ]
+    model=grok-4.7-medium
+    [ "$tier" = worker ] || model=grok-4.7-high
+    [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind cursor --pane pane1 -- --model $model" ]
+    rm "$HERDR_CALLS"
+  done
+}
+
+@test "no-trust does not allow additional arguments" {
+  for arg in --no-trust --yolo -pf; do
+    run "$SCRIPT" w1 pane1 worker --no-trust "$arg"
+    [ "$status" -eq 2 ]
+    [ ! -e "$HERDR_CALLS" ]
+  done
 }
 
 @test "cursor left out of providers.enabled is refused" {
