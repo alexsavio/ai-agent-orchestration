@@ -29,7 +29,7 @@ def git(path, *args):
     ).stdout.strip()
 
 
-def hook(command, cwd):
+def hook(command, cwd, timeout=20):
     payload = json.dumps(
         {"tool_name": "Bash", "cwd": str(cwd), "tool_input": {"command": command}}
     )
@@ -39,7 +39,7 @@ def hook(command, cwd):
             input=payload,
             capture_output=True,
             text=True,
-            timeout=20,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(HOOK, "timeout", "", "guard timed out")
@@ -1790,6 +1790,19 @@ pkill -f vite
         ),
     ]:
         case(name, command, False, scripts)
+    zeros = "0" * 65536
+    for command, deny in (
+        ("printf '%" + zeros + "!'", False),
+        ("printf '%" + zeros + "!' > out.txt; pkill -f vite", True),
+        ("printf '%" + zeros + "!' | wc -c", False),
+        ("echo '%" + zeros + "!' > out.txt", False),
+    ):
+        start = time.perf_counter()
+        result = hook(command, scripts, timeout=1)
+        elapsed = time.perf_counter() - start
+        assert result.returncode == (2 if deny else 0), (result, elapsed)
+        assert elapsed < 1, f"64 KB zero format took {elapsed:.3f}s"
+        print(f"64 KB zero format {command[:12]!r}: {elapsed:.3f}s")
     started = time.perf_counter()
     log_path = Path.home() / ".claude/hooks/guard-bash.log"
     assert not guard.evaluate(f"bash {scripts}/fan.sh", repo)

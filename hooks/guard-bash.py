@@ -708,7 +708,7 @@ ESCAPE = re.compile(
 ESCAPED = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n"}
 ESCAPED |= {"r": "\r", "t": "\t", "v": "\v", "\\": "\\", '"': '"', "'": "'", "?": "?"}
 PRINTF_CONVERSION = re.compile(
-    r"%(\d+\$)?([-+ #0]*)(\*|\d+)?(\.\*|\.\d*)?[hlLjtz]*([a-zA-Z%])"
+    r"%(\d+\$)?([-+ #0]*)([1-9]\d*|\*)?(\.\*|\.\d*)?[hlLjtz]*([a-zA-Z%])"
 )
 INTEGER = re.compile(r"\s*([-+]?)(0[xX][0-9a-fA-F]+|\d+)")
 QUOTING = str.maketrans("", "", "\"'\\")
@@ -818,9 +818,11 @@ def echoed_text(words):
         while args[:1] == ["--"] or args[:1] == ["-v"]:
             args = args[2:] if args[0] == "-v" else args[1:]
         if args:
-            for quotes in (True, False):
-                text, modelled = printf_text(args[0], args[1:], quotes)
-                texts.append(text)
+            text, modelled = printf_text(args[0], args[1:])
+            texts.append(text)
+            if any(escape in args[0] for escape in ("\\'", '\\"', "\\?")):
+                text, modelled = printf_text(args[0], args[1:], False)
+            texts.append(text)
             texts.append(texts[0] if modelled else "\n".join(args[1:]))
             texts.append(texts[1])
     else:
