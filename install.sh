@@ -538,7 +538,13 @@ ask_config_keys() {
   if [ "$codex_empty" = 2 ] && [ -z "$(unset ORCH_PROVIDERS && config_value ORCH_PROVIDERS)" ]; then
     families=claude
     [ -z "$(unset ORCH_PI_WORKER_MODEL ORCH_PI_SMART_MODEL ORCH_PI_MODELS && config_value ORCH_PI_WORKER_MODEL)$(unset ORCH_PI_WORKER_MODEL ORCH_PI_SMART_MODEL ORCH_PI_MODELS && config_value ORCH_PI_SMART_MODEL)$(unset ORCH_PI_WORKER_MODEL ORCH_PI_SMART_MODEL ORCH_PI_MODELS && config_value ORCH_PI_MODELS)" ] || families=$families,pi
-    [ -z "$(unset ORCH_CURSOR_WORKER_MODEL ORCH_CURSOR_SMART_MODEL && config_value ORCH_CURSOR_WORKER_MODEL)$(unset ORCH_CURSOR_WORKER_MODEL ORCH_CURSOR_SMART_MODEL && config_value ORCH_CURSOR_SMART_MODEL)" ] || families=$families,cursor
+    for key in ORCH_CURSOR_WORKER_MODEL ORCH_CURSOR_SMART_MODEL; do
+      value=$(unset ORCH_CURSOR_WORKER_MODEL ORCH_CURSOR_SMART_MODEL && config_value "$key")
+      case "$value" in
+        "" | "<"*">") ;;
+        *) families=$families,cursor; break ;;
+      esac
+    done
     write_config_key ORCH_PROVIDERS "$families"
     printf -v ORCH_PROVIDERS '%s' "$families"
   fi
