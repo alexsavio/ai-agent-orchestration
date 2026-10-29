@@ -4,7 +4,6 @@
 import argparse
 import contextlib
 import os
-import re
 import select
 import shutil
 import subprocess
@@ -18,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "watchers"))
 import feed_attach  # noqa: E402
 from question_lock import answers_lock  # noqa: E402
 from question_remind import atomic_write, remind_path, write_remind  # noqa: E402
+from question_text import option_rows, read_question  # noqa: E402
 from reminder_picker import (
     PICK_KEYS,
     TYPE_HINT,
@@ -33,7 +33,6 @@ ESCAPE = "ESC"
 ESCAPE_WAIT = 0.05
 SETTLE_SECONDS = 5
 POLL_SECONDS = 0.2
-OPTION = re.compile(r"^([1-9])\. (.*)$")
 
 
 def answer_path(question):
@@ -77,40 +76,77 @@ class Panel:
             clock,
         )
         self.launcher, self.feed = launcher, Path(feed)
+        self.markdown_failed = False
+        self.markdown_cache = {}
         self.slug = self.question.stem
         self.status, self.picker, self.done, self.pending = "", None, False, None
 
     def options(self):
         """The option id -> label pairs under `## Options`, or None when the file has no such section."""
         try:
-            lines = self.question.read_text().splitlines()
+            rows = option_rows(read_question(self.question))
         except OSError:
             return None
-        found, in_options = {}, False
-        for line in lines:
-            if in_options:
-                if line.strip().startswith("#"):
-                    break
-                match = OPTION.match(line)
-                if match:
-                    found[match.group(1)] = " ".join(match.group(2).split())
-            elif line.strip() == "## Options":
-                in_options = True
-        return found if in_options else None
+        return (
+            {match.group(1): " ".join(match.group(2).split()) for _, match in rows}
+            if rows is not None
+            else None
+        )
+
+    def markdown(self, text):
+        if self.markdown_failed:
+            return text
+        columns = max(1, self.columns() - 1)
+        key = (text, columns)
+        if key in self.markdown_cache:
+            return self.markdown_cache[key]
+        executable = shutil.which("mdcat")
+        if not executable and os.access("/opt/homebrew/bin/mdcat", os.X_OK):
+            executable = "/opt/homebrew/bin/mdcat"
+        if executable:
+            source = text
+            if rows := option_rows(text):
+                lines = text.splitlines()
+                for index, match in rows:
+                    lines[index] = f"{match.group(1)}\\. {match.group(2)}  "
+                source = "\n".join(lines)
+            try:
+                rendered = subprocess.run(
+                    [
+                        executable,
+                        "--ansi",
+                        "--local",
+                        "--no-pager",
+                        "--columns",
+                        str(columns),
+                    ],
+                    input=source,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                    timeout=5,
+                ).stdout.rstrip()
+                self.markdown_cache[key] = rendered
+                return rendered
+            except (OSError, subprocess.SubprocessError):
+                pass
+        print("question-pane: mdcat unavailable; showing plain text.", file=sys.stderr)
+        self.markdown_failed = True
+        return text
 
     def show(self, status=None):
         self.status = self.status if status is None else status
         text = (
-            self.question.read_text()
+            read_question(self.question)
             .rstrip()
             .replace("Answer in the Coordinator pane.", "")
         )
-        lines = [text, "", HINT]
+        lines = [self.markdown(text), "", HINT]
         if self.picker:
             lines += [""] + picker_lines(self.picker, max(1, self.columns() - 1))[0]
         if self.status:
             lines += ["", self.status]
-        self.out.write("\033[H\033[2J" + "\r\n".join(lines))
+        self.out.write("\033[H\033[2J" + "\n".join(lines).replace("\n", "\r\n"))
         self.out.flush()
 
     def record(self, text):

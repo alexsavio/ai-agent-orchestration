@@ -4,6 +4,7 @@ load test_helper
 
 setup() {
   setup_fixture
+  unset HERDR_PANE_ID
   mkdir -p "$HOME/.claude/coordinator/questions"
   : >"$TMP/none.toml"
   cat >"$BIN/herdr-question" <<'EOF'
@@ -25,6 +26,25 @@ EOF
   export ORCH_CLOSED_DIR="$TMP/closed"
   python_bin=$(command -v python3)
   export HERDR_BIN_PATH="$BIN/herdr-question" ORCH_CONFIG="$TMP/none.toml" ORCH_PYTHON3="$python_bin"
+}
+
+@test "open splits the caller pane even with Coordinator question and to-do anchors" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  panes='{"result":{"panes":[{"pane_id":"architect","workspace_id":"asking"},{"pane_id":"todo","label":"To-do","workspace_id":"coordinator"},{"pane_id":"old-question","label":"Q: old","workspace_id":"coordinator"}]}}'
+  run env HERDR_PANE_ID=architect HERDR_PANES="$panes" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane split architect --direction down --no-focus' "$TMP/question-herdr.calls"
+  [ "$(cat "${question%.md}.asker-pane")" = architect ]
+}
+
+@test "a vanished caller pane falls back to the last question pane" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf 'Which release?\n' >"$question"
+  panes='{"result":{"panes":[{"pane_id":"todo","label":"To-do"},{"pane_id":"old-question","label":"Q: old"}]}}'
+  run env HERDR_PANE_ID=vanished HERDR_PANES="$panes" "$ROOT/ask-user-question" release "$question"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane split old-question --direction down --no-focus' "$TMP/question-herdr.calls"
 }
 
 @test "ask-user-question stacks below the to-do pane and does not focus it" {
@@ -71,6 +91,7 @@ EOF
   question="$HOME/.claude/coordinator/questions/release.md"
   printf question >"$question"
   printf yes >"${question%.md}.answer"
+  printf architect >"${question%.md}.asker-pane"
   export HERDR_REQUIRE_QUESTION="$question"
   local panes='{"result":{"panes":[{"pane_id":"question-pane","label":"Q: release","terminal_title_stripped":"python3 question-pane.py","title":"old title"},{"pane_id":"other","label":"Q: release-notes","terminal_title_stripped":"Q: release"}]}}'
   run env HERDR_PANES="$panes" "$ROOT/ask-user-question" close release
@@ -81,12 +102,14 @@ EOF
   [ -f "$ORCH_CLOSED_DIR/question-pane" ]
   [ ! -e "$question" ]
   [ ! -e "${question%.md}.answer" ]
+  [ ! -e "${question%.md}.asker-pane" ]
 }
 
 @test "failed close keeps question files and removes the intentional-close marker" {
   question="$HOME/.claude/coordinator/questions/release.md"
   printf question >"$question"
   printf yes >"${question%.md}.answer"
+  printf architect >"${question%.md}.asker-pane"
   local panes='{"result":{"panes":[{"pane_id":"question-pane","label":"Q: release","terminal_title_stripped":"python3 question-pane.py"}]}}'
   run env HERDR_FAIL=close HERDR_PANES="$panes" "$ROOT/ask-user-question" close release
   [ "$status" -ne 0 ]
@@ -94,6 +117,7 @@ EOF
   [ "$(cat "$question")" = question ]
   [ "$(cat "${question%.md}.answer")" = yes ]
   [ ! -e "$ORCH_CLOSED_DIR/question-pane" ]
+  [ "$(cat "${question%.md}.asker-pane")" = architect ]
 }
 
 @test "ask-user-question rejects a missing question file" {
@@ -199,6 +223,7 @@ EOF
 @test "hide closes the exact pane and keeps the question files" {
   question="$HOME/.claude/coordinator/questions/release.md"
   printf question >"$question"
+  printf architect >"${question%.md}.asker-pane"
   printf '%s\n' 2000000000 >"${question%.md}.remind"
   local panes='{"result":{"panes":[{"pane_id":"question-pane","label":"Q: release"},{"pane_id":"other","label":"Q: release-notes"}]}}'
   run env HERDR_PANES="$panes" "$ROOT/ask-user-question" hide release
@@ -208,6 +233,7 @@ EOF
   [ "$status" -eq 1 ]
   [ -f "$ORCH_CLOSED_DIR/question-pane" ]
   [ -f "$question" ]
+  [ "$(cat "${question%.md}.asker-pane")" = architect ]
   [ -f "${question%.md}.remind" ]
 }
 
@@ -230,6 +256,60 @@ EOF
   [ "$output" -eq 1 ]
   [ ! -e "$questions/due.remind" ]
   [ -f "$questions/later.remind" ]
+}
+
+@test "a due reminder reopens beside its original asker instead of the watcher" {
+  questions="$HOME/.claude/coordinator/questions"
+  printf due >"$questions/due.md"
+  printf architect >"$questions/due.asker-pane"
+  printf '%s\n' 1 >"$questions/due.remind"
+  panes='{"result":{"panes":[{"pane_id":"architect","workspace_id":"asking"},{"pane_id":"watcher","workspace_id":"coordinator"},{"pane_id":"todo","label":"To-do"}]}}'
+  run env HERDR_PANE_ID=watcher ORCH_USER_QUESTIONS_DIR="$questions" HERDR_PANES="$panes" "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane split architect --direction down --no-focus' "$TMP/question-herdr.calls"
+  [ ! -e "$questions/due.remind" ]
+}
+
+@test "a reminder with a vanished saved asker falls back and clears the saved pane" {
+  questions="$HOME/.claude/coordinator/questions"
+  printf due >"$questions/due.md"
+  for anchor in question todo; do
+    printf gone >"$questions/due.asker-pane"
+    printf '%s\n' 1 >"$questions/due.remind"
+    if [ "$anchor" = question ]; then
+      panes='{"result":{"panes":[{"pane_id":"watcher"},{"pane_id":"todo","label":"To-do"},{"pane_id":"question","label":"Q: other"}]}}'
+    else
+      panes='{"result":{"panes":[{"pane_id":"watcher"},{"pane_id":"todo","label":"To-do"}]}}'
+    fi
+    : >"$TMP/question-herdr.calls"
+    run env HERDR_PANE_ID=watcher ORCH_USER_QUESTIONS_DIR="$questions" HERDR_PANES="$panes" "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
+    [ "$status" -eq 0 ]
+    grep -qx "pane split $anchor --direction down --no-focus" "$TMP/question-herdr.calls"
+    [ ! -e "$questions/due.asker-pane" ]
+    [ ! -e "$questions/due.remind" ]
+  done
+}
+
+@test "a legacy reminder ignores the watcher caller and uses the to-do fallback" {
+  questions="$HOME/.claude/coordinator/questions"
+  printf due >"$questions/due.md"
+  printf '%s\n' 1 >"$questions/due.remind"
+  panes='{"result":{"panes":[{"pane_id":"watcher"},{"pane_id":"todo","label":"To-do"}]}}'
+  run env HERDR_PANE_ID=watcher ORCH_USER_QUESTIONS_DIR="$questions" HERDR_PANES="$panes" "$ORCH_PYTHON3" "$ROOT/coordinator/watchers/watchers.py" answers --state-dir "$TMP/state"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane split todo --direction down --no-focus' "$TMP/question-herdr.calls"
+  [ ! -e "$questions/due.asker-pane" ]
+}
+
+@test "an initial worker escalation through the watcher helper retains the caller" {
+  question="$HOME/.claude/coordinator/questions/release.md"
+  printf release >"$question"
+  printf todo >"${question%.md}.asker-pane"
+  panes='{"result":{"panes":[{"pane_id":"architect"},{"pane_id":"todo","label":"To-do"}]}}'
+  run env HERDR_PANE_ID=architect HERDR_PANES="$panes" "$ORCH_PYTHON3" -c 'import sys; sys.path.insert(0, sys.argv[1]); import watchers; sys.exit(watchers.open_question("release", sys.argv[2]))' "$ROOT/coordinator/watchers" "$question"
+  [ "$status" -eq 0 ]
+  grep -qx 'pane split architect --direction down --no-focus' "$TMP/question-herdr.calls"
+  [ "$(cat "${question%.md}.asker-pane")" = architect ]
 }
 
 @test "a failed reopen keeps the reminder for the next pass" {

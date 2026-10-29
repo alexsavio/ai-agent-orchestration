@@ -3,6 +3,7 @@ import importlib.util
 import io
 import os
 import pty
+import re
 import signal
 import subprocess
 import sys
@@ -77,6 +78,179 @@ class PanelCase(IsolatedTestCase):
 
     def remind_file(self):
         return self.question.with_suffix(".remind")
+
+
+class MarkdownTest(PanelCase):
+    def test_question_is_rendered_with_mdcat_and_controls_stay_interactive(self):
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat"),
+            patch.object(
+                pane.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="Rendered question\n"),
+            ) as render,
+        ):
+            self.panel.show()
+            self.press("2")
+        self.assertEqual(render.call_args.args[0][0], "/bin/mdcat")
+        self.assertEqual(
+            render.call_args.kwargs["input"], self.question.read_text().rstrip()
+        )
+        self.assertIn("Rendered question", self.out.getvalue())
+        self.assertIn(pane.HINT, self.out.getvalue())
+        self.assertEqual(pane.answer_path(self.question).read_text().strip(), "2")
+
+    def test_missing_mdcat_renders_plain_text_with_one_warning(self):
+        with (
+            patch.object(pane.shutil, "which", return_value=None),
+            patch.object(pane.os, "access", return_value=False),
+            patch.object(pane.sys, "stderr", new_callable=io.StringIO) as err,
+        ):
+            self.panel.show()
+            self.panel.show()
+        self.assertIn("Ship it?", self.out.getvalue())
+        self.assertEqual(len(err.getvalue().splitlines()), 1)
+        self.assertIn("mdcat", err.getvalue())
+
+    def test_failed_mdcat_keeps_the_panel_interactive(self):
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat"),
+            patch.object(pane.subprocess, "run", side_effect=OSError("gone")),
+            patch.object(pane.sys, "stderr", new_callable=io.StringIO) as err,
+        ):
+            self.panel.show()
+            self.press("1")
+        self.assertIn("Ship it?", self.out.getvalue())
+        self.assertEqual(len(err.getvalue().splitlines()), 1)
+        self.assertEqual(pane.answer_path(self.question).read_text().strip(), "1")
+
+    def test_mdcat_result_is_cached_per_width_and_updated_question(self):
+        width = [80]
+        self.panel.columns = lambda: width[0]
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat"),
+            patch.object(
+                pane.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="Rendered\n"),
+            ) as render,
+        ):
+            self.panel.show()
+            self.panel.show("status")
+            self.press("r", pane.ESCAPE)
+            self.assertEqual(render.call_count, 1)
+            width[0] = 100
+            self.panel.show()
+            self.assertEqual(render.call_count, 2)
+            width[0] = 80
+            self.panel.show()
+            self.assertEqual(render.call_count, 2)
+            self.question.write_text("Updated question")
+            self.panel.show()
+            self.assertEqual(render.call_count, 3)
+        self.assertEqual(render.call_args.kwargs["input"], "Updated question")
+
+    def test_mdcat_failure_is_remembered_across_redraws_and_widths(self):
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat") as which,
+            patch.object(
+                pane.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired("mdcat", 5),
+            ) as render,
+            patch.object(pane.sys, "stderr", new_callable=io.StringIO) as err,
+        ):
+            self.panel.show()
+            self.panel.columns = lambda: 100
+            self.panel.show("status")
+            self.press("r", pane.ESCAPE, "1")
+        self.assertEqual(render.call_count, 1)
+        self.assertEqual(which.call_count, 1)
+        self.assertEqual(len(err.getvalue().splitlines()), 1)
+        self.assertEqual(pane.answer_path(self.question).read_text().strip(), "1")
+
+    def test_controls_are_removed_before_both_render_paths_and_option_status(self):
+        controls = "".join(
+            chr(n) for n in (*range(9), *range(11, 32), *range(127, 160))
+        )
+        self.question.write_text(
+            "# Safe"
+            + controls
+            + " question\n\tcontext\n\n## Options\n1. Yes"
+            + controls
+            + " please"
+        )
+        clean = "# Safe question\n\tcontext\n\n## Options\n1. Yes please"
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat"),
+            patch.object(
+                pane.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="Rendered\n"),
+            ) as render,
+        ):
+            self.panel.show()
+        self.assertEqual(
+            render.call_args.kwargs["input"], clean.replace("1. Yes", "1\\. Yes") + "  "
+        )
+        with (
+            patch.object(pane.shutil, "which", return_value=None),
+            patch.object(pane.os, "access", return_value=False),
+            patch.object(pane.sys, "stderr", new_callable=io.StringIO),
+        ):
+            other = pane.Panel(self.question, io.StringIO())
+            other.show()
+            other.press("1")
+        self.assertIn(clean.replace("\n", "\r\n"), other.out.getvalue())
+        self.assertEqual(
+            pane.answer_path(self.question).read_text().strip(), '1 "Yes please"'
+        )
+        self.assertIn('Sent: 1 "Yes please"', other.out.getvalue())
+
+    def test_renderer_preserves_duplicate_ids_and_lines_only_in_options(self):
+        self.question.write_text(
+            "# Pick\n1. Context\n1. More context\n\n## Options\n1. A\n1. B\n2. C\n\n## Notes\n1. Note\n1. Another note"
+        )
+        with (
+            patch.object(pane.shutil, "which", return_value="/bin/mdcat"),
+            patch.object(
+                pane.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="Rendered\n"),
+            ) as render,
+        ):
+            self.panel.show()
+            self.press("2", "3")
+        self.assertEqual(
+            render.call_args.kwargs["input"],
+            "# Pick\n1. Context\n1. More context\n\n## Options\n1\\. A  \n1\\. B  \n2\\. C  \n\n## Notes\n1. Note\n1. Another note",
+        )
+        self.assertEqual(pane.answer_path(self.question).read_text().strip(), '2 "C"')
+        self.assertIn("No option 3.", self.out.getvalue())
+
+    def test_real_mdcat_displays_source_option_ids(self):
+        executable = pane.shutil.which("mdcat") or "/opt/homebrew/bin/mdcat"
+        if not os.access(executable, os.X_OK):
+            self.skipTest("mdcat is not installed")
+        self.question.write_text("# Pick\n\n## Options\n1. A\n1. B\n2. C\n")
+        self.panel.show()
+        rendered = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", self.out.getvalue())
+        lines = [line.strip() for line in rendered.splitlines()]
+        for option in ("1. A", "1. B", "2. C"):
+            self.assertIn(option, lines)
+
+    def test_homebrew_mdcat_is_used_when_missing_from_path(self):
+        with (
+            patch.object(pane.shutil, "which", return_value=None),
+            patch.object(pane.os, "access", return_value=True),
+            patch.object(
+                pane.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="Rendered\n"),
+            ) as render,
+        ):
+            self.panel.show()
+        self.assertEqual(render.call_args.args[0][0], "/opt/homebrew/bin/mdcat")
 
 
 class DismissTest(PanelCase):
@@ -321,7 +495,7 @@ class ReopenTest(IsolatedTestCase):
         base = self.dir / "state"
         attempts = []
 
-        def slow(slug, question):
+        def slow(slug, question, **kwargs):
             attempts.append(slug)
             raise subprocess.TimeoutExpired("ask-user-question", 10)
 
@@ -351,7 +525,9 @@ class ReopenTest(IsolatedTestCase):
         calls = []
         with (
             patch.dict(os.environ, {"ORCH_USER_QUESTIONS_DIR": str(self.dir)}),
-            patch.object(w, "open_question", lambda *args: calls.append(args) or 0),
+            patch.object(
+                w, "open_question", lambda *args, **kwargs: calls.append(args) or 0
+            ),
         ):
             w.collect_answers(None, consume=False)
             self.assertEqual(calls, [])
