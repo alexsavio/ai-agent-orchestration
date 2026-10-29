@@ -236,6 +236,7 @@ Before you report a task complete, every line must hold:
 6. **Any claim that decides behaviour on live pages, you verified yourself** — read-only, from the code.
 7. **An independent review pass** by an agent from the *other* family (or, when the other is off, a fresh Sonnet pane for a Haiku or Sonnet author, a fresh Opus pane for an Opus author, escalated to a stronger allowed tier for the cases in the provider rule; for a Fable author or with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code; see the provider rule above), which did not write the code.
    The author reviewing its own work is not a review.
+   Brief the reviewer with [references/reviewer.md](references/reviewer.md): a fixed findings table, one row per claim.
 8. **Anything removed has a removal audit.** When a PR deletes a public surface — an element tag, a
    partial, a helper, a test id, a CSS contract, a config key — it enumerates every remaining
    reference and proves each is handled. Grep the whole repo, including the languages the test suite
