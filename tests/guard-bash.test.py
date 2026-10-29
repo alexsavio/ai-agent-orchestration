@@ -1463,6 +1463,13 @@ pkill -f vite
             "append of a kill to a clean script",
             "echo 'pkill -f vite' >> clean.sh; bash clean.sh",
         ),
+        ("printf grouping flag", "printf \"%'s %'s\" pkill \"-f vite\" | sh"),
+        (
+            "printf escaped positional dollars",
+            'printf "%2\\$s %1\\$s" "-f vite" pkill | sh',
+        ),
+        ("printf unknown percent before conversion", "printf '%! %s' pkill '-f vite' | sh"),
+        ("printf unknown percent after conversion", "printf '%s %!' pkill '-f vite' | sh"),
         ("printf length modifier", "printf 'kill -9 %ld\\n' -1 | sh"),
         ("printf argument position", "printf '%1$s' 'pkill -f vite' | sh"),
         ("printf %d with leading zeros", "printf 'kill -9 %d\\n' -01 | sh"),
@@ -1842,7 +1849,12 @@ pkill -f vite
         'x\\"y',
         'x\\"y',
         'x"y',
+        'x\\"y',
     ], "printf: slots 1 and 4 read the quote, slot 3 keeps the text"
+    assert guard.printf_text("%%", [])[1]
+    assert guard.printf_text("%'s", ["echo hi"]) == ("echo hi", True)
+    assert not guard.printf_text("%! %s", ["echo hi"])[1]
+    assert not guard.printf_text("%s %!", ["echo hi"])[1]
     pairs = guard.joined(
         [guard.ScriptText(["a", "b", "c", "d"]), guard.ScriptText(["x", "y", "z"])]
     ).readings

@@ -708,7 +708,7 @@ ESCAPE = re.compile(
 ESCAPED = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n"}
 ESCAPED |= {"r": "\r", "t": "\t", "v": "\v", "\\": "\\", '"': '"', "'": "'", "?": "?"}
 PRINTF_CONVERSION = re.compile(
-    r"%(\d+\$)?([-+ #0]*)([1-9]\d*|\*)?(\.\*|\.\d*)?[hlLjtz]*([a-zA-Z%])"
+    r"%(\d+\$)?([-+ #0']*)([1-9]\d*|\*)?(\.\*|\.\d*)?[hlLjtz]*([a-zA-Z%])"
 )
 INTEGER = re.compile(r"\s*([-+]?)(0[xX][0-9a-fA-F]+|\d+)")
 QUOTING = str.maketrans("", "", "\"'\\")
@@ -742,6 +742,7 @@ def padding(flags, width, spec, value):
 
 
 def printf_value(flags, width, precision, conversion, arg):
+    flags = flags.replace("'", "")
     if conversion in "diuxXo":
         integer = INTEGER.match(arg)
         if integer:
@@ -776,6 +777,8 @@ def printf_text(format_, args, quotes=True):
         start, position = used, 0
         for match in PRINTF_CONVERSION.finditer(format_):
             place, flags, width, precision, conversion = match.groups(default="")
+            if "%" in format_[position : match.start()]:
+                modelled = False
             if append(unescape(format_[position : match.start()], quotes)):
                 return ScriptText(["".join(out)], PRINTF_TOO_LARGE_REASON), False
             position = match.end()
@@ -799,6 +802,8 @@ def printf_text(format_, args, quotes=True):
                 value = arg
             if append(value):
                 return ScriptText(["".join(out)], PRINTF_TOO_LARGE_REASON), False
+        if "%" in format_[position:]:
+            modelled = False
         if append(unescape(format_[position:], quotes)):
             return ScriptText(["".join(out)], PRINTF_TOO_LARGE_REASON), False
         if used >= len(args) or used == start:
@@ -810,7 +815,7 @@ def echoed_text(words):
     The readings are best-effort: they cover the common bash, zsh and sh readings, not every option of every shell.
     0 as written; 1 bash-like (echo follows the last e/E flag; printf reads \\" \\' \\?); 2 zsh-like (echo reads escapes; printf keeps
     \\" \\' \\?); 3 nothing read (echo) or each argument on a line (printf not modelled, else as written); 4 macOS sh (echo prints its option
-    words and reads escapes; printf reads \\" \\' \\?).
+    words and reads escapes; printf reads \\" \\' \\?); 5 arguments joined by spaces (printf not modelled, else as written).
     A text that does not parse falls back to fallback_stages, a word check that ignores quote characters and backslashes."""
     args = words[1:]
     texts = [" ".join(args).replace("\\n", "\n")]
@@ -825,6 +830,7 @@ def echoed_text(words):
             texts.append(text)
             texts.append(texts[0] if modelled else "\n".join(args[1:]))
             texts.append(texts[1])
+            texts.append(texts[0] if modelled else " ".join(args[1:]))
     else:
         options = ""
         while args and ECHO_OPTIONS.match(args[0]):
