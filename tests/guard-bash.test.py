@@ -2091,6 +2091,21 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             f"herdr pane run w1:p2 \"$(printf '{executable} --yolo')\"",
             True,
         )
+    for command in (
+        "cursor agent --yolo",
+        "command cursor agent --yolo",
+        "env FOO=1 cursor agent --yolo",
+        "exec cursor agent --yolo",
+        "/opt/bin/cursor agent --yolo",
+    ):
+        case(f"cursor command {command}", command, True)
+        case(
+            f"cursor pane command {command}",
+            f"herdr pane run w1:p2 '{command}'",
+            True,
+        )
+    for command in ("cursor .", "cursor --version", "cursor agent --help"):
+        case(f"allowed cursor command {command}", command)
     case(
         "generated agent argument is not a command",
         'herdr pane run p "$(printf echo) $(printf agent)"',

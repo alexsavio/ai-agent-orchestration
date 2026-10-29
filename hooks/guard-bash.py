@@ -1763,6 +1763,10 @@ def guard_pi(executable, args, where=".", disabled=()):
     """Enforce the pi and Cursor launchers and model restrictions on agent starts."""
     if executable in ("cursor-agent", "agent"):
         return None if pi_info(args) else CURSOR_REASON
+    if executable == "cursor":
+        if args[:1] != ["agent"]:
+            return None
+        return None if pi_info(args[1:]) else CURSOR_REASON
     if executable == "herdr":
         pair, rest = herdr_subcommand(args)
         text = " ".join(rest[1:][1 if rest[1:2] == ["--"] else 0 :])
@@ -1821,7 +1825,8 @@ def pi_candidates(words, wrapped):
         candidate
         for candidate in found
         if candidate
-        and os.path.basename(candidate[0]) in ("herdr", "pi", "cursor-agent", "agent")
+        and os.path.basename(candidate[0])
+        in ("herdr", "pi", "cursor", "cursor-agent", "agent")
     ]
 
 
@@ -1908,7 +1913,7 @@ def evaluate_words(words, where, command, disabled, pipeline):
     elif executable == "gh":
         args = unwrap_gh(args)
         guards = (guard_attribution,)
-    elif executable in ("herdr", "pi", "cursor-agent", "agent"):
+    elif executable in ("herdr", "pi", "cursor", "cursor-agent", "agent"):
         return (
             None
             if "guard_pi" in disabled
