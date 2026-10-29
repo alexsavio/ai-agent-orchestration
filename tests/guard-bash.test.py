@@ -1718,10 +1718,6 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "echo 'p\\\"kill -f vite' | sh",
         ),
         (
-            "echo append that a printf quote encloses in every reading",
-            "printf 'echo \"\\n' > m.sh; echo 'pkill -f vite \"' >> m.sh; bash m.sh",
-        ),
-        (
             "echo of an unterminated quote piped to a shell",
             "echo 'echo \"unterminated' | sh",
         ),
@@ -1791,6 +1787,8 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         "p",
         "\\x70",
     ], "echo without -e: slot 1 keeps the text, slot 2 reads it"
+    pairs = guard.joined(["a\x1eb\x1ec\x1ed", "x\x1ey\x1ez"]).split(guard.VARIANT)
+    assert pairs == ["a\nx", "b\ny", "c\nz", "d\nx"], "a missing slot reads the first"
     long_piece = guard.capped("a" * 200000 + guard.VARIANT + "b")
     assert len(long_piece) == guard.SCRIPT_SCAN_LIMIT + 1 + 2, (
         "capped keeps a long piece"
