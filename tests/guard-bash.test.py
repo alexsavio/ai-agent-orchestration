@@ -1463,13 +1463,19 @@ pkill -f vite
             "append of a kill to a clean script",
             "echo 'pkill -f vite' >> clean.sh; bash clean.sh",
         ),
-        ("printf grouping flag", "printf \"%'s %'s\" pkill \"-f vite\" | sh"),
+        ("printf grouping flag", 'printf "%\'s %\'s" pkill "-f vite" | sh'),
         (
             "printf escaped positional dollars",
             'printf "%2\\$s %1\\$s" "-f vite" pkill | sh',
         ),
-        ("printf unknown percent before conversion", "printf '%! %s' pkill '-f vite' | sh"),
-        ("printf unknown percent after conversion", "printf '%s %!' pkill '-f vite' | sh"),
+        (
+            "printf unknown percent before conversion",
+            "printf '%! %s' pkill '-f vite' | sh",
+        ),
+        (
+            "printf unknown percent after conversion",
+            "printf '%s %!' pkill '-f vite' | sh",
+        ),
         ("printf length modifier", "printf 'kill -9 %ld\\n' -1 | sh"),
         ("printf argument position", "printf '%1$s' 'pkill -f vite' | sh"),
         ("printf %d with leading zeros", "printf 'kill -9 %d\\n' -01 | sh"),
@@ -2012,7 +2018,10 @@ pkill -f vite
     guard.SCRIPT_SCAN_SECONDS = -1
     try:
         result, new_log = logged(f"bash {scripts}/kills.sh", repo)
-        assert result and "budget exhausted" in result and "scan-budget" in new_log, (result, new_log)
+        assert result and "budget exhausted" in result and "scan-budget" in new_log, (
+            result,
+            new_log,
+        )
         result, new_log = logged(f"bash {scripts}/kills.sh; git stash", wt)
         assert result and "scan-budget" in new_log, (result, new_log)
     finally:
