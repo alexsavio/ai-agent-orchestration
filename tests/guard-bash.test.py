@@ -1044,6 +1044,7 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         (scripts / fixture).write_text(text)
     (scripts / "rs.sh").write_text("killall \x1e node\n")
     (scripts / "us.sh").write_text("echo \x1f\n")
+    (scripts / "seen-safe.sh").write_text("echo safe\n")
     for marker in ("\x1d", "\x1e", "\x1f"):
         name = f"kill{marker}.sh"
         reference = f"bash ./{name}"
@@ -1123,6 +1124,22 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ),
         ("printf %s written script", "printf '%s' 'pkill -f vite' > k.sh; bash k.sh"),
         ("printf %q followed by a literal", "printf '%qkill -f vite\\n' p | sh"),
+        (
+            "echo last -eE flag keeps escapes in a paired append",
+            r"""printf 'echo "\x22\n' > m.sh; echo -eE 'echo "\x22"
+pkill -f vite
+# "' >> m.sh; bash m.sh""",
+        ),
+        (
+            "echo last separate -E flag keeps escapes in a paired append",
+            r"""printf 'echo "\x22\n' > m.sh; echo -e -E 'echo "\x22"
+pkill -f vite
+# "' >> m.sh; bash m.sh""",
+        ),
+        (
+            "decoded reading revisits a rewritten disk script",
+            r"""echo -e '\0145cho "pkill -f vite" > seen-safe.sh; bash seen-safe.sh' | sh""",
+        ),
         (
             "printf %b preserves quote escapes",
             r"""printf '%b\n' 'echo \"\n\x70kill -f vite\n\"' | sh""",
@@ -1799,6 +1816,10 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         assert slots[1] == "p", f"echo {options}: slot 1 reads"
     slots = guard.echoed_text(["echo", "-E", "\\x70"]).readings
     assert slots[1:3] == ("\\x70", "p"), "echo -E: slot 1 keeps the text, slot 2 reads"
+    for options in (["-eE"], ["-e", "-E"], ["-E", "-e", "-E"]):
+        assert guard.echoed_text(["echo", *options, "\\x70"]).readings[1] == "\\x70", (
+            f"echo {options}: the final -E disables bash escapes"
+        )
     assert guard.echoed_text(["echo", "-n", "\\x70"]).readings[4] == "-n p", (
         "echo slot 4 keeps the option words"
     )

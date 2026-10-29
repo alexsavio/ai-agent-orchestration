@@ -808,7 +808,7 @@ def printf_text(format_, args, quotes=True):
 def echoed_text(words):
     """Returns the readings of the text echo or printf writes, one fixed slot each, so an append or cat pairs slot with slot.
     The readings are best-effort: they cover the common bash, zsh and sh readings, not every option of every shell.
-    0 as written; 1 bash-like (echo reads escapes with -e; printf reads \\" \\' \\?); 2 zsh-like (echo reads escapes; printf keeps
+    0 as written; 1 bash-like (echo follows the last e/E flag; printf reads \\" \\' \\?); 2 zsh-like (echo reads escapes; printf keeps
     \\" \\' \\?); 3 nothing read (echo) or each argument on a line (printf not modelled, else as written); 4 macOS sh (echo prints its option
     words and reads escapes; printf reads \\" \\' \\?).
     A text that does not parse falls back to fallback_stages, a word check that ignores quote characters and backslashes."""
@@ -830,7 +830,8 @@ def echoed_text(words):
             args = args[1:]
         plain, read = " ".join(args), unescape(" ".join(args), False)
         printed = unescape(" ".join(words[1:]), False)
-        texts += [read if "e" in options else plain, read, plain, printed]
+        escape_flags = [flag for flag in options if flag in "eE"]
+        texts += [read if escape_flags[-1:] == ["e"] else plain, read, plain, printed]
     return ScriptText(texts)
 
 
@@ -1302,10 +1303,15 @@ def code_kills(code, cwd, disabled, depth, state):
     if isinstance(code, ScriptText):
         if code.too_large:
             raise TooLarge(code.too_large)
-        return any(
-            code_kills(piece, cwd, disabled, depth, state)
-            for piece in dict.fromkeys(code.readings)
-        )
+        seen = state["seen"]
+        try:
+            for piece in dict.fromkeys(code.readings):
+                state["seen"] = seen.copy()
+                if code_kills(piece, cwd, disabled, depth, state):
+                    return True
+            return False
+        finally:
+            state["seen"] = seen
     code = bounded(code)
     state["left"] -= len(code)
     if state["left"] < 0:
