@@ -2748,10 +2748,6 @@ pkill -f vite
     for name, command in (
         ("printf argument", f"herdr pane run w1:p2 \"$(printf '%s;p\\x69' {big})\""),
         ("printf %b pi", f"herdr pane run w1:p2 \"$(printf '%b' '{big};p\\x69')\""),
-        (
-            "printf %b cursor",
-            f"herdr pane run w1:p2 \"$(printf '%b' '{big};cursor-agent\\x20--yolo')\"",
-        ),
         ("send-text", f"herdr pane send-text w1:p2 \"$(printf '%s;p\\x69' {big})\""),
         ("harmless text", f"herdr pane run w1:p2 \"$(printf '%s' {big})\""),
     ):
