@@ -388,6 +388,23 @@ fork_head_missing_from_pull_ref() {
   [ "$status" -eq 1 ]
 }
 
+@test "the reviewer start is a worker start with the file-edit deny last" {
+  # shellcheck disable=SC2016 # The backticks are literal skill text.
+  grep -qF -- 'A Claude reviewer start is a worker start with the deny last: `... -- --model <model> <effort flag> --strict-mcp-config --disallowedTools "Edit(./**)" NotebookEdit`' "$ROOT/skills/architect/references/dispatch.md"
+}
+
+@test "the gate item 7 points to the reviewer template" {
+  grep -qF -- 'Brief the reviewer with [references/reviewer.md](references/reviewer.md)' "$ROOT/skills/architect/SKILL.md"
+}
+
+@test "the reviewer template pins the findings table header" {
+  grep -qF -- '| claim | file:line opened | verdict | evidence | rung | fix the author can apply |' "$ROOT/skills/architect/references/reviewer.md"
+}
+
+@test "the reviewer template says the tool block is a tripwire, not a sandbox" {
+  grep -qF -- 'this is a tripwire, not a sandbox' "$ROOT/skills/architect/references/reviewer.md"
+}
+
 @test "a per-dispatch effort survives a worker recycle through the handoff" {
   # shellcheck disable=SC2016 # The backticks are literal skill text.
   grep -qF -- '- **Effort:** the `--effort` level of the first start, from the dispatch note (you cannot see your own level), or empty when the first start passed no `--effort`; the architect fills it in when the worker leaves it out.' "$ROOT/skills/architect/references/worker-recycle.md"
@@ -1434,4 +1451,9 @@ assert len(lines) == 1 and lines[0].startswith("ready:"), lines
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["queue"], "codex is off" in d["note"])')" = "[] True" ]
   [ ! -e "$TMP/gh.called" ]
+}
+
+@test "the architect skill keeps /goal out of the default worker brief" {
+  grep -qF 'is not part of the default worker brief' "$ROOT/skills/architect/SKILL.md"
+  grep -qF 'joins the running turn' "$ROOT/skills/architect/SKILL.md"
 }

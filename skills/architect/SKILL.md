@@ -185,6 +185,8 @@ No code starts until the Coordinator answers `LEGACY OK`. Other projects skip th
 ## Guardrails in every handoff
 
 - Workers do not call the `advisor` tool; architects and the Coordinator keep it. Each call re-reads the whole transcript uncached on the advisor model.
+- `/goal` is not part of the default worker brief. It is not shown to help yet; keep it for a long job whose worker is known to stop early, and write the condition for all the work you will send to that pane.
+- The goal is checked only when a turn ends. A prompt sent to a busy pane joins the running turn, so a goal set for one task is checked after all of them; once met it clears.
 - Prove the test **fails first**. Mutate one guard at a time and report which test caught it. A test that stays green under its own mutation pins nothing.
 - Run the linter **and** the formatter. Passing lint is not passing CI.
 - A pure refactor edits **no spec**, and the test count matches before and after.
@@ -238,6 +240,7 @@ Before you report a task complete, every line must hold:
 6. **Any claim that decides behaviour on live pages, you verified yourself** — read-only, from the code.
 7. **An independent review pass** by an agent from the *other* family (or, when the other is off, a fresh Sonnet pane for a Haiku or Sonnet author, a fresh Opus pane for an Opus author, escalated to a stronger allowed tier for the cases in the provider rule; for a Fable author or with no stronger allowed tier, a fresh pane of the strongest allowed tier that did not write the code; see the provider rule above), which did not write the code.
    The author reviewing its own work is not a review.
+   Brief the reviewer with [references/reviewer.md](references/reviewer.md): a fixed findings table, one row per claim.
 8. **Anything removed has a removal audit.** When a PR deletes a public surface — an element tag, a
    partial, a helper, a test id, a CSS contract, a config key — it enumerates every remaining
    reference and proves each is handled. Grep the whole repo, including the languages the test suite
