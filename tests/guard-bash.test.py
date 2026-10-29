@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ["ORCH_ENV"] = "none"
 
@@ -1101,6 +1102,11 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "tee -- -guard.sh <<'EOF'\nkill -9 -1\nEOF\nsh -- -guard.sh",
         ),
         ("printf %s written script", "printf '%s' 'pkill -f vite' > k.sh; bash k.sh"),
+        ("printf %q followed by a literal", "printf '%qkill -f vite\\n' p | sh"),
+        (
+            "printf %b preserves quote escapes",
+            r"""printf '%b\n' 'echo \"\n\x70kill -f vite\n\"' | sh""",
+        ),
         ("echo after a lone dash", "echo - 'pkill -f vite' | sh"),
         (
             "printf format reuse past the scan budget",
@@ -1789,6 +1795,18 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     assert len(long_piece) == guard.SCRIPT_SCAN_LIMIT + 1 + 2, (
         "capped keeps a long piece"
     )
+    with patch.object(guard, "printf_value", wraps=guard.printf_value) as conversion:
+        text, modelled = guard.printf_text("%1$s" * 10000, ["x" * 60000])
+    assert conversion.call_count == 2, "printf must stop converting at the size limit"
+    assert text == "x" * guard.SCRIPT_SCAN_LIMIT + guard.CUT and not modelled
+    text, modelled = guard.printf_text("x" * guard.SCRIPT_SCAN_LIMIT, [])
+    assert len(text) == guard.SCRIPT_SCAN_LIMIT and modelled
+    for format_ in (
+        "x" * (guard.SCRIPT_SCAN_LIMIT + 1),
+        "x" * guard.SCRIPT_SCAN_LIMIT + "%%",
+    ):
+        text, modelled = guard.printf_text(format_, [])
+        assert text == "x" * guard.SCRIPT_SCAN_LIMIT + guard.CUT and not modelled
     assert time.perf_counter() - started < 3, "scan budget is not applied"
     assert not log_path.exists() or "scan-budget" not in log_path.read_text()
     for number in range(40):

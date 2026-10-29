@@ -694,7 +694,7 @@ ESCAPE = re.compile(
 ESCAPED = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n"}
 ESCAPED |= {"r": "\r", "t": "\t", "v": "\v", "\\": "\\", '"': '"', "'": "'", "?": "?"}
 PRINTF_CONVERSION = re.compile(
-    r"%(\d+\$)?([-+ #0]*)(\*|\d+)?(\.\*|\.\d*)?[hlLjqtz]*([a-zA-Z%])"
+    r"%(\d+\$)?([-+ #0]*)(\*|\d+)?(\.\*|\.\d*)?[hlLjtz]*([a-zA-Z%])"
 )
 INTEGER = re.compile(r"\s*([-+]?)(0[xX][0-9a-fA-F]+|\d+)")
 QUOTING = str.maketrans("", "", "\"'\\")
@@ -741,9 +741,11 @@ def printf_value(flags, width, precision, conversion, arg):
         spec = "d" if conversion in "iu" else conversion
         flags = flags.replace("0", "")
         return ("%" + flags + padding(flags, width, spec, number) + spec) % number
-    value = {"b": unescape, "q": shlex.quote, "c": lambda arg: arg[:1]}.get(
-        conversion, str
-    )(arg)
+    value = {
+        "b": lambda arg: unescape(arg, False),
+        "q": shlex.quote,
+        "c": lambda arg: arg[:1],
+    }.get(conversion, str)(arg)
     spec = precision + "s"
     return ("%" + flags + padding(flags, width, spec, value) + spec) % value
 
@@ -752,14 +754,23 @@ def printf_text(format_, args, quotes=True):
     """Returns the text printf writes for a format and its arguments, and the arguments left over when a conversion is not modelled.
     Output past SCRIPT_SCAN_LIMIT is cut and ends in CUT."""
     out, used, modelled, size = [], 0, True, 0
+
+    def append(text):
+        nonlocal size
+        out.append(text[: SCRIPT_SCAN_LIMIT - size])
+        size += len(text)
+        return size > SCRIPT_SCAN_LIMIT
+
     while True:
-        start, position, first = used, 0, len(out)
+        start, position = used, 0
         for match in PRINTF_CONVERSION.finditer(format_):
             place, flags, width, precision, conversion = match.groups(default="")
-            out.append(unescape(format_[position : match.start()], quotes))
+            if append(unescape(format_[position : match.start()], quotes)):
+                return clean("".join(out)) + CUT, False
             position = match.end()
             if conversion == "%":
-                out.append("%")
+                if append("%"):
+                    return clean("".join(out)) + CUT, False
                 continue
             if place and len(place) < 10:
                 used = max(int(place[:-1]) - 1, 0)
@@ -771,14 +782,14 @@ def printf_text(format_, args, quotes=True):
             try:
                 if "*" in width + precision or conversion not in "sbcdiuxXoq":
                     raise ValueError(conversion)
-                out.append(printf_value(flags, width, precision, conversion, arg))
+                value = printf_value(flags, width, precision, conversion, arg)
             except (ValueError, TypeError):
                 modelled = False
-                out.append(arg)
-        out.append(unescape(format_[position:], quotes))
-        size += sum(map(len, out[first:]))
-        if size > SCRIPT_SCAN_LIMIT:
-            return clean("".join(out)[:SCRIPT_SCAN_LIMIT]) + CUT, False
+                value = arg
+            if append(value):
+                return clean("".join(out)) + CUT, False
+        if append(unescape(format_[position:], quotes)):
+            return clean("".join(out)) + CUT, False
         if used >= len(args) or used == start:
             return clean("".join(out)), modelled
 
