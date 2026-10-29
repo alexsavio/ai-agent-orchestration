@@ -783,7 +783,9 @@ def printf_text(format_, args, quotes=True):
 
 
 def echoed_text(words):
-    """Returns the readings of the text echo or printf writes, one fixed slot each: as written, escapes read, escapes kept, and each argument on a line."""
+    """Returns the readings of the text echo or printf writes, one fixed slot each, and slot i is the same shell in both:
+    0 as written, 1 bash (echo reads escapes only with -e; printf reads \\" \\' \\?), 2 zsh (echo reads escapes unless -E; printf keeps
+    \\" \\' \\?), 3 nothing read (echo) or each argument on a line (printf). No shell's echo reads \\" \\' \\?."""
     args = words[1:]
     texts = [clean(" ".join(args).replace("\\n", "\n"))]
     if os.path.basename(words[0]) == "printf":
@@ -796,9 +798,16 @@ def echoed_text(words):
             if not modelled:
                 texts.append(clean("\n".join(args[1:])))
     else:
+        options = ""
         while args and ECHO_OPTIONS.match(args[0]):
+            options += args[0]
             args = args[1:]
-        texts += [clean(unescape(" ".join(args))), clean(" ".join(args))]
+        plain, read = clean(" ".join(args)), clean(unescape(" ".join(args), False))
+        texts += [
+            read if "e" in options else plain,
+            plain if "E" in options else read,
+            plain,
+        ]
     return VARIANT.join(texts)
 
 

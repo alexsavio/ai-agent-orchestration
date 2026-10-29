@@ -1275,6 +1275,38 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "append of an echo whose readings pair across texts",
             'printf \'"\\x22\\"\\n\' > m.sh; echo -e \'p"k"ill -f vite \\"\' >> m.sh; bash m.sh',
         ),
+        (
+            "echo -e keeps a backslash quote the shell keeps",
+            'echo -e \'p"k"il\\x6c -f vite \\"\' | sh',
+        ),
+        (
+            "echo keeps a backslash quote the shell keeps",
+            'echo \'p"k"il\\x6c -f vite \\"\' | sh',
+        ),
+        (
+            "append of a plain echo to a printf with a backslash quote",
+            'printf \'echo "\\"\\n\' > m.sh; echo \'p"k"ill -f vite \\"\' >> m.sh; bash m.sh',
+        ),
+        (
+            "append of an echo with an escape to a printf that pairs across texts",
+            'printf \'"\\x22\\"\\n\' > m.sh; echo \'p"k"il\\x6c -f vite \\"\' >> m.sh; bash m.sh',
+        ),
+        (
+            "cat of a printf and an echo whose readings pair across texts",
+            'printf \'"\\x22\\"\\n\' > m.sh; echo \'p"k"ill -f vite \\"\' > n.sh; cat m.sh n.sh | sh',
+        ),
+        (
+            "cat of a printf and a heredoc whose readings pair across texts",
+            "printf 'echo \"\\\"\\n' > m.sh; cat > q.sh <<'EOF'\np\"k\"ill -f vite\nEOF\ncat m.sh q.sh | sh",
+        ),
+        (
+            "heredoc append to a printf whose readings pair across texts",
+            "printf 'echo \"\\\"\\n' > m.sh; cat >> m.sh <<'EOF'\np\"k\"ill -f vite\nEOF\nbash m.sh",
+        ),
+        (
+            "repeated echo text and a script, each under the scan budget alone",
+            "echo '" + "\n".join([": " + "x" * 1000] * 180) + "' | sh; bash kills.sh",
+        ),
         ("cat of two disk files past the scan limit", "cat a40.sh b40.sh | sh"),
         (
             "append to a disk file past the scan limit",
