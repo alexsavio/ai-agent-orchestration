@@ -157,7 +157,7 @@ watch_long() {
 
 # Killing the watcher alone leaves its foreground sleep behind, so the watcher runs the sleep in the
 # background and its TERM trap kills it. After RUNLONG the watcher keeps running until the job ends or
-# stop_watch kills it, so stop_watch never signals a reaped pid.
+# stop_watch kills it, so stop_watch rarely signals a freed pid.
 # The watcher is started from a subshell, so it is not a child of this shell: bash 5.2 can print
 # "wait_for: No record of process" into the job's stderr when a child dies during a command substitution.
 start_watch() {
@@ -337,6 +337,8 @@ forward_signal() {
     terminate_group "$CHILD_PID"
     wait "$CHILD_PID" 2>/dev/null || true
   fi
+  # Bash 3.2 runs a second identical signal after the first exit, which skips the EXIT trap and its cleanup.
+  trap '' INT TERM HUP
   exit "$code"
 }
 
