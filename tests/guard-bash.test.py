@@ -1368,6 +1368,30 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "printf 'echo \"\\\"\\n' > m.sh; echo -n -e 'p\"k\"il\\x6c -f vite' >> m.sh; bash m.sh",
         ),
         (
+            "echo -Ee append, the escape read in the bash reading alone",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -Ee '\\x70kill -f vite # \"' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo -n -e append, the escape read in the bash reading alone",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -n -e '\\x70kill -f vite # \"' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo -e -n append, the escape read in the bash reading alone",
+            "printf 'echo \"\\\"\\n' > m.sh; echo -e -n '\\x70kill -f vite # \"' >> m.sh; bash m.sh",
+        ),
+        (
+            "plain echo append, the escape read in the zsh reading alone",
+            "printf 'echo \\\"\\n' > m.sh; echo '\\x70kill -f vite # \"' >> m.sh; bash m.sh",
+        ),
+        (
+            "echo -e piped to a shell, the text no shell reads is the only kill",
+            "echo -e ''\"'\"'\\\\pkill -f vite\\47' | sh",
+        ),
+        (
+            "echo -e append to a printf quote, the unread text is the only kill",
+            "echo -e \"'pkill -f vite\" >> m.sh; printf '\\47\\n' >> m.sh; sh m.sh",
+        ),
+        (
             "append of a plain echo to a printf with a backslash quote",
             'printf \'echo "\\"\\n\' > m.sh; echo \'p"k"ill -f vite \\"\' >> m.sh; bash m.sh',
         ),
@@ -1690,6 +1714,14 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ("overwrite of a script on disk", "echo 'echo hi' > kills.sh; bash kills.sh"),
         ("echo a lone dash", "echo - hi | sh"),
         (
+            "echo of a backslash quote inside a kill word, piped to a shell",
+            "echo 'p\\\"kill -f vite' | sh",
+        ),
+        (
+            "echo append that a printf quote encloses in every reading",
+            "printf 'echo \"\\n' > m.sh; echo 'pkill -f vite \"' >> m.sh; bash m.sh",
+        ),
+        (
             "echo of an unterminated quote piped to a shell",
             "echo 'echo \"unterminated' | sh",
         ),
@@ -1753,6 +1785,12 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         assert reason and "script text" in reason and "printf" not in reason, reason
     reason = guard.evaluate("printf '" + PAD + "%s\\n' " + "x " * 70 + "| sh", scripts)
     assert reason and "printf output" in reason, reason
+    assert guard.echoed_text(["echo", "\\x70"]).split(guard.VARIANT) == [
+        "\\x70",
+        "\\x70",
+        "p",
+        "\\x70",
+    ], "echo without -e: slot 1 keeps the text, slot 2 reads it"
     long_piece = guard.capped("a" * 200000 + guard.VARIANT + "b")
     assert len(long_piece) == guard.SCRIPT_SCAN_LIMIT + 1 + 2, (
         "capped keeps a long piece"
