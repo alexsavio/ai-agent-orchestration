@@ -673,9 +673,16 @@ def shell_args(words):
     return command_mode, stdin_mode, check_only, operands
 
 
+def clean(text):
+    """Replaces the marker bytes VARIANT and CUT, so text from a command or a file cannot fake one."""
+    return text.replace(VARIANT, "_").replace(CUT, "_")
+
+
 def heredoc_bodies(words):
     return [
-        words[i + 1] for i in range(len(words) - 1) if words[i] == "--guard-heredoc"
+        clean(words[i + 1])
+        for i in range(len(words) - 1)
+        if words[i] == "--guard-heredoc"
     ]
 
 
@@ -729,6 +736,7 @@ def printf_value(flags, width, precision, conversion, arg):
         else:
             number = ord(arg[1]) if arg[:1] in "'\"" and len(arg) > 1 else 0
         spec = "d" if conversion in "iu" else conversion
+        flags = flags.replace("0", "")
         return ("%" + flags + padding(flags, width, spec, number) + spec) % number
     value = {"b": unescape, "q": shlex.quote, "c": lambda arg: arg[:1]}.get(
         conversion, str
@@ -767,15 +775,15 @@ def printf_text(format_, args, quotes=True):
         out.append(unescape(format_[position:], quotes))
         size += sum(map(len, out[first:]))
         if size > SCRIPT_SCAN_LIMIT:
-            return "".join(out)[:SCRIPT_SCAN_LIMIT] + CUT, False
+            return clean("".join(out)[:SCRIPT_SCAN_LIMIT]) + CUT, False
         if used >= len(args) or used == start:
-            return "".join(out), modelled
+            return clean("".join(out)), modelled
 
 
 def echoed_text(words):
     """Returns the text echo or printf writes: as written, with escapes read, and with the format filled in."""
     args = words[1:]
-    texts = [" ".join(args).replace("\\n", "\n")]
+    texts = [clean(" ".join(args).replace("\\n", "\n"))]
     if os.path.basename(words[0]) == "printf":
         while args[:1] == ["--"] or args[:1] == ["-v"]:
             args = args[2:] if args[0] == "-v" else args[1:]
@@ -784,11 +792,11 @@ def echoed_text(words):
                 text, modelled = printf_text(args[0], args[1:], quotes)
                 texts.append(text)
             if not modelled:
-                texts.append("\n".join(args[1:]))
+                texts.append(clean("\n".join(args[1:])))
     else:
         while args and ECHO_OPTIONS.match(args[0]):
             args = args[1:]
-        texts += [" ".join(args), unescape(" ".join(args))]
+        texts += [clean(" ".join(args)), clean(unescape(" ".join(args)))]
     return VARIANT.join(dict.fromkeys(texts))
 
 
@@ -796,13 +804,13 @@ def shell_programs(words):
     """Returns the code a shell runs: its -c program, else its stdin heredoc unless a script file is named; for ksh, also an operand it cannot open as a file."""
     name = os.path.basename(words[0]) if words else ""
     if name == "eval":
-        return [" ".join(words[1:])]
+        return [clean(" ".join(words[1:]))]
     if name not in SHELL_EXECUTABLES:
         return []
     heredocs = heredoc_bodies(words)
     command_mode, stdin_mode, _, operands = shell_args(words)
     if command_mode or (name == "ksh" and operands and not stdin_mode):
-        return operands[:1]
+        return [clean(operand) for operand in operands[:1]]
     return heredocs if stdin_mode or not operands else []
 
 
@@ -1013,6 +1021,14 @@ def joined(texts):
     )
 
 
+def capped(text):
+    """Cuts each VARIANT piece of text at SCRIPT_SCAN_LIMIT and marks a cut piece with CUT."""
+    return VARIANT.join(
+        piece[:SCRIPT_SCAN_LIMIT] + (CUT if len(piece) > SCRIPT_SCAN_LIMIT else "")
+        for piece in text.split(VARIANT)
+    )
+
+
 SCRIPT_SCAN_SECONDS = 5
 SCRIPT_HEREDOC_LIMIT = 64
 SCRIPT_SHELLS = SHELL_EXECUTABLES - {"eval"}
@@ -1043,7 +1059,7 @@ def script_text(path):
             data = handle.read(SCRIPT_SCAN_LIMIT)
     except OSError:
         return None
-    return None if b"\0" in data else data.decode("utf-8", "replace")
+    return None if b"\0" in data else clean(data.decode("utf-8", "replace"))
 
 
 def runs_as_shell(code):
@@ -1123,7 +1139,7 @@ def stdin_program(words, where, pipeline, redirects, env, written):
     """The code a shell without a script operand reads from a here-string, a file or the pipe before it."""
     for op, target in redirects:
         if op == "<<<":
-            return target
+            return clean(target)
         if op == "<":
             return written_or_disk_text(run_key(target, where, env), written)
     if len(pipeline) < 2:
@@ -1144,11 +1160,7 @@ def stdin_program(words, where, pipeline, redirects, env, written):
             if size < SCRIPT_SCAN_LIMIT:
                 parts.append(written_or_disk_text(key, written))
                 size += len(parts[-1]) + 1
-        return VARIANT.join(
-            piece[:SCRIPT_SCAN_LIMIT]
-            + (CUT if CUT in piece[SCRIPT_SCAN_LIMIT:] else "")
-            for piece in joined(parts or [""]).split(VARIANT)
-        )
+        return capped(joined(parts or [""]))
     return None
 
 
@@ -1174,7 +1186,7 @@ def runs(entries, disabled):
         for target, append in targets:
             key = run_key(target, where, env)
             before = written_or_disk_text(key, written) if append else ""
-            written[key] = joined([before, text]) if before else text
+            written[key] = capped(joined([before, text])) if before else text
         if "guard_inline_shell" not in disabled:
             for text in shell_programs(words):
                 yield "an inline shell program", text, where, None

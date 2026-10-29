@@ -1041,6 +1041,8 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     }
     for fixture, text in fixtures.items():
         (scripts / fixture).write_text(text)
+    (scripts / "rs.sh").write_text("killall \x1e node\n")
+    (scripts / "us.sh").write_text("echo \x1f\n")
     (scripts / "dash").mkdir()
     (scripts / "dash" / "-").write_text("pkill -f vite\n")
     (scripts / "bin.sh").write_bytes(b"#!/bin/bash\npkill -f vite\n\0")
@@ -1198,6 +1200,67 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         ),
         ("printf precision on a number", "printf 'kill -9 %.2d\\n' -1 | sh"),
         ("printf single quote escape", "printf \"p\\'\\'kill -f vite\\n\" | sh"),
+        (
+            "printf escape makes the variant byte",
+            "printf 'killall \\036 \\156ode\\n' | sh",
+        ),
+        (
+            "echo -e hex escape makes the variant byte",
+            "echo -e 'killall \\x1e \\x6eode' | sh",
+        ),
+        (
+            "echo -e variant byte in a written script",
+            "echo -e 'killall \\x1e \\x6eode' > w.sh; bash w.sh",
+        ),
+        (
+            "printf variant byte in kill arguments",
+            "printf 'kill -9 \\036 -1\\n' > w.sh; zsh w.sh",
+        ),
+        (
+            "quote kill found only in the kept escape reading",
+            'printf \'p"\\x6b"ill -f vite\\n\\"\\n\' | sh',
+        ),
+        (
+            "single quote kill found only in the kept escape reading",
+            "printf 'p\"\\x6b\"ill -f vite\\n\\'\"'\"'\\n' | sh",
+        ),
+        (
+            "cat of a lone quote script and a quoted kill",
+            "printf '\\\"\\n' > a.sh; echo 'p\"k\"ill -f vite' > b.sh; cat a.sh b.sh | sh",
+        ),
+        (
+            "kept escape reading before a conversion",
+            'printf \'p"\\x6b"ill -f vite\\n\\"%s\\n\' x | sh',
+        ),
+        ("printf width of a kill word", "printf 'pk%1sll -f vite\\n' i | sh"),
+        ("printf width of a pid", "printf 'kill -9 -%1d\\n' 1 | sh"),
+        (
+            "append wrapped across readings",
+            "printf '\"\\x22\\\"\\n' > a.sh; printf 'p\"\\x6b\"ill -f vite\\n' >> a.sh; bash a.sh",
+        ),
+        ("separator byte typed in a heredoc", "bash <<'EOF'\nkillall \x1e node\nEOF"),
+        ("separator byte typed in eval", "eval 'killall \x1e node'"),
+        ("separator byte typed in bash -c", "bash -c 'killall \x1e node'"),
+        ("separator byte typed in a here-string", "bash <<< 'killall \x1e node'"),
+        ("separator byte in a script on disk", "bash rs.sh"),
+        ("separator byte typed in echo", "echo 'killall \x1e node' | sh"),
+        (
+            "separator byte typed in a printf argument",
+            "printf '%f\\n' 'killall \x1e node' | sh",
+        ),
+        (
+            "cat of two files past the scan limit",
+            "printf ': "
+            + "x" * 40000
+            + "\\n' > a.sh; printf ': "
+            + "x" * 40000
+            + "\\n' > b.sh; cat a.sh b.sh | sh",
+        ),
+        ("printf zero flag on a pid", "printf 'kill -9 %05d\\n' -1 | sh"),
+        (
+            "many appends past the scan limit, then run",
+            "echo hi > a.sh; " + ("printf '" + PAD + "' >> a.sh; ") * 100 + "bash a.sh",
+        ),
         (
             "tee --append to a script on disk",
             "tee --append kills.sh <<'EOF'\necho done\nEOF\nbash kills.sh",
@@ -1499,6 +1562,19 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         (
             "printf width and precision",
             "printf '%-10s|%5d|%.2s\\n' a 3 xyz > table.txt",
+        ),
+        ("printf separator byte inside a word", "printf 'p\\036kill -f vite\\n' | sh"),
+        ("printf separator byte inside a pid", "printf 'kill -9 \\036-1\\n' | sh"),
+        ("unit separator byte in a script on disk", "bash us.sh"),
+        ("echo separator byte after a kill word", "echo 'pkill\x1e -f vite' | sh"),
+        (
+            "printf argument separator byte after a kill word",
+            "printf '%f\\n' 'pkill\x1e -f vite' | sh",
+        ),
+        ("printf unit separator byte, run", "printf 'echo \\037\\n' | sh"),
+        (
+            "printf unit separator byte in a written script, run",
+            "printf 'echo \\037\\n' > a.sh; bash a.sh",
         ),
         (
             "tee after the option terminator, never run",
