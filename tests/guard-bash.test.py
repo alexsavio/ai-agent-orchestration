@@ -1356,30 +1356,6 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
             "printf 'echo \"\\\"\\n' > m.sh; echo 'p\"k\"ill -f vite \\x27' >> m.sh; bash m.sh",
         ),
         (
-            "echo -Ee append, last option wins",
-            "printf 'echo \"\\\"\\n' > m.sh; echo -Ee 'p\"k\"il\\x6c -f vite' >> m.sh; bash m.sh",
-        ),
-        (
-            "echo -e -n append, second option word",
-            "printf 'echo \"\\\"\\n' > m.sh; echo -e -n 'p\"k\"il\\x6c -f vite' >> m.sh; bash m.sh",
-        ),
-        (
-            "echo -n -e append, first option word",
-            "printf 'echo \"\\\"\\n' > m.sh; echo -n -e 'p\"k\"il\\x6c -f vite' >> m.sh; bash m.sh",
-        ),
-        (
-            "echo -Ee append, the escape read in the bash reading alone",
-            "printf 'echo \"\\\"\\n' > m.sh; echo -Ee '\\x70kill -f vite # \"' >> m.sh; bash m.sh",
-        ),
-        (
-            "echo -n -e append, the escape read in the bash reading alone",
-            "printf 'echo \"\\\"\\n' > m.sh; echo -n -e '\\x70kill -f vite # \"' >> m.sh; bash m.sh",
-        ),
-        (
-            "echo -e -n append, the escape read in the bash reading alone",
-            "printf 'echo \"\\\"\\n' > m.sh; echo -e -n '\\x70kill -f vite # \"' >> m.sh; bash m.sh",
-        ),
-        (
             "plain echo append, the escape read in the zsh reading alone",
             "printf 'echo \\\"\\n' > m.sh; echo '\\x70kill -f vite # \"' >> m.sh; bash m.sh",
         ),
@@ -1390,6 +1366,10 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         (
             "echo -e append to a printf quote, the unread text is the only kill",
             "echo -e \"'pkill -f vite\" >> m.sh; printf '\\47\\n' >> m.sh; sh m.sh",
+        ),
+        (
+            "macOS sh append, echo escapes read with a printf quote read",
+            "printf 'echo \"\\\"\\n' > m.sh; echo '\\x70kill -f vite # \"' >> m.sh; sh m.sh",
         ),
         (
             "append of a plain echo to a printf with a backslash quote",
@@ -1786,7 +1766,20 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
         "\\x70",
         "p",
         "\\x70",
-    ], "echo without -e: slot 1 keeps the text, slot 2 reads it"
+        "p",
+    ], "echo without -e: slot 1 keeps the text, slots 2 and 4 read it"
+    for options in (["-e"], ["-Ee"], ["-n", "-e"], ["-e", "-n"]):
+        slots = guard.echoed_text(["echo", *options, "\\x70"]).split(guard.VARIANT)
+        assert slots[1] == "p", f"echo {options}: slot 1 reads"
+    slots = guard.echoed_text(["echo", "-E", "\\x70"]).split(guard.VARIANT)
+    assert slots[1:3] == ["\\x70", "p"], "echo -E: slot 1 keeps the text, slot 2 reads"
+    assert guard.echoed_text(["printf", 'x\\"y']).split(guard.VARIANT) == [
+        'x\\"y',
+        'x"y',
+        'x\\"y',
+        'x\\"y',
+        'x"y',
+    ], "printf: slots 1 and 4 read the quote, slot 3 keeps the text"
     pairs = guard.joined(["a\x1eb\x1ec\x1ed", "x\x1ey\x1ez"]).split(guard.VARIANT)
     assert pairs == ["a\nx", "b\ny", "c\nz", "d\nx"], "a missing slot reads the first"
     long_piece = guard.capped("a" * 200000 + guard.VARIANT + "b")

@@ -787,8 +787,8 @@ def echoed_text(words):
     """Returns the readings of the text echo or printf writes, one fixed slot each, so an append or cat pairs slot with slot.
     The readings are best-effort: they cover the common bash, zsh and sh readings, not every option of every shell.
     0 as written; 1 bash-like (echo reads escapes with -e; printf reads \\" \\' \\?); 2 zsh-like (echo reads escapes; printf keeps
-    \\" \\' \\?); 3 nothing read (echo) or each argument on a line (printf). A text that does not parse falls back to
-    fallback_stages, a word check that ignores quote characters and backslashes."""
+    \\" \\' \\?); 3 nothing read (echo) or each argument on a line (printf); 4 macOS sh (echo reads escapes; printf reads \\" \\' \\?).
+    A text that does not parse falls back to fallback_stages, a word check that ignores quote characters and backslashes."""
     args = words[1:]
     texts = [clean(" ".join(args).replace("\\n", "\n"))]
     if os.path.basename(words[0]) == "printf":
@@ -798,15 +798,15 @@ def echoed_text(words):
             for quotes in (True, False):
                 text, modelled = printf_text(args[0], args[1:], quotes)
                 texts.append(text)
-            if not modelled:
-                texts.append(clean("\n".join(args[1:])))
+            texts.append(texts[0] if modelled else clean("\n".join(args[1:])))
+            texts.append(texts[1])
     else:
         options = ""
         while args and ECHO_OPTIONS.match(args[0]):
             options += args[0]
             args = args[1:]
         plain, read = clean(" ".join(args)), clean(unescape(" ".join(args), False))
-        texts += [read if "e" in options else plain, read, plain]
+        texts += [read if "e" in options else plain, read, plain, read]
     return VARIANT.join(texts)
 
 
