@@ -714,6 +714,7 @@ INTEGER = re.compile(r"\s*([-+]?)(0[xX][0-9a-fA-F]+|\d+)")
 QUOTING = str.maketrans("", "", "\"'\\")
 PRINTF_TOO_LARGE_REASON = "printf output run by a shell is too large to check safely; write it to a file with a smaller format or remove the pipe to a shell."
 SCRIPT_TOO_LARGE_REASON = "script text run by a shell is more than 64 KB, too large to check safely; split the script or run a smaller file."
+PANE_TOO_LARGE_REASON = "printf output typed into a pane is more than 64 KB, too large to check safely; send a smaller text."
 
 
 def unescape(text, quotes=True):
@@ -1974,11 +1975,15 @@ def guard_pi_text(text, where, disabled, depth, direct=True, strict=False):
         for stage in shell_segments(body):
             words, _ = unwrap(stage)
             if words and os.path.basename(words[0]) in ("echo", "printf"):
-                reason = guard_pi_text(
-                    echoed_text(words), where, disabled, depth + 1, strict=True
-                )
-                if reason:
-                    return reason
+                echoed = echoed_text(words)
+                if echoed.too_large:
+                    return PANE_TOO_LARGE_REASON
+                for reading in dict.fromkeys(text_readings(echoed)):
+                    reason = guard_pi_text(
+                        reading, where, disabled, depth + 1, strict=True
+                    )
+                    if reason:
+                        return reason
     try:
         units = [segment for _, unit, _ in flow_units(text) for segment in unit]
     except ValueError:

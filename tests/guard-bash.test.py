@@ -1476,6 +1476,16 @@ pkill -f vite
             "printf unknown percent after conversion",
             "printf '%s %!' pkill '-f vite' | sh",
         ),
+        ("printf two grouping flags", "printf \"%''s %s %s\" kill -9 -1 | sh"),
+        ("printf unmodelled conversion joins arguments", "printf '%z' kill -9 -1 | sh"),
+        (
+            "printf unclosed zero width",
+            "printf '%" + "0" * 28 + "!' pkill | sh",
+        ),
+        (
+            "state seen restored after the readings",
+            'bash -c \'echo "echo safe > kills.sh; bash kills.sh" | sh; bash -c "bash kills.sh"\'',
+        ),
         ("printf length modifier", "printf 'kill -9 %ld\\n' -1 | sh"),
         ("printf argument position", "printf '%1$s' 'pkill -f vite' | sh"),
         ("printf %d with leading zeros", "printf 'kill -9 %d\\n' -01 | sh"),
@@ -1859,6 +1869,7 @@ pkill -f vite
     ], "printf: slots 1 and 4 read the quote, slot 3 keeps the text"
     assert guard.printf_text("%%", [])[1]
     assert guard.printf_text("%'s", ["echo hi"]) == ("echo hi", True)
+    assert guard.printf_text("%''s", ["echo hi"]) == ("echo hi", True)
     assert not guard.printf_text("%! %s", ["echo hi"])[1]
     assert not guard.printf_text("%s %!", ["echo hi"])[1]
     pairs = guard.joined(
@@ -2683,6 +2694,69 @@ pkill -f vite
         "generated agent argument is not a command",
         'herdr pane run p "$(printf echo) $(printf agent)"',
     )
+    for name, command in (
+        (
+            "printf argument",
+            "herdr pane run w1:p2 \"$(printf '%s --yolo' cursor-agent)\"",
+        ),
+        (
+            "printf hex escape",
+            "herdr pane run w1:p2 \"$(printf 'cursor-agent\\x20--yolo')\"",
+        ),
+        (
+            "echo -e hex escape",
+            "herdr pane run w1:p2 \"$(echo -e 'cursor-agent\\x20--yolo')\"",
+        ),
+        (
+            "echo hex escape",
+            "herdr pane run w1:p2 \"$(echo 'cursor-agent\\x20--yolo')\"",
+        ),
+        (
+            "printf two arguments",
+            "herdr pane send-text w1:p2 \"$(printf '%s %s' agent --yolo)\"",
+        ),
+        (
+            "backtick printf argument",
+            "herdr pane run w1:p2 \"`printf '%s --yolo' cursor-agent`\"",
+        ),
+        ("pi printf argument", "herdr pane run w1:p2 \"$(printf '%s' pi)\""),
+        (
+            "pi printf argument with flag",
+            "herdr pane run w1:p2 \"$(printf '%s --provider x' pi)\"",
+        ),
+        ("pi printf hex escape", "herdr pane run w1:p2 \"$(printf 'p\\x69')\""),
+    ):
+        case(f"pane text reads every echo/printf reading: {name}", command, True)
+    for name, command in (
+        ("echo -n escape", "herdr pane run w1:p2 \"$(echo -n 'p\\x69')\""),
+        ("printf quotes kept", 'herdr pane run w1:p2 "$(printf \'\\";p\\x69;\\"\')"'),
+    ):
+        case(f"pane text reads reading 2: {name}", command, True)
+    for name, command in (
+        (
+            "reading 0 only: escapes break the parse",
+            "herdr pane run w1:p2 \"$(echo -e 'p\\0151\\x22\\npi')\"",
+        ),
+        (
+            "reading 3 only: nothing read",
+            'herdr pane run w1:p2 "$(echo -ne \'pi --yolo\\" --yolo\\x22\')"',
+        ),
+    ):
+        case(f"pane text reads reading 0 and 3: {name}", command, True)
+    big = "a" * 66000
+    # A printf cut at 64 KB fails closed, so the harmless last row is denied on purpose.
+    for name, command in (
+        ("printf argument", f"herdr pane run w1:p2 \"$(printf '%s;p\\x69' {big})\""),
+        ("printf %b pi", f"herdr pane run w1:p2 \"$(printf '%b' '{big};p\\x69')\""),
+        ("send-text", f"herdr pane send-text w1:p2 \"$(printf '%s;p\\x69' {big})\""),
+        ("harmless text", f"herdr pane run w1:p2 \"$(printf '%s' {big})\""),
+    ):
+        case(f"pane text cut at 64 KB fails closed: {name}", command, True)
+    for name, command in (
+        ("printf argument", "herdr pane run w1:p2 \"$(printf '%s' ls)\""),
+        ("echo", 'herdr pane run w1:p2 "$(echo hello)"'),
+    ):
+        case(f"pane text allows an ordinary substitution: {name}", command)
     for command in (
         "herdr agent list",
         "orch-agents",
