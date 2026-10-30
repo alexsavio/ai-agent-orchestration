@@ -1766,11 +1766,13 @@ def command_lookup(args):
 QUIET_REDIRECTION = re.compile(
     r"(?:(?<!\d)\d*>>?|&>>?)[ \t]*/dev/null(?![\w/.-])|(?<!\d)\d*>&[12](?![\w/.-])"
 )
-CAPTURE = re.compile(r"\$\(|[<>]\(|(?<!\|)\|(?!\|)")
+CAPTURE = re.compile(
+    r"\$\(|[<>]\(|(?<!\|)\|(?!\|)|\$_|\$\{_|\balias\b|\bfunction\s+command\b|\bcommand\s*\(\s*\)"
+)
 
 
 def quiet_lookup(command):
-    """A lookup is not a run only when nothing can read its output: no substitution, pipe or redirection to a file anywhere in the command."""
+    """A lookup is not a run only when nothing can read its output or redefine `command`: no substitution, pipe, `$_`, alias, `command` function or redirection to a file anywhere in the command."""
     return not CAPTURE.search(command) and ">" not in QUIET_REDIRECTION.sub("", command)
 
 
