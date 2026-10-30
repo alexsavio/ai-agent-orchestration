@@ -1767,8 +1767,9 @@ LOOKUP_REDIRECTION = re.compile(
     r"&?>>?[ \t]*/dev/null(?=[\s;&|]|$)|>&[12](?=[\s;&|]|$)"
 )
 LOOKUP_SEGMENT = re.compile(
-    r"[ \t]*(?:(?:if|elif|then|else|!)(?:[ \t]+|$))*"
-    r"(?:fi|(?:command|echo|true|false|exit)(?:[ \t]+[A-Za-z0-9_.+/:,%@-]+)*)?[ \t]*"
+    r"(?:(?:if|elif|then|else|!)(?:[ \t]+|$))*"
+    r"(?:fi|(?:command(?:[ \t]+-p+)*[ \t]+-[pvV]*[vV][pvV]*|echo|true|false|exit)"
+    r"(?:[ \t]+[A-Za-z0-9_.+/:,%@-]+)*)?"
 )
 
 
@@ -1776,7 +1777,8 @@ def quiet_lookup(command):
     """The raw command is only plain lookups, `echo`, `true`, `false`, `exit` and `if`, with redirects only to /dev/null or a standard descriptor: nothing in it can read the output, redefine `command` or hide a second command."""
     rest = LOOKUP_REDIRECTION.sub(" ", command)
     return all(
-        LOOKUP_SEGMENT.fullmatch(part) for part in re.split(r"\n|;|&&|\|\|", rest)
+        LOOKUP_SEGMENT.fullmatch(part.strip(" \t"))
+        for part in re.split(r"\n|;|&&|\|\|", rest)
     )
 
 
@@ -1798,9 +1800,8 @@ def unwrap(words, lookup_ok=False):
     while words and re.match(r"^[A-Za-z_][\w]*=", words[0]):
         words = words[1:]
     while words and os.path.basename(words[0]) in WRAPPER_OPTIONS:
-        word = words.pop(0)
-        wrapper = os.path.basename(word)
-        if lookup_ok and word == "command" and not wrapped and command_lookup(words):
+        wrapper = os.path.basename(words.pop(0))
+        if lookup_ok and command_lookup(words):
             return [], [wrapper]
         wrapped.append(wrapper)
         words = unwrap_wrapper_options(words, wrapper)

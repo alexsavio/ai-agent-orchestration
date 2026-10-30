@@ -1828,6 +1828,12 @@ pkill -f vite
         assert result.returncode == (2 if deny else 0), (result, elapsed)
         assert elapsed < 1, f"64 KB zero format took {elapsed:.3f}s"
         print(f"64 KB zero format {command[:12]!r}: {elapsed:.3f}s")
+    start = time.perf_counter()
+    result = hook(" " * 128000 + "git push origin main", scripts, timeout=1)
+    elapsed = time.perf_counter() - start
+    assert result.returncode == 2, (result, elapsed)
+    assert elapsed < 1, f"128000 blanks took {elapsed:.3f}s"
+    print(f"128000 blanks before a push: {elapsed:.3f}s")
     started = time.perf_counter()
     log_path = Path.home() / ".claude/hooks/guard-bash.log"
     assert not guard.evaluate(f"bash {scripts}/fan.sh", repo)
@@ -2700,6 +2706,9 @@ pkill -f vite
         "command -pv pi",
         "command -vp pi",
         "command -p -v pi",
+        "command -pp -v pi",
+        "command -p -p -v pi",
+        "command -v pi;\techo ok",
         "command -v -- pi",
         "command -v pi cursor-agent",
         "command -v pi cursor-agent herdr",
@@ -2850,6 +2859,17 @@ pkill -f vite
         "command -v pi <<< x",
         "command -v pi # x",
         "command -v pi *",
+        "command source ./f; command -v pi",
+        "command -p source ./f; command -v pi",
+        "command -p -p make; command -v pi",
+        "command . ./f; command -v pi",
+        "command builtin source ./f; command -v pi",
+        "command eval source ./f; command -v pi",
+        "command -v pi; command make",
+        "command env -v git push origin main",
+        "command time -v git push origin main",
+        "command nice -v pi",
+        "command command -v pi",
         "command -v pi $PATH",
     ):
         case(f"command run or captured lookup {command}", command, True)
