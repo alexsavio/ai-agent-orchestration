@@ -1753,7 +1753,9 @@ def unwrap_wrapper_options(words, wrapper):
 
 
 def command_lookup(args):
-    """True when the options of `command` are only -p, -v and -V with -v or -V among them: it prints where names are and runs nothing."""
+    """True when the options of `command` are only -p, -v and -V with -v or -V among them: it prints where names are and runs nothing. A `}` ends the segment in zsh, so a command may follow it."""
+    if "}" in args:
+        return False
     lookup = False
     for word in args:
         if re.fullmatch(r"-[pvV]+", word):
@@ -1764,15 +1766,16 @@ def command_lookup(args):
 
 
 QUIET_REDIRECTION = re.compile(
-    r"(?:(?<!\d)\d*>>?|&>>?)[ \t]*/dev/null(?![\w/.-])|(?<!\d)\d*>&[12](?![\w/.-])"
+    r"(?<!\d)\d*>>?[ \t]*/dev/null(?![\w/.-])|(?<!\d)\d*>&[12](?![\w/.-])"
 )
 CAPTURE = re.compile(
-    r"\$\(|[<>]\(|(?<!\|)\|(?!\|)|\$_|\$\{_|\balias\b|\bfunction\s+command\b|\bcommand\s*\(\s*\)"
+    r"\$\(|[<=]\(|(?<!\|)\|(?!\|)|\$_|\$\{[^A-Za-z]|\balias(?:es)?\b"
+    r"|\bfunctions?\b|\(\s*\)|\beval\b|\bsource\b|(?:^|[\s;&(])\.\s"
 )
 
 
 def quiet_lookup(command):
-    """A lookup is not a run only when nothing can read its output or redefine `command`: no substitution, pipe, `$_`, alias, `command` function or redirection to a file anywhere in the command."""
+    """A lookup is not a run only when nothing can read its output or redefine `command`: no substitution, pipe, `$_`, alias, function, `eval`, `source` or redirection to a file anywhere in the command."""
     return not CAPTURE.search(command) and ">" not in QUIET_REDIRECTION.sub("", command)
 
 
@@ -1794,10 +1797,11 @@ def unwrap(words, lookup_ok=False):
     while words and re.match(r"^[A-Za-z_][\w]*=", words[0]):
         words = words[1:]
     while words and os.path.basename(words[0]) in WRAPPER_OPTIONS:
-        wrapper = os.path.basename(words.pop(0))
+        word = words.pop(0)
+        wrapper = os.path.basename(word)
+        if lookup_ok and word == "command" and not wrapped and command_lookup(words):
+            return [], [wrapper]
         wrapped.append(wrapper)
-        if lookup_ok and wrapper == "command" and command_lookup(words):
-            return [], wrapped
         words = unwrap_wrapper_options(words, wrapper)
         if wrapper == "timeout" and words:
             words.pop(0)
