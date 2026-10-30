@@ -1768,7 +1768,7 @@ LOOKUP_REDIRECTION = re.compile(
 )
 LOOKUP_SEGMENT = re.compile(
     r"(?:(?:if|elif|then|else|!)(?:[ \t]+|$))*"
-    r"(?:fi|(?:command(?:[ \t]+-p+)*[ \t]+-[pvV]*[vV][pvV]*|echo|true|false|exit)"
+    r"(?:fi|(?:command(?:[ \t]+-p+)*[ \t]+-p*[vV][pvV]*|echo|true|false|exit)"
     r"(?:[ \t]+[A-Za-z0-9_.+/:,%@-]+)*)?"
 )
 
@@ -1801,7 +1801,7 @@ def unwrap(words, lookup_ok=False):
         words = words[1:]
     while words and os.path.basename(words[0]) in WRAPPER_OPTIONS:
         wrapper = os.path.basename(words.pop(0))
-        if lookup_ok and command_lookup(words):
+        if lookup_ok and not wrapped and command_lookup(words):
             return [], [wrapper]
         wrapped.append(wrapper)
         words = unwrap_wrapper_options(words, wrapper)

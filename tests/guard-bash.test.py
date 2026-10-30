@@ -1834,6 +1834,13 @@ pkill -f vite
     assert result.returncode == 2, (result, elapsed)
     assert elapsed < 1, f"128000 blanks took {elapsed:.3f}s"
     print(f"128000 blanks before a push: {elapsed:.3f}s")
+    for name, word in (("v", "v" * 128000), ("vp", "vp" * 64000)):
+        start = time.perf_counter()
+        result = hook(f"command -{word}$; git push origin main", scripts, timeout=1)
+        elapsed = time.perf_counter() - start
+        assert result.returncode == 2, (result, elapsed)
+        assert elapsed < 1, f"128000 option letters {name} took {elapsed:.3f}s"
+        print(f"128000 option letters {name} before a push: {elapsed:.3f}s")
     started = time.perf_counter()
     log_path = Path.home() / ".claude/hooks/guard-bash.log"
     assert not guard.evaluate(f"bash {scripts}/fan.sh", repo)
@@ -2707,6 +2714,7 @@ pkill -f vite
         "command -vp pi",
         "command -p -v pi",
         "command -pp -v pi",
+        "command -ppv pi",
         "command -p -p -v pi",
         "command -v pi;\techo ok",
         "command -v -- pi",
@@ -2870,6 +2878,10 @@ pkill -f vite
         "command time -v git push origin main",
         "command nice -v pi",
         "command command -v pi",
+        "command -v -x env -v git push origin main",
+        "command -v -x time -v git push origin main",
+        "command -V -x nice -v pi",
+        "command -pv -f nohup -v pi",
         "command -v pi $PATH",
     ):
         case(f"command run or captured lookup {command}", command, True)
@@ -2877,6 +2889,7 @@ pkill -f vite
         "command -v pi",
         "command -v pi; pi",
         "$(command -v pi)",
+        "command -v -x env -v git push origin main",
     ):
         case(
             f"cursor pane command lookup {command}",
