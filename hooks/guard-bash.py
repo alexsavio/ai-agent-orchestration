@@ -1752,7 +1752,29 @@ def unwrap_wrapper_options(words, wrapper):
     return words
 
 
-def unwrap(words):
+def command_lookup(args):
+    """True when the options of `command` are only -p, -v and -V with -v or -V among them: it prints where names are and runs nothing."""
+    lookup = False
+    for word in args:
+        if re.fullmatch(r"-[pvV]+", word):
+            lookup = lookup or bool(re.search("[vV]", word))
+        else:
+            return lookup and (word == "--" or not word.startswith("-"))
+    return lookup
+
+
+QUIET_REDIRECTION = re.compile(
+    r"(?:(?<!\d)\d*>>?|&>>?)[ \t]*/dev/null(?![\w/.-])|(?<!\d)\d*>&[12](?![\w/.-])"
+)
+CAPTURE = re.compile(r"\$\(|[<>]\(|(?<!\|)\|(?!\|)")
+
+
+def quiet_lookup(command):
+    """A lookup is not a run only when nothing can read its output: no substitution, pipe or redirection to a file anywhere in the command."""
+    return not CAPTURE.search(command) and ">" not in QUIET_REDIRECTION.sub("", command)
+
+
+def unwrap(words, lookup_ok=False):
     wrapped = []
     while words and words[0] in (
         "then",
@@ -1772,6 +1794,8 @@ def unwrap(words):
     while words and os.path.basename(words[0]) in WRAPPER_OPTIONS:
         wrapper = os.path.basename(words.pop(0))
         wrapped.append(wrapper)
+        if lookup_ok and wrapper == "command" and command_lookup(words):
+            return [], wrapped
         words = unwrap_wrapper_options(words, wrapper)
         if wrapper == "timeout" and words:
             words.pop(0)
@@ -2084,10 +2108,11 @@ def evaluate(command, cwd, disabled=()):
             )
             if reason:
                 return reason
+        lookup_ok = quiet_lookup(normalized_command)
         for words, where, pipeline in commands(normalized_command, cwd):
             # Familiar wrappers may have incomplete option parsing. Inspect every later
             # guarded executable too, so a leftover option value cannot hide a command.
-            words, wrapped = unwrap(words)
+            words, wrapped = unwrap(words, lookup_ok)
             if not words:
                 continue
             candidates = [words]

@@ -749,7 +749,7 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     )
     for name, command in [
         ("env combined short options", "env -i0 git push origin HEAD:main"),
-        ("command combined short options", "command -pv git push origin HEAD:main"),
+        ("command combined short options", "command -pp git push origin HEAD:main"),
         ("exec combined short options", "exec -cl git push origin HEAD:main"),
         ("time combined short options", "time -avq git push origin HEAD:main"),
         (
@@ -776,6 +776,8 @@ with tempfile.TemporaryDirectory(prefix="guard-bash-tests-") as directory:
     for wrapper, options in guard.WRAPPER_OPTIONS.items():
         for option, arity in options.items():
             if wrapper == "env" and option in ("-S", "--split-string"):
+                continue
+            if wrapper == "command" and option in ("-v", "-V"):
                 continue
             prefix = [wrapper, option]
             if arity == 1:
@@ -2690,6 +2692,86 @@ pkill -f vite
         )
     for command in ("cursor .", "cursor --version", "cursor agent --help"):
         case(f"allowed cursor command {command}", command)
+    for command in (
+        "command -v pi",
+        "command -V pi",
+        "command -pv pi",
+        "command -vp pi",
+        "command -p -v pi",
+        "command -v -- pi",
+        "command -v cursor-agent",
+        "command -V cursor-agent",
+        "command -v pi cursor-agent herdr",
+        "command -v pkill",
+        "command -pv git push origin HEAD:main",
+        "command -v pi >/dev/null",
+        "command -v pi 2>/dev/null",
+        "command -v pi >/dev/null 2>&1 && echo ok",
+        "command -v pi || echo missing",
+        "if command -v cursor-agent >/dev/null 2>&1; then echo y; fi",
+        "env command -v pi",
+        "timeout 5 command -v pi",
+    ):
+        case(f"command lookup {command}", command)
+    for command in (
+        "command pi",
+        "command -p pi",
+        "command -- pi",
+        "command -p -- pi",
+        "command -x pi",
+        "command -v -x pi",
+        "command -vx pi",
+        "command cursor-agent -p hi",
+        "command pkill -f vite",
+        "command kill -9 -1",
+        "command git push origin main",
+        "env command pi",
+        "command -v pi; pi",
+        "command -v pi && pi",
+        "command -v pi || pi",
+        "command -v pi; command pi",
+        "command -v cursor-agent && cursor-agent -p hi",
+        "command -v herdr && herdr agent start x --kind pi --pane p",
+        "command -v herdr && herdr agent start x --kind cursor --pane p",
+        "command -v kill -9 -1; kill -9 -1",
+        "command -v git && git push origin main",
+        "$(command -v pi) --model x",
+        '"$(command -v cursor-agent)" -p hi',
+        "`command -v pi` --model x",
+        "x=$(command -v pi); $x",
+        'eval "$(command -v pi)"',
+        "bash -c 'command -v pi && pi'",
+        "bash -c 'command -v pi'",
+        'bash -c "$(command -v pi)"',
+        "bash <(command -v pi)",
+        "command -v pi | bash",
+        "command -v pi | sh",
+        "command -v pi 2>&1 | cat",
+        "command -v pi > /dev/null | bash",
+        "command -v pi |& bash",
+        "{ command -v pi; } | bash",
+        "( command -v pi ) | bash",
+        "command -v pi > f; bash f",
+        "command -v pi >> f; bash f",
+        "command -v pi >&f; bash f",
+        "x=`command -v pi`; $x",
+        "`echo; command -v pi` --model x",
+        "{ command -v pi; } > f; bash f",
+        "exec >f; command -v pi; bash f",
+        "command -v pi >/dev/null/x",
+        "command -v pi >'/dev/null'",
+    ):
+        case(f"command run or captured lookup {command}", command, True)
+    for command in (
+        "command -v pi",
+        "command -v pi; pi",
+        "$(command -v pi)",
+    ):
+        case(
+            f"cursor pane command lookup {command}",
+            f"herdr pane run w1:p2 '{command}'",
+            True,
+        )
     case(
         "generated agent argument is not a command",
         'herdr pane run p "$(printf echo) $(printf agent)"',
