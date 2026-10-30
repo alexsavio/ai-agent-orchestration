@@ -1753,9 +1753,7 @@ def unwrap_wrapper_options(words, wrapper):
 
 
 def command_lookup(args):
-    """True when the options of `command` are only -p, -v and -V with -v or -V among them: it prints where names are and runs nothing. A `}` ends the segment in zsh, so a command may follow it."""
-    if "}" in args:
-        return False
+    """True when the options of `command` are only -p, -v and -V with -v or -V among them: it prints where names are and runs nothing."""
     lookup = False
     for word in args:
         if re.fullmatch(r"-[pvV]+", word):
@@ -1765,18 +1763,21 @@ def command_lookup(args):
     return lookup
 
 
-QUIET_REDIRECTION = re.compile(
-    r"(?<!\d)\d*>>?[ \t]*/dev/null(?![\w/.-])|(?<!\d)\d*>&[12](?![\w/.-])"
+LOOKUP_REDIRECTION = re.compile(
+    r"&?>>?[ \t]*/dev/null(?=[\s;&|]|$)|>&[12](?=[\s;&|]|$)"
 )
-CAPTURE = re.compile(
-    r"\$\(|[<=]\(|(?<!\|)\|(?!\|)|\$_|\$\{[^A-Za-z]|\balias(?:es)?\b"
-    r"|\bfunctions?\b|\(\s*\)|\beval\b|\bsource\b|(?:^|[\s;&(])\.\s"
+LOOKUP_SEGMENT = re.compile(
+    r"[ \t]*(?:(?:if|elif|then|else|!)(?:[ \t]+|$))*"
+    r"(?:fi|(?:command|echo|true|false|exit)(?:[ \t]+[A-Za-z0-9_.+/:,%@-]+)*)?[ \t]*"
 )
 
 
 def quiet_lookup(command):
-    """A lookup is not a run only when nothing can read its output or redefine `command`: no substitution, pipe, `$_`, alias, function, `eval`, `source` or redirection to a file anywhere in the command."""
-    return not CAPTURE.search(command) and ">" not in QUIET_REDIRECTION.sub("", command)
+    """The raw command is only plain lookups, `echo`, `true`, `false`, `exit` and `if`, with redirects only to /dev/null or a standard descriptor: nothing in it can read the output, redefine `command` or hide a second command."""
+    rest = LOOKUP_REDIRECTION.sub(" ", command)
+    return all(
+        LOOKUP_SEGMENT.fullmatch(part) for part in re.split(r"\n|;|&&|\|\|", rest)
+    )
 
 
 def unwrap(words, lookup_ok=False):
@@ -2114,7 +2115,7 @@ def evaluate(command, cwd, disabled=()):
             )
             if reason:
                 return reason
-        lookup_ok = quiet_lookup(normalized_command)
+        lookup_ok = quiet_lookup(command)
         for words, where, pipeline in commands(normalized_command, cwd):
             # Familiar wrappers may have incomplete option parsing. Inspect every later
             # guarded executable too, so a leftover option value cannot hide a command.
