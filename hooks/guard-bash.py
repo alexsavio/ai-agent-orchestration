@@ -362,7 +362,7 @@ def file_text(name, cwd):
 def guard_attribution(args, cwd, opts, raw):
     if not args:
         return None
-    raw = attribution_scan_text(raw)
+    raw = attribution_scan_text(raw, READING[0])
     text = []
     files = []
     if args[0] == "commit":
@@ -2017,7 +2017,7 @@ def comment_segment(words):
 
 
 @functools.lru_cache(maxsize=8)
-def attribution_scan_text(command):
+def attribution_scan_text(command, reading):
     return "\n".join(
         " ".join(segment)
         for segment in shell_segments(command)
