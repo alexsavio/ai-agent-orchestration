@@ -1764,7 +1764,7 @@ def command_lookup(args):
 
 
 LOOKUP_REDIRECTION = re.compile(
-    r"&?>>?[ \t]*/dev/null(?=[\s;&|]|$)|>&[12](?=[\s;&|]|$)"
+    r"&>>?[ \t]*/dev/null(?=[ \t]*(?:$|\n|;|&&|\|\|))|>>?[ \t]*/dev/null(?=[\s;&|]|$)|>&[12](?=[\s;&|]|$)"
 )
 LOOKUP_SEGMENT = re.compile(
     r"(?:(?:if|elif|then|else|!)(?:[ \t]+|$))*"
@@ -1774,7 +1774,7 @@ LOOKUP_SEGMENT = re.compile(
 
 
 def quiet_lookup(command):
-    """The raw command is only plain lookups, `echo`, `true`, `false`, `exit` and `if`, with redirects only to /dev/null or a standard descriptor: nothing in it can read the output, redefine `command` or hide a second command."""
+    """The raw command is only plain lookups, `echo`, `true`, `false`, `exit` and `if`, with redirects only to /dev/null or a standard descriptor (`&>` only at command end): nothing in it can read the output, redefine `command` or hide a second command."""
     rest = LOOKUP_REDIRECTION.sub(" ", command)
     return all(
         LOOKUP_SEGMENT.fullmatch(part.strip(" \t"))

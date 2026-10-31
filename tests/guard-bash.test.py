@@ -2766,6 +2766,8 @@ pkill -f vite
         "command -v pi; pi",
         "command -v pi && pi",
         "command -v pi || pi",
+        "command -v x &>/dev/null pi",
+        "command -v x &>/dev/null git push origin main",
         "command -v pi; command pi",
         "command -v cursor-agent && cursor-agent -p hi",
         "command -v herdr && herdr agent start x --kind pi --pane p",
