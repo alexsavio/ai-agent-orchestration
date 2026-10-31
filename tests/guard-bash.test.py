@@ -3397,6 +3397,153 @@ pkill -f vite
         ("repeated xargs options", "pgrep -f vite | xargs " + "-pp " * 30 + "ki"),
     ]:
         case(name, command)
+    bs = "\\"
+    line_end_deny = [
+        ("two backslashes then a newline", f"true {bs * 2}\ngit push origin main"),
+        ("four backslashes then a newline", f"true {bs * 4}\ngit push origin main"),
+        ("six backslashes then a newline", f"true {bs * 6}\ngit push origin main"),
+        ("comment ends at the newline", f"true # {bs}\ngit push origin main"),
+        ("comment with two backslashes", f"true # {bs * 2}\ngit push origin main"),
+        ("comment with three backslashes", f"true # {bs * 3}\ngit push origin main"),
+        ("space after a joined line", f"git{bs}\n push origin main"),
+        ("pi after an even run", f"true {bs * 2}\npi"),
+        ("kill after an even run", f"true {bs * 2}\npkill -f vite"),
+        ("even run in a substitution", f"x=$(true {bs * 2}\ngit push origin main)"),
+        ("even run in braces", f"{{ true {bs * 2}\ngit push origin main; }}"),
+        ("even run after &&", f"true && true {bs * 2}\ngit push origin main"),
+        ("even run in an if", f"if true; then true {bs * 2}\ngit push origin main; fi"),
+        ("even run in an inline shell", f"sh -c 'true {bs * 2}\npi'"),
+        ("even run in double quotes", f'bash -c "true {bs * 4}\npi"'),
+        ("even run in eval", f"eval 'true {bs * 2}\npi'"),
+        (
+            "pane run, two backslashes",
+            f"herdr pane run p 'true {bs * 2}\ngit push origin main'",
+        ),
+        (
+            "pane run, four in double quotes",
+            f'herdr pane run p "true {bs * 4}\ngit push origin main"',
+        ),
+        (
+            "pane send-text, two backslashes",
+            f"herdr pane send-text p 'true {bs * 2}\ngit push origin main'",
+        ),
+        (
+            "pane send-text, four in double quotes",
+            f'herdr pane send-text p "true {bs * 4}\ngit push origin main"',
+        ),
+        (
+            "pane run, lookup and four backslashes",
+            f"herdr pane run p 'command -v x {bs * 4}\ngit push origin main'",
+        ),
+        (
+            "pane send-text, lookup and four backslashes",
+            f"herdr pane send-text p 'command -v x {bs * 4}\ngit push origin main'",
+        ),
+        ("comment in a substitution", f"x=$(true # {bs}\npi)"),
+        ("even run in backticks", f"x=`true {bs * 2}\npi`"),
+        ("heredoc quote then a comment", f'cat <<EOF\nsay "\nEOF\ntrue # {bs}\npi'),
+        (
+            "heredoc to a shell with an even run",
+            f"bash <<'EOF'\ntrue {bs * 2}\npi\nEOF",
+        ),
+        ("lookup and four backslashes", f"command -v x {bs * 4}\ngit push origin main"),
+        (
+            "pi lookup and four backslashes",
+            f"command -v pi {bs * 4}\ngit push origin main",
+        ),
+    ]
+    ampersand_deny = [
+        ("&> then a push", "true &>/dev/null git push origin main"),
+        ("&>> then a push", "true &>>/dev/null git push origin main"),
+        ("&> with a space then a push", "true &> /dev/null git push origin main"),
+        ("&> to a file then a push", "true &>/tmp/x git push origin main"),
+        ("&> then pi", "true &>/dev/null pi"),
+        ("&> then pkill", "true &>/dev/null pkill -f vite"),
+        ("&> then killall", "true &>/dev/null killall node"),
+        ("&> then cursor-agent", "true &>/dev/null cursor-agent"),
+        (
+            "&> then an attributed commit",
+            "true &>/dev/null git commit -m 'Co-Authored-By: Claude'",
+        ),
+        (
+            "&> then a herdr cursor start",
+            "true &>/dev/null herdr agent start w --kind cursor",
+        ),
+        (
+            "&> then a codex bypass",
+            "true &>/dev/null herdr agent start w --kind codex -- --yolo",
+        ),
+        ("&> then a push in a chain", "ls &>/dev/null git push origin main && echo ok"),
+        ("&> in an inline shell", "sh -c 'true &>/dev/null pi'"),
+        ("&> in a dash shell", "dash -c 'true &>/dev/null pkill -f vite'"),
+        ("&> in eval", "eval 'true &>/dev/null pi'"),
+        ("&> in a substitution", "x=$(true &>/dev/null git push origin main)"),
+        ("&> in a subshell", "( true &>/dev/null git push origin main )"),
+        ("&> in an if", "if true; then true &>/dev/null git push origin main; fi"),
+        ("&> after &&", "true && true &>/dev/null git push origin main"),
+        ("&> in pane text", "herdr pane run p 'true &>/dev/null git push origin main'"),
+        ("&> in pane send-text", "herdr pane send-text p 'true &>/dev/null pi'"),
+        ("& then a redirect then a push", "true & >/dev/null git push origin main"),
+        ("&| then a push", "true &| git push origin main"),
+        ("&! then a push", "true &! git push origin main"),
+        ("|& then a push", "true |& git push origin main"),
+        ("too many &> redirects", "true " + "&>/dev/null " * 201),
+    ]
+    still_allowed = [
+        ("one backslash joins the lines", f"true {bs}\ngit push origin main"),
+        ("three backslashes join the lines", f"true {bs * 3}\ngit push origin main"),
+        ("five backslashes join the lines", f"true {bs * 5}\ngit push origin main"),
+        (
+            "pane run, one backslash",
+            f"herdr pane run p 'true {bs}\ngit push origin main'",
+        ),
+        (
+            "single quotes keep the backslashes",
+            f"echo 'a {bs * 2}\ngit push origin main'",
+        ),
+        (
+            "heredoc body is data",
+            f"cat <<'EOF'\ntrue {bs * 2}\ngit push origin main\nEOF",
+        ),
+        ("echo a#b", "echo a#b"),
+        ("hash in single quotes", "echo 'a # b'"),
+        ("hash in double quotes", 'echo "a # b"'),
+        ("double quotes join one backslash", f'echo "line {bs}\nnext"'),
+        (
+            "long curl with a join",
+            f"curl {bs}\n  -s https://example.com {bs}\n  -o /tmp/out.txt",
+        ),
+        ("npm test to a file", "npm test &>/tmp/out.txt"),
+        ("ls to null", "ls &>/dev/null"),
+        ("ls to null then echo", "ls &>/dev/null && echo ok"),
+        ("git status to null", "git status &>/dev/null; echo ok"),
+        ("make append to a log", "make build &>>/tmp/log"),
+        ("command -v pi to null", "command -v pi &>/dev/null"),
+        ("command -v pi to null then echo", "command -v pi &>/dev/null && echo ok"),
+        ("command -v pi in an if", "if command -v pi &>/dev/null; then echo y; fi"),
+        ("true &> then ls", "true &>/dev/null ls"),
+        ("200 &> redirects", "true " + "&>/dev/null " * 200),
+    ]
+    for name, command in line_end_deny + ampersand_deny:
+        case(name, command, True)
+    for name, command in still_allowed:
+        case(name, command)
+    for name, command in (
+        ("128000 backslashes", "true " + bs * 128000 + "\ngit push origin main"),
+        ("128000 backslashes, odd", "true " + bs * 128001 + "\ngit push origin main"),
+        ("128000 &> targets", "true " + "&>a " * 128000),
+        ("128000 hashes", "true " + "#" * 128000 + "\ngit push origin main"),
+        ("128000 hash words", "true " + "# " * 64000 + "\ngit push origin main"),
+        ("128000 joined lines", "true " + (bs + "\n") * 64000 + "git push origin main"),
+    ):
+        start = time.perf_counter()
+        result = hook(command, repo, timeout=1)
+        elapsed = time.perf_counter() - start
+        assert result.returncode in (0, 2), (name, result)
+        assert elapsed < 1, f"{name} took {elapsed:.3f}s"
+        print(
+            f"line-end and &> time row {name}: rc {result.returncode}, {elapsed:.3f}s"
+        )
     failed = []
     for name, command, deny, cwd in cases:
         result = hook(command, cwd)
@@ -3441,6 +3588,39 @@ pkill -f vite
         print(
             f"Mutation: disable {disabled} -> {len(caught)} test failures; witness: {witness}"
         )
+    new_rows = [
+        (name, command, deny, cwd)
+        for name, command, deny, cwd in cases
+        if name in {n for n, _ in line_end_deny + ampersand_deny + still_allowed}
+    ]
+    for label, patched in (
+        ("join on any backslash count", lambda t: re.sub(r"\\\n", "", t)),
+        (
+            "join inside comments and single quotes",
+            lambda t: re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1", t),
+        ),
+        (
+            "join and drop the next line's indent",
+            lambda t: re.sub(r"(?<!\\)((?:\\\\)*)\\\n[ \t]*", r"\1", t),
+        ),
+    ):
+        guard.shell_tokens.cache_clear()
+        with patch.object(guard, "join_lines", patched):
+            caught = [n for n, c, d, w in new_rows if bool(guard.evaluate(c, w)) != d]
+        guard.shell_tokens.cache_clear()
+        assert caught, label
+        print(f"Mutation: {label} -> {len(caught)} failures; first: {caught[0]}")
+    for label, target, value in (
+        ("check only the first &> reading", "dash_reading", lambda tokens: ()),
+        ("no limit on &> redirects", "AMPERSAND_REDIRECT_LIMIT", 10**9),
+        ("no heredoc skip in line joins", "HEREDOC_MARK", re.compile(r"(?!)")),
+    ):
+        guard.shell_tokens.cache_clear()
+        with patch.object(guard, target, value):
+            caught = [n for n, c, d, w in new_rows if bool(guard.evaluate(c, w)) != d]
+        guard.shell_tokens.cache_clear()
+        assert caught, label
+        print(f"Mutation: {label} -> {len(caught)} failures; first: {caught[0]}")
     for bad in (
         "{",
         "{}",

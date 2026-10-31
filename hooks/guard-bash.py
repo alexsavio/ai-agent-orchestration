@@ -473,6 +473,84 @@ BLOCK_OPENERS = {"while", "until", "for", "if", "case", "select", "{"}
 BLOCK_CLOSERS = {"done", "fi", "esac", "}"}
 
 
+HEREDOC_MARK = re.compile(r"<<(-?)[ \t]*(['\"]?)([A-Za-z_]\w*)\2")
+COMMENT_BEFORE = frozenset(" \t\r\n;&|()<>`")
+
+
+def heredoc_end(text, start, marker, strip):
+    """Index just past the closing marker line of a heredoc whose body starts at `start`, or the end of the text."""
+    index = start
+    while index <= len(text):
+        end = text.find("\n", index)
+        end = len(text) if end < 0 else end
+        line = text[index:end]
+        if (line.lstrip("\t") if strip else line) == marker:
+            return end
+        index = end + 1
+    return len(text)
+
+
+def join_lines(text):
+    """Joins a backslash with the newline after it, as the shell does, so that a run of backslashes joins only when its count is odd. Nothing joins inside single quotes, inside a comment (which ends at the newline) or in a heredoc body."""
+    if "\\" not in text:
+        return text
+    out, stack, pending, last, index = [], [""], [], "", 0
+    while index < len(text):
+        char, context = text[index], stack[-1]
+        step = 1
+        if context == "'":
+            if char == "'":
+                stack.pop()
+        elif char == "\\":
+            step = 2
+            if text[index + 1 : index + 2] == "\n" and context != "$'":
+                index += 2
+                continue
+        elif context == "$'":
+            if char == "'":
+                stack.pop()
+        elif context == '"':
+            if char == '"':
+                stack.pop()
+            elif text.startswith("$(", index):
+                stack.append("(")
+                step = 2
+        elif char in "'\"":
+            stack.append(char)
+        elif text.startswith("$'", index):
+            stack.append("$'")
+            step = 2
+        elif text.startswith("$(", index):
+            stack.append("(")
+            step = 2
+        elif char == "(" and context == "(":
+            stack.append("(")
+        elif char == ")" and context == "(":
+            stack.pop()
+        elif char == "#" and (not last or last in COMMENT_BEFORE):
+            end = text.find("\n", index)
+            step = (len(text) if end < 0 else end) - index
+        elif text.startswith("<<", index) and not text.startswith("<<<", index):
+            mark = HEREDOC_MARK.match(text, index)
+            if mark:
+                pending.append((mark[3], bool(mark[1])))
+                step = mark.end() - index
+        elif char == "\n" and pending:
+            out.append(char)
+            index += 1
+            for marker, strip in pending:
+                end = heredoc_end(text, index, marker, strip)
+                out.append(text[index:end])
+                index = end
+            pending = []
+            last = out[-1][-1:] or "\n"
+            continue
+        out.append(text[index : index + step])
+        last = text[index + step - 1]
+        index += step
+    return "".join(out)
+
+
 def mask_quoted(command):
     """Drops unquoted comments, marks redirection fd prefixes, keeps unquoted backtick bodies in one word, and masks quoted operators and single-quoted $ and backticks."""
     out, quote, index = [], "", 0
@@ -528,14 +606,26 @@ def unmask(word):
 @functools.lru_cache(maxsize=8)
 def shell_tokens(command):
     lex = shlex.shlex(
-        mask_quoted(expand_heredocs(re.sub(r"\\\n[ \t]*", "", command))),
+        mask_quoted(expand_heredocs(join_lines(command))),
         posix=True,
         punctuation_chars=OPERATOR_CHARS,
     )
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     lex.commenters = ""
-    return tuple(part for token in lex for part in split_operators(token)) + (";",)
+    tokens = tuple(part for token in lex for part in split_operators(token)) + (";",)
+    if "&>" in tokens or "&>>" in tokens:
+        # bash and zsh read `&>` as one redirect; dash reads `&` then `>`, so what follows the target runs as a command. Both readings are checked.
+        tokens += dash_reading(tokens)
+    return tokens
+
+
+def dash_reading(tokens):
+    return tuple(
+        part
+        for token in tokens
+        for part in {"&>": ("&", ">"), "&>>": ("&", ">>")}.get(token, (token,))
+    )
 
 
 def split_operators(token):
@@ -1287,7 +1377,7 @@ def kill_words(entries, text):
 
 def bounded(code):
     """Joins line continuations, then cuts code at a heredoc marker over 256 characters or after SCRIPT_HEREDOC_LIMIT `<<`; the heredoc matcher is quadratic on unterminated ones."""
-    code = re.sub(r"\\\n[ \t]*", "", code)
+    code = join_lines(code)
     long_marker = re.search(r"<<-?[ \t]*['\"]?\w{257}", code)
     if long_marker:
         code = code[: long_marker.start()]
@@ -2107,9 +2197,15 @@ def evaluate_words(words, where, command, disabled, pipeline):
     return None
 
 
+AMPERSAND_REDIRECT_LIMIT = 200
+AMPERSAND_REASON = "More than 200 `&>` redirects: both shell readings of each cannot be checked in time. Split the command."
+
+
 def evaluate(command, cwd, disabled=()):
     try:
-        normalized_command = re.sub(r"\\\n[ \t]*", "", command)
+        normalized_command = join_lines(command)
+        if normalized_command.count("&>") > AMPERSAND_REDIRECT_LIMIT:
+            return AMPERSAND_REASON
         if "guard_memory" not in disabled and "guard_broad_kill" not in disabled:
             reason = guard_broad_kill(normalized_command) or guard_script_kill(
                 normalized_command, cwd, disabled
