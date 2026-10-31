@@ -1,6 +1,6 @@
 # The Bash guard
 
-`hooks/guard-bash.py` runs before every Bash tool call in Claude Code. It reads the command and never runs it. It reads `&>` both ways (one redirect, and `&` then `>` as dash does, so the words after the target are checked as a command), joins a backslash and a newline only for an odd number of backslashes outside a comment or single quotes, and denies a command with more than 200 `&>`. It denies:
+`hooks/guard-bash.py` runs before every Bash tool call in Claude Code. It reads the command and never runs it. It reads `&>` both ways (one redirect, and `&` then `>` as dash does, so the words after the target are checked as a command), joins a backslash and a newline only for an odd number of backslashes outside a comment or single quotes (and also checks the reading where every pair joins, for a `<<` that is no heredoc), and denies a command with more than 200 `&>`. It denies:
 
 - `git push` to `main` or `master` (including `--all`, `--mirror`, `:` and glob refspecs). Push a branch and open a PR. GitHub wiki remotes are allowed.
 - AI attribution in commit messages, PR titles and PR bodies, such as `Co-Authored-By: Claude` or "Generated with Claude Code".

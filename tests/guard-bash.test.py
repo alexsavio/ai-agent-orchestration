@@ -3397,6 +3397,7 @@ pkill -f vite
         ("repeated xargs options", "pgrep -f vite | xargs " + "-pp " * 30 + "ki"),
     ]:
         case(name, command)
+    new_start = len(cases)
     bs = "\\"
     line_end_deny = [
         ("two backslashes then a newline", f"true {bs * 2}\ngit push origin main"),
@@ -3489,6 +3490,49 @@ pkill -f vite
         ("|& then a push", "true |& git push origin main"),
         ("too many &> redirects", "true " + "&>/dev/null " * 201),
     ]
+    false_heredoc = [
+        ("arithmetic shift then a join", f"echo $((1<<x))\np{bs}\ni"),
+        (
+            "arithmetic shift then a split push",
+            f"echo $((1<<x))\ngit pu{bs}\nsh origin main",
+        ),
+        (
+            "arithmetic assignment then a split kill",
+            f"x=$((1<<y))\npk{bs}\nill -f vite",
+        ),
+        ("test bracket shift then a join", f"[[ a<<b ]]\np{bs}\ni"),
+        ("false heredoc in an inline shell", f"bash -c 'echo $((1<<x))\np{bs}\ni'"),
+        ("false heredoc in pane text", f"herdr pane run p 'echo $((1<<x))\np{bs}\ni'"),
+    ]
+    end_backslash = [
+        ("push ending in a backslash", f"git push origin main {bs}"),
+        ("push ending in a glued backslash", f"git push origin main{bs}"),
+        ("chained push ending in a backslash", f"true; git push origin main {bs}"),
+        ("pi ending in a backslash", f"pi {bs}"),
+        ("pkill ending in a backslash", f"pkill -f vite {bs}"),
+        (
+            "pane push ending in a backslash",
+            f"herdr pane run p 'git push origin main {bs}'",
+        ),
+    ]
+    for name, command in false_heredoc + end_backslash:
+        case(name, command, True)
+    (scripts / "false-heredoc.sh").write_text(f"echo $((1<<x))\npk{bs}\nill -f vite\n")
+    (scripts / "even-run.sh").write_text(f"true {bs * 2}\npkill -f vite\n")
+    (scripts / "end-backslash.sh").write_text(f"pkill -f vite {bs}")
+    for name, file in (
+        ("script with a false heredoc and a split kill", "false-heredoc.sh"),
+        ("script with an even run then a kill", "even-run.sh"),
+        ("script ending in a backslash", "end-backslash.sh"),
+    ):
+        case(name, f"bash {scripts}/{file}", True, scripts)
+    case(
+        "script with a split kill, run by stdin",
+        f"bash < {scripts}/false-heredoc.sh",
+        True,
+        scripts,
+    )
+    case("end of text is no heredoc", f"echo hi {bs}", False)
     still_allowed = [
         ("one backslash joins the lines", f"true {bs}\ngit push origin main"),
         ("three backslashes join the lines", f"true {bs * 3}\ngit push origin main"),
@@ -3588,13 +3632,23 @@ pkill -f vite
         print(
             f"Mutation: disable {disabled} -> {len(caught)} test failures; witness: {witness}"
         )
-    new_rows = [
-        (name, command, deny, cwd)
-        for name, command, deny, cwd in cases
-        if name in {n for n, _ in line_end_deny + ampersand_deny + still_allowed}
-    ]
+    new_rows = cases[new_start:]
+    original_join = guard.join_lines
+
+    def verdict(command, cwd):
+        try:
+            return bool(guard.evaluate(command, cwd))
+        except Exception:
+            return False
+
+    def raises_at_end(text):
+        if text.endswith(bs):
+            raise IndexError(text)
+        return original_join(text)
+
     for label, patched in (
         ("join on any backslash count", lambda t: re.sub(r"\\\n", "", t)),
+        ("raise when the text ends in a backslash", raises_at_end),
         (
             "join inside comments and single quotes",
             lambda t: re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1", t),
@@ -3604,21 +3658,22 @@ pkill -f vite
             lambda t: re.sub(r"(?<!\\)((?:\\\\)*)\\\n[ \t]*", r"\1", t),
         ),
     ):
-        guard.shell_tokens.cache_clear()
+        guard.tokenize.cache_clear()
         with patch.object(guard, "join_lines", patched):
-            caught = [n for n, c, d, w in new_rows if bool(guard.evaluate(c, w)) != d]
-        guard.shell_tokens.cache_clear()
+            caught = [n for n, c, d, w in new_rows if verdict(c, w) != d]
+        guard.tokenize.cache_clear()
         assert caught, label
         print(f"Mutation: {label} -> {len(caught)} failures; first: {caught[0]}")
     for label, target, value in (
         ("check only the first &> reading", "dash_reading", lambda tokens: ()),
         ("no limit on &> redirects", "AMPERSAND_REDIRECT_LIMIT", 10**9),
         ("no heredoc skip in line joins", "HEREDOC_MARK", re.compile(r"(?!)")),
+        ("no old join reading", "old_join", lambda t: guard.join_lines(t)),
     ):
-        guard.shell_tokens.cache_clear()
+        guard.tokenize.cache_clear()
         with patch.object(guard, target, value):
-            caught = [n for n, c, d, w in new_rows if bool(guard.evaluate(c, w)) != d]
-        guard.shell_tokens.cache_clear()
+            caught = [n for n, c, d, w in new_rows if verdict(c, w) != d]
+        guard.tokenize.cache_clear()
         assert caught, label
         print(f"Mutation: {label} -> {len(caught)} failures; first: {caught[0]}")
     for bad in (

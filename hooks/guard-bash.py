@@ -490,8 +490,12 @@ def heredoc_end(text, start, marker, strip):
     return len(text)
 
 
+def old_join(text):
+    return re.sub(r"\\\n[ \t]*", "", text)
+
+
 def join_lines(text):
-    """Joins a backslash with the newline after it, as the shell does, so that a run of backslashes joins only when its count is odd. Nothing joins inside single quotes, inside a comment (which ends at the newline) or in a heredoc body."""
+    """Joins a backslash with the newline after it, as the shell does, so that a run of backslashes joins only when its count is odd. Nothing joins inside single quotes, inside a comment (which ends at the newline) or in a heredoc body. A backslash at the end of the text is dropped. Callers also check `old_join`, which joins every pair: it covers a `<<` that is no heredoc (`$((1<<x))`)."""
     if "\\" not in text:
         return text
     out, stack, pending, last, index = [], [""], [], "", 0
@@ -502,8 +506,11 @@ def join_lines(text):
             if char == "'":
                 stack.pop()
         elif char == "\\":
+            if index + 1 == len(text):
+                index += 1
+                continue
             step = 2
-            if text[index + 1 : index + 2] == "\n" and context != "$'":
+            if text[index + 1] == "\n" and context != "$'":
                 index += 2
                 continue
         elif context == "$'":
@@ -603,10 +610,21 @@ def unmask(word):
     return word.translate(UNMASK)
 
 
-@functools.lru_cache(maxsize=8)
+READING = ["new"]
+
+
+def line_reading(reading):
+    return join_lines if reading == "new" else old_join
+
+
 def shell_tokens(command):
+    return tokenize(command, READING[0])
+
+
+@functools.lru_cache(maxsize=8)
+def tokenize(command, reading):
     lex = shlex.shlex(
-        mask_quoted(expand_heredocs(join_lines(command))),
+        mask_quoted(expand_heredocs(line_reading(reading)(command))),
         posix=True,
         punctuation_chars=OPERATOR_CHARS,
     )
@@ -1375,9 +1393,9 @@ def kill_words(entries, text):
     )
 
 
-def bounded(code):
-    """Joins line continuations, then cuts code at a heredoc marker over 256 characters or after SCRIPT_HEREDOC_LIMIT `<<`; the heredoc matcher is quadratic on unterminated ones."""
-    code = join_lines(code)
+def bounded(code, join=old_join):
+    """Joins line continuations with `join`, then cuts code at a heredoc marker over 256 characters or after SCRIPT_HEREDOC_LIMIT `<<`; the heredoc matcher is quadratic on unterminated ones."""
+    code = join(code)
     long_marker = re.search(r"<<-?[ \t]*['\"]?\w{257}", code)
     if long_marker:
         code = code[: long_marker.start()]
@@ -1397,7 +1415,7 @@ class TooLarge(Exception):
     pass
 
 
-def code_kills(code, cwd, disabled, depth, state):
+def code_kills(code, cwd, disabled, depth, state, joined=False):
     """True when code a shell runs kills broadly, directly or through code it runs in turn."""
     if isinstance(code, ScriptText):
         if code.too_large:
@@ -1411,7 +1429,20 @@ def code_kills(code, cwd, disabled, depth, state):
             return False
         finally:
             state["seen"] = seen
-    code = bounded(code)
+    if not joined:
+        previous = READING[0]
+        try:
+            for reading in ("new", "old"):
+                text = line_reading(reading)(code)
+                if reading == "old" and "\\" not in code:
+                    continue
+                READING[0] = reading
+                if code_kills(text, cwd, disabled, depth, state, True):
+                    return True
+        finally:
+            READING[0] = previous
+        return False
+    code = bounded(code, lambda text: text)
     state["left"] -= len(code)
     if state["left"] < 0:
         raise ScanBudget(f"more than {SCRIPT_SCAN_BUDGET} bytes of code to scan")
@@ -2202,8 +2233,24 @@ AMPERSAND_REASON = "More than 200 `&>` redirects: both shell readings of each ca
 
 
 def evaluate(command, cwd, disabled=()):
+    """Checks the command under two readings of a backslash and a newline: the shell's (`join_lines`) and every pair joined (`old_join`)."""
+    previous = READING[0]
     try:
-        normalized_command = join_lines(command)
+        for reading in ("new", "old"):
+            normalized = line_reading(reading)(command)
+            if reading == "old" and "\\" not in command:
+                continue
+            READING[0] = reading
+            reason = evaluate_reading(command, normalized, cwd, disabled)
+            if reason:
+                return reason
+    finally:
+        READING[0] = previous
+    return None
+
+
+def evaluate_reading(command, normalized_command, cwd, disabled):
+    try:
         if normalized_command.count("&>") > AMPERSAND_REDIRECT_LIMIT:
             return AMPERSAND_REASON
         if "guard_memory" not in disabled and "guard_broad_kill" not in disabled:
