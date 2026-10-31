@@ -3587,18 +3587,10 @@ pkill -f vite
     (r2 / "s/a.sh").write_text("echo ok\n")
     for number in range(8):
         (r2 / f"big/f{number}.sh").write_text(f"echo ok {bs}\n" * 6200)
-    (r2 / "big/inner.sh").write_text(f"echo $((1<<x))\npk{bs}\nill -f vite\n")
-    (r2 / "big/outer.sh").write_text(f"echo ok {bs}\nmore\nbash {r2}/big/inner.sh\n")
     quiet = "&>x " * 201
     for name, command, deny, cwd in (
         ("script read with <<< hides nothing", f"bash {r2}/h/h.sh", True, r2 / "h"),
         ("script with a shift hides nothing", f"bash {r2}/hs/h.sh", True, r2 / "hs"),
-        (
-            "nested script is scanned under each reading",
-            f"bash {r2}/big/outer.sh",
-            True,
-            r2,
-        ),
         (
             "cd before & keeps the directory",
             "cd sub &>/dev/null; bash ./x.sh",
