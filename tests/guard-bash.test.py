@@ -2,6 +2,7 @@
 """Policy integration tests plus in-memory mutation checks for guard-bash."""
 
 import importlib.util
+import io
 import json
 import os
 import re
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -3488,7 +3490,6 @@ pkill -f vite
         ("&| then a push", "true &| git push origin main"),
         ("&! then a push", "true &! git push origin main"),
         ("|& then a push", "true |& git push origin main"),
-        ("too many &> redirects", "true " + "&>/dev/null " * 201),
     ]
     false_heredoc = [
         ("arithmetic shift then a join", f"echo $((1<<x))\np{bs}\ni"),
@@ -3566,8 +3567,78 @@ pkill -f vite
         ("command -v pi to null then echo", "command -v pi &>/dev/null && echo ok"),
         ("command -v pi in an if", "if command -v pi &>/dev/null; then echo y; fi"),
         ("true &> then ls", "true &>/dev/null ls"),
-        ("200 &> redirects", "true " + "&>/dev/null " * 200),
     ]
+    pane = "herdr pane run p "
+    r2 = scripts / "r2"
+    for sub in ("h", "hs", "m", "s", "big"):
+        (r2 / sub).mkdir(parents=True)
+    (r2 / "h/h.sh").write_text(
+        f"read v <<<word\necho pki{bs}\nll -f vite > a.sh\nbash a.sh\n"
+    )
+    (r2 / "hs/h.sh").write_text(
+        f"echo $((1<<x))\necho pki{bs}\nll -f vite > a.sh\nbash a.sh\n"
+    )
+    (r2 / "m/x.sh").write_text("pkill -f vite\n")
+    (r2 / "m/sub").mkdir()
+    (r2 / "m/sub/x.sh").write_text("echo ok\n")
+    (r2 / "s/s.sh").write_text(
+        "true &>/dev/null echo 'pkill -f vite' >a.sh\nbash a.sh\n"
+    )
+    (r2 / "s/a.sh").write_text("echo ok\n")
+    for number in range(8):
+        (r2 / f"big/f{number}.sh").write_text(f"echo ok {bs}\n" * 6200)
+    (r2 / "big/inner.sh").write_text(f"echo $((1<<x))\npk{bs}\nill -f vite\n")
+    (r2 / "big/outer.sh").write_text(f"echo ok {bs}\nmore\nbash {r2}/big/inner.sh\n")
+    quiet = "&>x " * 201
+    for name, command, deny, cwd in (
+        ("script read with <<< hides nothing", f"bash {r2}/h/h.sh", True, r2 / "h"),
+        ("script with a shift hides nothing", f"bash {r2}/hs/h.sh", True, r2 / "hs"),
+        (
+            "nested script is scanned under each reading",
+            f"bash {r2}/big/outer.sh",
+            True,
+            r2,
+        ),
+        (
+            "cd before & keeps the directory",
+            "cd sub &>/dev/null; bash ./x.sh",
+            True,
+            r2 / "m",
+        ),
+        ("second &> stream starts clean", f"bash {r2}/s/s.sh", True, r2 / "s"),
+        (
+            "eight 62 KB scripts with joins",
+            "; ".join(f"bash {r2}/big/f{number}.sh" for number in range(8)),
+            False,
+            r2,
+        ),
+    ):
+        case(name, command, deny, cwd)
+    for name, command in (
+        ("&>&1 then a push", "true &>&1 git push origin main"),
+        ("&>&2 then pi", "true &>&2 pi"),
+        ("&>&- then pkill", "true &>&- pkill -f vite"),
+        ("&>| then a push", "true &>|/dev/null git push origin main"),
+        ("&>&1 in a dash shell", "dash -c 'true &>&1 pkill -f vite'"),
+        ("<<< then a split pi", f"true <<<x\ntrue {bs * 2}\np{bs}\ni"),
+        ("four nested pane commands", pane * 4 + "ls"),
+        (
+            "340 nested pane commands then a push",
+            pane * 340 + "ls; git push origin main",
+        ),
+        ("nested pane commands with joins", pane * 10 + "ls " + bs * 2048 + "x"),
+    ):
+        case(name, command, True)
+    for name, command in (
+        ("three nested pane commands", pane * 3 + "ls"),
+        ("&>&1 alone", "npm test &>&1"),
+        ("201 &> in single quotes", f"echo '{quiet}'"),
+        ("201 &> in double quotes", f'echo "{quiet}"'),
+        ("201 &> in a comment", f"ls # {quiet}"),
+        ("201 &> in a quoted heredoc", f"cat <<'E'\n{quiet}\nE"),
+        ("201 &> in a commit message", f"git commit -m '{quiet}'"),
+    ):
+        case(name, command)
     for name, command in line_end_deny + ampersand_deny:
         case(name, command, True)
     for name, command in still_allowed:
@@ -3575,7 +3646,11 @@ pkill -f vite
     for name, command in (
         ("128000 backslashes", "true " + bs * 128000 + "\ngit push origin main"),
         ("128000 backslashes, odd", "true " + bs * 128001 + "\ngit push origin main"),
-        ("128000 &> targets", "true " + "&>a " * 128000),
+        ("pane chain 10", pane * 10 + "ls " + bs * 2**11 + "x"),
+        ("pane chain 12", pane * 12 + "ls " + bs * 2**13 + "x"),
+        ("pane chain 13", pane * 13 + "ls " + bs * 2**14 + "x"),
+        ("pane chain 16", pane * 16 + "ls " + bs * 2**17 + "x"),
+        ("pane chain 20, no backslashes", pane * 20 + "ls"),
         ("128000 hashes", "true " + "#" * 128000 + "\ngit push origin main"),
         ("128000 hash words", "true " + "# " * 64000 + "\ngit push origin main"),
         ("128000 joined lines", "true " + (bs + "\n") * 64000 + "git push origin main"),
@@ -3666,7 +3741,6 @@ pkill -f vite
         print(f"Mutation: {label} -> {len(caught)} failures; first: {caught[0]}")
     for label, target, value in (
         ("check only the first &> reading", "dash_reading", lambda tokens: ()),
-        ("no limit on &> redirects", "AMPERSAND_REDIRECT_LIMIT", 10**9),
         ("no heredoc skip in line joins", "HEREDOC_MARK", re.compile(r"(?!)")),
         ("no old join reading", "old_join", lambda t: guard.join_lines(t)),
     ):
@@ -3676,6 +3750,71 @@ pkill -f vite
         guard.tokenize.cache_clear()
         assert caught, label
         print(f"Mutation: {label} -> {len(caught)} failures; first: {caught[0]}")
+
+    def mutant(old, new):
+        source = HOOK.read_text()
+        assert old in source, old
+        module = types.ModuleType("mutant")
+        exec(compile(source.replace(old, new), str(HOOK), "exec"), module.__dict__)
+        return module
+
+    for label, old, new in (
+        (
+            "seen key without the text",
+            "where, text_readings(inner))",
+            "where)",
+        ),
+        (
+            "budget charged for both readings",
+            'if READING[0] == "new":\n        state["left"]',
+            'if True:\n        state["left"]',
+        ),
+        ("no pane nesting cap", "PANE_NEST_LIMIT = 3", "PANE_NEST_LIMIT = 10**9"),
+        (
+            "no &> then & or | handling",
+            'following in (("&",), ("|",))',
+            "following in ()",
+        ),
+        (
+            "<<< read as a heredoc opener",
+            'elif text.startswith("<<<", index):\n            step = 3\n        elif text.startswith("<<", index):',
+            'elif text.startswith("<<", index) and not text.startswith("<<<", index):',
+        ),
+        (
+            "no break before the second &> stream",
+            "tokens += (STREAM_BREAK,) + dash_reading(tokens)",
+            "tokens += dash_reading(tokens)",
+        ),
+        (
+            "cd before & changes the directory",
+            '                    and token != "&"\n',
+            "",
+        ),
+    ):
+        broken = mutant(old, new)
+        broken.tokenize.cache_clear()
+        caught = []
+        for name, command, deny, cwd in new_rows:
+            try:
+                denied = bool(broken.evaluate(command, cwd))
+            except Exception:
+                denied = False
+            if denied != deny:
+                caught.append(name)
+        assert caught, label
+        print(f"Mutation: {label} -> {len(caught)} failures; first: {caught[0]}")
+    broken = mutant("except RecursionError as exc:", "except KeyboardInterrupt as exc:")
+    payload = json.dumps(
+        {"tool_name": "Bash", "cwd": str(repo), "tool_input": {"command": "ls"}}
+    )
+    for module, expected in ((guard, 2), (broken, 0)):
+        with (
+            patch.object(module, "evaluate", side_effect=RecursionError),
+            patch("sys.stdin", io.StringIO(payload)),
+            patch("sys.stderr", io.StringIO()),
+        ):
+            assert module.main() == expected, (module, expected)
+    print("Mutation: no RecursionError deny in main -> caught by the recursion check")
     for bad in (
         "{",
         "{}",

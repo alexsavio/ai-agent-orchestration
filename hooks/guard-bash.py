@@ -537,7 +537,9 @@ def join_lines(text):
         elif char == "#" and (not last or last in COMMENT_BEFORE):
             end = text.find("\n", index)
             step = (len(text) if end < 0 else end) - index
-        elif text.startswith("<<", index) and not text.startswith("<<<", index):
+        elif text.startswith("<<<", index):
+            step = 3
+        elif text.startswith("<<", index):
             mark = HEREDOC_MARK.match(text, index)
             if mark:
                 pending.append((mark[3], bool(mark[1])))
@@ -611,6 +613,7 @@ def unmask(word):
 
 
 READING = ["new"]
+STREAM_BREAK = "\n\n"
 
 
 def line_reading(reading):
@@ -634,16 +637,24 @@ def tokenize(command, reading):
     tokens = tuple(part for token in lex for part in split_operators(token)) + (";",)
     if "&>" in tokens or "&>>" in tokens:
         # bash and zsh read `&>` as one redirect; dash reads `&` then `>`, so what follows the target runs as a command.
-        tokens += dash_reading(tokens)
+        tokens += (STREAM_BREAK,) + dash_reading(tokens)
     return tokens
 
 
 def dash_reading(tokens):
-    return tuple(
-        part
-        for token in tokens
-        for part in {"&>": ("&", ">"), "&>>": ("&", ">>")}.get(token, (token,))
-    )
+    out, skip = [], False
+    for index, token in enumerate(tokens):
+        following = tokens[index + 1 : index + 2]
+        if skip:
+            skip = False
+        elif token == "&>" and following in (("&",), ("|",)):
+            out += ["&", ">" + following[0]]
+            skip = True
+        elif token in ("&>", "&>>"):
+            out += ["&", token[1:]]
+        else:
+            out.append(token)
+    return tuple(out)
 
 
 def split_operators(token):
@@ -1443,7 +1454,8 @@ def code_kills(code, cwd, disabled, depth, state, joined=False):
             READING[0] = previous
         return False
     code = bounded(code, lambda text: text)
-    state["left"] -= len(code)
+    if READING[0] == "new":
+        state["left"] -= len(code)
     if state["left"] < 0:
         raise ScanBudget(f"more than {SCRIPT_SCAN_BUDGET} bytes of code to scan")
     if time.monotonic() >= state["deadline"]:
@@ -1461,9 +1473,10 @@ def code_kills(code, cwd, disabled, depth, state, joined=False):
         return False
     for _, inner, where, key in runs(entries, disabled):
         if key:
-            if (key, depth, where) in state["seen"]:
+            visit = (key, depth, where, text_readings(inner))
+            if visit in state["seen"]:
                 continue
-            state["seen"].add((key, depth, where))
+            state["seen"].add(visit)
         if code_kills(inner, where, disabled, depth + 1, state):
             return True
     return False
@@ -1651,6 +1664,10 @@ def commands(command, cwd, redirects=None):
     control_before = None
     previous_status = None
     for token in shell_tokens(command):
+        if token == STREAM_BREAK:
+            segment, pipeline, stack = [], [], []
+            currents, control_before, previous_status = {str(cwd)}, None, None
+            continue
         if is_operator(token):
             found = redirections(segment) if redirects is not None else []
             segment = without_redirections(segment)
@@ -1663,7 +1680,12 @@ def commands(command, cwd, redirects=None):
                 cd_args = segment[1:]
                 while segment[0] == "cd" and cd_args[:1] in (["--"], ["-L"], ["-P"]):
                     cd_args = cd_args[1:]
-                if segment[0] == "cd" and len(cd_args) == 1 and "$" not in cd_args[0]:
+                if (
+                    segment[0] == "cd"
+                    and token != "&"
+                    and len(cd_args) == 1
+                    and "$" not in cd_args[0]
+                ):
                     candidates = {
                         os.path.abspath(
                             os.path.join(current, os.path.expanduser(cd_args[0]))
@@ -2016,6 +2038,11 @@ def raw_fallback(command):
     return None
 
 
+PANE_NEST = [0]
+PANE_NEST_LIMIT = 3
+PANE_NEST_REASON = (
+    "Pane text nests pane commands more than 3 levels deep; send it in smaller steps."
+)
 HERDR_PAIRS = (
     ("agent", "start"),
     ("agent", "prompt"),
@@ -2083,9 +2110,14 @@ def guard_pi(executable, args, where=".", disabled=()):
         elif pair in (("pane", "run"), ("pane", "send-text")):
             if MODEL_COMMAND.match(text):
                 return PI_REASON
-            return evaluate(text, where, disabled) or guard_pi_text(
-                text, where, disabled, 0, strict=True
-            )
+            if PANE_NEST[0] >= PANE_NEST_LIMIT:
+                return PANE_NEST_REASON
+            PANE_NEST[0] += 1
+            try:
+                reason = evaluate(text, where, disabled)
+            finally:
+                PANE_NEST[0] -= 1
+            return reason or guard_pi_text(text, where, disabled, 0, strict=True)
         elif pair == ("agent", "prompt") and MODEL_COMMAND.match(text):
             return PI_REASON
     elif not pi_info(args):
@@ -2228,10 +2260,6 @@ def evaluate_words(words, where, command, disabled, pipeline):
     return None
 
 
-AMPERSAND_REDIRECT_LIMIT = 200
-AMPERSAND_REASON = "More than 200 `&>` redirects: both shell readings of each cannot be checked in time. Split the command."
-
-
 def evaluate(command, cwd, disabled=()):
     """Checks the command under two readings of a backslash and a newline: the shell's (`join_lines`) and every pair joined (`old_join`)."""
     previous = READING[0]
@@ -2251,8 +2279,6 @@ def evaluate(command, cwd, disabled=()):
 
 def evaluate_reading(command, normalized_command, cwd, disabled):
     try:
-        if normalized_command.count("&>") > AMPERSAND_REDIRECT_LIMIT:
-            return AMPERSAND_REASON
         if "guard_memory" not in disabled and "guard_broad_kill" not in disabled:
             reason = guard_broad_kill(normalized_command) or guard_script_kill(
                 normalized_command, cwd, disabled
@@ -2284,6 +2310,11 @@ def evaluate_reading(command, normalized_command, cwd, disabled):
         return raw_fallback(normalized_command)
 
 
+RECURSION_REASON = (
+    "Command text nests too deeply to check; split it into smaller commands."
+)
+
+
 def main():
     command = None
     try:
@@ -2295,6 +2326,10 @@ def main():
         if not isinstance(command, str) or not isinstance(cwd, str):
             raise ValueError("invalid hook input")
         reason = evaluate(command, cwd)
+    except RecursionError as exc:
+        log_failure(exc, command)
+        print(RECURSION_REASON, file=sys.stderr)
+        return 2
     except Exception as exc:
         log_failure(exc, command)
         return 0
