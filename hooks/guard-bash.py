@@ -495,7 +495,7 @@ def old_join(text):
 
 
 def join_lines(text):
-    """Joins a backslash with the newline after it, as the shell does, so that a run of backslashes joins only when its count is odd. Nothing joins inside single quotes, inside a comment (which ends at the newline) or in a heredoc body. A backslash at the end of the text is dropped. Callers also check `old_join`, which joins every pair: it covers a `<<` that is no heredoc (`$((1<<x))`)."""
+    """Joins a backslash and the newline after it as the shell does: odd counts only, never in single quotes, comments or heredoc bodies; a final backslash is dropped. Callers also check `old_join`."""
     if "\\" not in text:
         return text
     out, stack, pending, last, index = [], [""], [], "", 0
@@ -633,7 +633,7 @@ def tokenize(command, reading):
     lex.commenters = ""
     tokens = tuple(part for token in lex for part in split_operators(token)) + (";",)
     if "&>" in tokens or "&>>" in tokens:
-        # bash and zsh read `&>` as one redirect; dash reads `&` then `>`, so what follows the target runs as a command. Both readings are checked.
+        # bash and zsh read `&>` as one redirect; dash reads `&` then `>`, so what follows the target runs as a command.
         tokens += dash_reading(tokens)
     return tokens
 
@@ -1433,9 +1433,9 @@ def code_kills(code, cwd, disabled, depth, state, joined=False):
         previous = READING[0]
         try:
             for reading in ("new", "old"):
-                text = line_reading(reading)(code)
                 if reading == "old" and "\\" not in code:
                     continue
+                text = line_reading(reading)(code)
                 READING[0] = reading
                 if code_kills(text, cwd, disabled, depth, state, True):
                     return True
@@ -2237,9 +2237,9 @@ def evaluate(command, cwd, disabled=()):
     previous = READING[0]
     try:
         for reading in ("new", "old"):
-            normalized = line_reading(reading)(command)
             if reading == "old" and "\\" not in command:
                 continue
+            normalized = line_reading(reading)(command)
             READING[0] = reading
             reason = evaluate_reading(command, normalized, cwd, disabled)
             if reason:

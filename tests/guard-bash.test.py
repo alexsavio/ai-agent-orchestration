@@ -3532,7 +3532,7 @@ pkill -f vite
         True,
         scripts,
     )
-    case("end of text is no heredoc", f"echo hi {bs}", False)
+    case("text ending in a backslash is allowed", f"echo hi {bs}", False)
     still_allowed = [
         ("one backslash joins the lines", f"true {bs}\ngit push origin main"),
         ("three backslashes join the lines", f"true {bs * 3}\ngit push origin main"),
