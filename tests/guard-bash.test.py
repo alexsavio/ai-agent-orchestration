@@ -3630,10 +3630,20 @@ pkill -f vite
             True,
             r2 / "hi",
         ),
-        ("cd & then a cd with $PWD", "cd sub & cd $PWD/sub; bash ./x.sh", True, r2 / "hi"),
+        (
+            "cd & then a cd with $PWD",
+            "cd sub & cd $PWD/sub; bash ./x.sh",
+            True,
+            r2 / "hi",
+        ),
         ("cd & then cd .. in a pipe", "cd sub & cd .. | bash ./x.sh", True, r2 / "hr"),
         ("cd & then the script in the folder", "cd sub & bash ./x.sh", True, r2 / "hr"),
-        ("cd & then the script in the sub folder", "cd sub & bash ./x.sh", True, r2 / "hi"),
+        (
+            "cd & then the script in the sub folder",
+            "cd sub & bash ./x.sh",
+            True,
+            r2 / "hi",
+        ),
         (
             "cd & group cd inside a script",
             f"bash {r2}/hi/g.sh",
@@ -3679,6 +3689,7 @@ pkill -f vite
         case(name, command, True)
     for name, command in still_allowed:
         case(name, command)
+
     def amp_chain(words, depth):
         text = " ".join(["a"] * words) + f" &>x y {bs}\nz"
         for _ in range(depth):
@@ -3867,7 +3878,9 @@ pkill -f vite
         finally:
             sys.setrecursionlimit(old)
     assert not allowed, allowed
-    print("Mutation: guard_script_kill swallows RecursionError -> caught by the limit sweep")
+    print(
+        "Mutation: guard_script_kill swallows RecursionError -> caught by the limit sweep"
+    )
     for module, expected in ((guard, 2), (broken, 0)):
         with (
             patch.object(module, "evaluate", side_effect=RecursionError),

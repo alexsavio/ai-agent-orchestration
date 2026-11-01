@@ -1616,7 +1616,8 @@ def guard_big_repo_reads(args, cwd, opts, raw, pipeline=()):
 def expand_heredocs(command):
     # Handle common direct heredocs and $(cat <<EOF ... EOF) message forms.
     pattern = re.compile(
-        r"(?<!<)<<(-?)[ \t]*(['\"]?)([A-Za-z_][\w]*)\2[^\n]*\n(.*?)\n[\t]*\3(?=\s|$)", re.S
+        r"(?<!<)<<(-?)[ \t]*(['\"]?)([A-Za-z_][\w]*)\2[^\n]*\n(.*?)\n[\t]*\3(?=\s|$)",
+        re.S,
     )
 
     def replace(m):
@@ -1684,11 +1685,7 @@ def commands(command, cwd, redirects=None):
                 cd_args = segment[1:]
                 while segment[0] == "cd" and cd_args[:1] in (["--"], ["-L"], ["-P"]):
                     cd_args = cd_args[1:]
-                if (
-                    segment[0] == "cd"
-                    and len(cd_args) == 1
-                    and "$" not in cd_args[0]
-                ):
+                if segment[0] == "cd" and len(cd_args) == 1 and "$" not in cd_args[0]:
                     candidates = {
                         os.path.abspath(
                             os.path.join(current, os.path.expanduser(cd_args[0]))
