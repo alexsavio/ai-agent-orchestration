@@ -3597,6 +3597,52 @@ pkill -f vite
     for number in range(8):
         (r2 / f"big/f{number}.sh").write_text(f"echo ok {bs}\n" * 6200)
     quiet = "&>x " * 201
+    t4_rows = (
+        (
+            "cd sub 2>/dev/null &>&1; { cd sub; } <<E\nE\ncd -P a;sh ./x.sh",
+            ("sub/x.sh", "a/b/x.sh"),
+        ),
+        (
+            "bash <<'GUARDX'\n{ cd sub; };cd s\\\nub & cd a;cd -P a \\\\\nbash < ./x.sh &>/dev/null && cat ./x.sh | bash\nGUARDX",
+            ("sub/x.sh", "sub/sub/x.sh", "a.sh"),
+        ),
+        (
+            "tee a.sh <<'E'\ntrue\nE &| cd sub 2>/dev/null &| cd a\nsource ./x.sh <<E\nE\nbash sub/x.sh",
+            ("sub/x.sh", "a/b/x.sh", "a.sh"),
+        ),
+        (
+            "bash -c 'cd s\\\nub & \\\ntee a.sh <<'\"'\"'E'\"'\"'\ntrue\nE <<<<x\ncd .. <<'\"'\"'E'\"'\"'\nb\\\nE\nbash a.sh'",
+            ("a.sh",),
+        ),
+        (
+            "cd -- sub &cd a & { cd sub; }\ncd a && ./x.sh # \\\nbash < ./x.sh",
+            ("sub/x.sh", "a.sh"),
+        ),
+        (
+            "cd -- sub &! cd sub <<E\nE\ncd -P a | bash sub/x.sh",
+            ("sub/sub/x.sh", "a/x.sh"),
+        ),
+    )
+    t4_cases = []
+    for number, (command, kills) in enumerate(t4_rows):
+        case_root = r2 / f"t4_{number}"
+        for folder in ("sub/sub", "a/b", "b"):
+            (case_root / folder).mkdir(parents=True)
+        for spot in (
+            "x.sh",
+            "sub/x.sh",
+            "sub/sub/x.sh",
+            "a/x.sh",
+            "a/b/x.sh",
+            "b/x.sh",
+            "a.sh",
+        ):
+            (case_root / spot).write_text(
+                "pkill -f vite\n" if spot in kills else "true\n"
+            )
+        t4_cases.append(
+            (f"shell ran the kill, form {number + 1}", command, True, case_root)
+        )
 
     def echo_chain(depth, tail):
         text = tail
@@ -3616,7 +3662,7 @@ pkill -f vite
         ("script read with <<< hides nothing", f"bash {r2}/h/h.sh", True, r2 / "h"),
         ("script with a shift hides nothing", f"bash {r2}/hs/h.sh", True, r2 / "hs"),
         (
-            "cd before & keeps the directory",
+            "second stream: cd & is no move",
             "cd sub &>/dev/null; bash ./x.sh",
             True,
             r2 / "m",
@@ -3637,7 +3683,12 @@ pkill -f vite
             r2 / "hi",
         ),
         ("cd & then cd .. in a pipe", "cd sub & cd .. | bash ./x.sh", True, r2 / "hr"),
-        ("cd & then the script in the folder", "cd sub & bash ./x.sh", True, r2 / "hr"),
+        (
+            "cd & then the script in the folder (known limit, as on main)",
+            "cd sub & bash ./x.sh",
+            False,
+            r2 / "hr",
+        ),
         (
             "cd & then the script in the sub folder",
             "cd sub & bash ./x.sh",
@@ -3650,6 +3701,7 @@ pkill -f vite
             True,
             r2 / "hi",
         ),
+        *t4_cases,
         ("script text with <<< and a heredoc line", "true <<<E\npi\nE\n", True, r2),
         ("cat heredoc named E is data", "cat <<E\npi\nE\n", False, r2),
         (
@@ -3840,8 +3892,13 @@ pkill -f vite
             "tokens += dash_reading(tokens)",
         ),
         (
-            "cd before & changes the directory",
-            '                    and token != "&"\n',
+            "first stream: cd & is a move",
+            "    dash_stream = False\n",
+            "    dash_stream = True\n",
+        ),
+        (
+            "second stream: cd & is no move",
+            '                    and not (dash_stream and token == "&")\n',
             "",
         ),
     ):

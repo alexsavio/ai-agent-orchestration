@@ -1668,8 +1668,10 @@ def commands(command, cwd, redirects=None):
     currents = {str(cwd)}
     control_before = None
     previous_status = None
+    dash_stream = False
     for token in shell_tokens(command):
         if token == STREAM_BREAK:
+            dash_stream = True
             segment, pipeline, stack = [], [], []
             currents, control_before, previous_status = {str(cwd)}, None, None
             continue
@@ -1685,7 +1687,12 @@ def commands(command, cwd, redirects=None):
                 cd_args = segment[1:]
                 while segment[0] == "cd" and cd_args[:1] in (["--"], ["-L"], ["-P"]):
                     cd_args = cd_args[1:]
-                if segment[0] == "cd" and len(cd_args) == 1 and "$" not in cd_args[0]:
+                if (
+                    segment[0] == "cd"
+                    and not (dash_stream and token == "&")
+                    and len(cd_args) == 1
+                    and "$" not in cd_args[0]
+                ):
                     candidates = {
                         os.path.abspath(
                             os.path.join(current, os.path.expanduser(cd_args[0]))
@@ -1704,7 +1711,6 @@ def commands(command, cwd, redirects=None):
                     if (
                         candidates
                         and not skipped
-                        and token != "&"
                         and (not conditional or previous_status is not None)
                     ):
                         currents = candidates
