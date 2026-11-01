@@ -1489,6 +1489,8 @@ def guard_script_kill(raw, cwd, disabled):
         entries = command_entries(raw, cwd)
     except ValueError:
         return None
+    except RecursionError:
+        raise
     except Exception as exc:
         log_failure(exc, raw, "scan-error")
         return None
@@ -1506,6 +1508,8 @@ def guard_script_kill(raw, cwd, disabled):
     except ScanBudget as exc:
         log_failure(exc, raw, "scan-budget")
         return "script scan budget exhausted with shell code left unchecked; split the command into smaller scripts."
+    except RecursionError:
+        raise
     except Exception as exc:
         log_failure(exc, raw, "scan-error")
     return None
@@ -1612,7 +1616,7 @@ def guard_big_repo_reads(args, cwd, opts, raw, pipeline=()):
 def expand_heredocs(command):
     # Handle common direct heredocs and $(cat <<EOF ... EOF) message forms.
     pattern = re.compile(
-        r"<<(-?)[ \t]*(['\"]?)([A-Za-z_][\w]*)\2[^\n]*\n(.*?)\n[\t]*\3(?=\s|$)", re.S
+        r"(?<!<)<<(-?)[ \t]*(['\"]?)([A-Za-z_][\w]*)\2[^\n]*\n(.*?)\n[\t]*\3(?=\s|$)", re.S
     )
 
     def replace(m):
@@ -1682,7 +1686,6 @@ def commands(command, cwd, redirects=None):
                     cd_args = cd_args[1:]
                 if (
                     segment[0] == "cd"
-                    and token != "&"
                     and len(cd_args) == 1
                     and "$" not in cd_args[0]
                 ):
@@ -1704,6 +1707,7 @@ def commands(command, cwd, redirects=None):
                     if (
                         candidates
                         and not skipped
+                        and token != "&"
                         and (not conditional or previous_status is not None)
                     ):
                         currents = candidates
@@ -2039,6 +2043,7 @@ def raw_fallback(command):
 
 
 PANE_NEST = [0]
+PANE_SEEN = set()
 PANE_NEST_LIMIT = 3
 PANE_NEST_REASON = (
     "Pane text nests pane commands more than 3 levels deep; send it in smaller steps."
@@ -2112,12 +2117,19 @@ def guard_pi(executable, args, where=".", disabled=()):
                 return PI_REASON
             if PANE_NEST[0] >= PANE_NEST_LIMIT:
                 return PANE_NEST_REASON
+            visit = (text, where, tuple(disabled), READING[0], PANE_NEST[0])
+            if visit in PANE_SEEN:
+                return None
             PANE_NEST[0] += 1
             try:
-                reason = evaluate(text, where, disabled)
+                reason = evaluate(text, where, disabled) or guard_pi_text(
+                    text, where, disabled, 0, strict=True
+                )
             finally:
                 PANE_NEST[0] -= 1
-            return reason or guard_pi_text(text, where, disabled, 0, strict=True)
+            if not reason:
+                PANE_SEEN.add(visit)
+            return reason
         elif pair == ("agent", "prompt") and MODEL_COMMAND.match(text):
             return PI_REASON
     elif not pi_info(args):
@@ -2263,6 +2275,8 @@ def evaluate_words(words, where, command, disabled, pipeline):
 def evaluate(command, cwd, disabled=()):
     """Checks the command under two readings of a backslash and a newline: the shell's (`join_lines`) and every pair joined (`old_join`)."""
     previous = READING[0]
+    if not PANE_NEST[0]:
+        PANE_SEEN.clear()
     try:
         for reading in ("new", "old"):
             if reading == "old" and "\\" not in command:

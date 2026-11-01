@@ -2,6 +2,7 @@
 """Policy integration tests plus in-memory mutation checks for guard-bash."""
 
 import importlib.util
+import inspect
 import io
 import json
 import os
@@ -3579,6 +3580,14 @@ pkill -f vite
         f"echo $((1<<x))\necho pki{bs}\nll -f vite > a.sh\nbash a.sh\n"
     )
     (r2 / "m/x.sh").write_text("pkill -f vite\n")
+    for sub in ("hi/sub", "hr"):
+        (r2 / sub).mkdir(parents=True)
+    (r2 / "hi/sub/x.sh").write_text("pkill -f vite\n")
+    (r2 / "hr/x.sh").write_text("pkill -f vite\n")
+    (r2 / "hr/sub").mkdir()
+    (r2 / "hr/sub/x.sh").write_text("echo ok\n")
+    (r2 / "hi/x.sh").write_text("echo ok\n")
+    (r2 / "hi/g.sh").write_text("cd sub & { cd sub; }; bash ./x.sh\n")
     (r2 / "m/sub").mkdir()
     (r2 / "m/sub/x.sh").write_text("echo ok\n")
     (r2 / "s/s.sh").write_text(
@@ -3588,7 +3597,22 @@ pkill -f vite
     for number in range(8):
         (r2 / f"big/f{number}.sh").write_text(f"echo ok {bs}\n" * 6200)
     quiet = "&>x " * 201
+
+    def echo_chain(depth, tail):
+        text = tail
+        for _ in range(depth):
+            text = pane + shlex.quote("$(echo " + shlex.quote(text) + ")")
+        return text
+
     for name, command, deny, cwd in (
+        (
+            "pane text seen at a shallow level is checked again deeper",
+            f"{pane}'{pane}ls'; " + pane * 4 + "ls",
+            True,
+            r2,
+        ),
+        ("echo chain of 6 pane levels, tail ls", echo_chain(6, "ls"), True, r2),
+        ("echo chain of 3 pane levels, tail ls", echo_chain(3, "ls"), False, r2),
         ("script read with <<< hides nothing", f"bash {r2}/h/h.sh", True, r2 / "h"),
         ("script with a shift hides nothing", f"bash {r2}/hs/h.sh", True, r2 / "hs"),
         (
@@ -3598,6 +3622,26 @@ pkill -f vite
             r2 / "m",
         ),
         ("second &> stream starts clean", f"bash {r2}/s/s.sh", True, r2 / "s"),
+        ("cd & then a group cd", "cd sub & { cd sub; }; bash ./x.sh", True, r2 / "hi"),
+        ("cd & then a negated cd", "cd sub & ! cd sub; bash ./x.sh", True, r2 / "hi"),
+        (
+            "cd & then a cd in an if",
+            "cd sub & if cd sub; then bash ./x.sh; fi",
+            True,
+            r2 / "hi",
+        ),
+        ("cd & then a cd with $PWD", "cd sub & cd $PWD/sub; bash ./x.sh", True, r2 / "hi"),
+        ("cd & then cd .. in a pipe", "cd sub & cd .. | bash ./x.sh", True, r2 / "hr"),
+        ("cd & then the script in the folder", "cd sub & bash ./x.sh", True, r2 / "hr"),
+        ("cd & then the script in the sub folder", "cd sub & bash ./x.sh", True, r2 / "hi"),
+        (
+            "cd & group cd inside a script",
+            f"bash {r2}/hi/g.sh",
+            True,
+            r2 / "hi",
+        ),
+        ("script text with <<< and a heredoc line", "true <<<E\npi\nE\n", True, r2),
+        ("cat heredoc named E is data", "cat <<E\npi\nE\n", False, r2),
         (
             "eight 62 KB scripts with joins",
             "; ".join(f"bash {r2}/big/f{number}.sh" for number in range(8)),
@@ -3635,7 +3679,14 @@ pkill -f vite
         case(name, command, True)
     for name, command in still_allowed:
         case(name, command)
+    def amp_chain(words, depth):
+        text = " ".join(["a"] * words) + f" &>x y {bs}\nz"
+        for _ in range(depth):
+            text = pane + shlex.quote(text) + " &>/dev/null"
+        return text
+
     for name, command in (
+        ("pane depth 3 with &> at each level", amp_chain(4000, 3)),
         ("128000 backslashes", "true " + bs * 128000 + "\ngit push origin main"),
         ("128000 backslashes, odd", "true " + bs * 128001 + "\ngit push origin main"),
         ("pane chain 10", pane * 10 + "ls " + bs * 2**11 + "x"),
@@ -3799,6 +3850,24 @@ pkill -f vite
     payload = json.dumps(
         {"tool_name": "Bash", "cwd": str(repo), "tool_input": {"command": "ls"}}
     )
+    (r2 / "rec").mkdir()
+    (r2 / "rec/k.sh").write_text("pkill -f vite\n")
+    allowed = []
+    depth = len(inspect.stack())
+    for limit in range(depth + 1, depth + 80):
+        guard.tokenize.cache_clear()
+        guard.attribution_scan_text.cache_clear()
+        old = sys.getrecursionlimit()
+        sys.setrecursionlimit(limit)
+        try:
+            if not guard.evaluate("bash k.sh", str(r2 / "rec")):
+                allowed.append(limit)
+        except RecursionError:
+            pass
+        finally:
+            sys.setrecursionlimit(old)
+    assert not allowed, allowed
+    print("Mutation: guard_script_kill swallows RecursionError -> caught by the limit sweep")
     for module, expected in ((guard, 2), (broken, 0)):
         with (
             patch.object(module, "evaluate", side_effect=RecursionError),
