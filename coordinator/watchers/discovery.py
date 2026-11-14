@@ -267,10 +267,14 @@ def repos(command, work=None):
     return found
 
 
-def architect_owners(command):
-    """Architect saved names to workspace IDs through the env adapter; no ambiguous routing."""
+def architect_owners(command, ambiguous_out=None):
+    """Architect saved names to workspace IDs through the env adapter; no ambiguous routing.
+
+    A set passed as ambiguous_out receives the names the adapter omitted as ambiguous."""
     try:
-        return adapter().architect_owners(command)
+        if ambiguous_out is None:
+            return adapter().architect_owners(command)
+        return adapter().architect_owners(command, ambiguous_out=ambiguous_out)
     except READ_ERRORS as error:
         raise Unavailable(str(error)[:200]) from error
 

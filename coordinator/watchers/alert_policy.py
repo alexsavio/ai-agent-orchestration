@@ -378,6 +378,9 @@ def todo_facts(line):
         return [
             fact("todo:readfail:" + line[len("TODO READFAIL ") :], line, clearable=True)
         ]
+    answer_recovered = re.match(r"TODO READ RECOVERED (answer:.+?: )", line)
+    if answer_recovered:
+        return [clear("todo:readfail:" + answer_recovered.group(1))]
     if line.startswith("TODO READ RECOVERED "):
         return [
             clear("todo:readfail:" + line[len("TODO READ RECOVERED ") :], exact=True)
