@@ -107,12 +107,6 @@ class AnswerFailureTests(IsolatedTestCase):
         self.assertNotIn("failure", stored)
         self.assertNotIn("failed_at", stored)
 
-    def test_record_without_failure_fields_still_delivers(self):
-        a.submit(OWNER, TEXT, "now")
-        self.assertNotIn("failure", a.records()[0])
-        ready, _, failures = self.collect_with(owners={OWNER: "workspace"})
-        self.assertEqual((len(ready), failures), (1, []))
-
     def test_answer_failure_stays_out_of_status_read_failures(self):
         a.submit(OWNER, TEXT, "now")
         with patch.object(

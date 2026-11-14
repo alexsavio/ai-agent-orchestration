@@ -105,8 +105,8 @@ class TodoAnswerTests(IsolatedTestCase):
 
     def test_existing_producer_routes_and_dedupes_answer(self):
         a.submit(OWNER, TEXT, "now")
-        records, failed, failures = a.collect(w.command)
-        self.assertEqual(failed, [])
+        records, notices, _ = a.collect(w.command)
+        self.assertEqual(notices, [])
         raw = dict(now=[], unreadable=[], read=[], scanned=True, todo_answers=records)
         after, lines = w.reduce_todo(None, raw)
         self.assertEqual(len(lines), 1)
@@ -142,9 +142,9 @@ class TodoAnswerTests(IsolatedTestCase):
             "architect_owners",
             side_effect=a.discovery.Unavailable("offline"),
         ):
-            records, failed, failures = a.collect(w.command)
+            records, notices, failures = a.collect(w.command)
         self.assertEqual(records, [])
-        self.assertEqual(failed, [])
+        self.assertEqual(notices, [])
         self.assertEqual([entry["reason"] for entry in failures], ["offline"])
         self.assertEqual(len(list(a.directory().glob("*.json"))), 1)
 
