@@ -277,6 +277,33 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(len(a.records()), 1)
         self.assertEqual(len(app.rows), 1)
 
+    def test_control_characters_never_reach_the_screen(self):
+        import re
+
+        _, view = self.view_app()
+        record = dict(
+            a.submit(OWNER, TEXT, "now"),
+            answer="\x1b[31mred\x07 ok",
+            failure="bad\x07\x1b]0;x\x07 reason",
+            architect="Arch\x1bitect",
+            text="Deploy \x1b[2J release [1: \x1b[31mnow] [2: later\x7f] -> Architect::Tooling",
+        )
+        editor = a.AnswerInput({"1": "\x1b[31mnow", "2": "late\x07r"})
+        rows = [(record["architect"], record["text"], False, "", record)]
+        shown = [
+            a.describe(record),
+            view.queued_label(record),
+            editor.prompt(),
+            *view.layout(rows, 80, 0)[0],
+            *view.answer_lines(editor, 80)[0],
+        ]
+        for line in shown:
+            for payload in ("\x1b[31m", "\x1b[2J", "\x1b]0", "\x07", "\x7f"):
+                self.assertNotIn(payload, line)
+            plain = re.sub(r"\x1b\[[0-9;]*m", "", line)
+            self.assertNotRegex(plain, r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", line)
+        self.assertIn("reason", a.describe(record))
+
     def test_demo_has_a_plain_item_and_an_undelivered_answer(self):
         _, view = self.view_app()
         app = view.App(

@@ -128,7 +128,7 @@ def atomic_write(path, data):
 
 
 def feed_line(owner, text, now):
-    clean = " ".join("".join(c for c in text if c.isprintable() or c == " ").split())
+    clean = todo_answers.printable(text)
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now))
     return f"{stamp} todo: TODO DISMISSED {'_'.join(owner.split())}: {clean} (start)\n"
 
@@ -274,6 +274,7 @@ def fit(line, width):
 
 
 def label(text, flagged, note=""):
+    text = todo_answers.printable(text)
     m = TARGET.search(text)
     body = TARGET.sub("", text).rstrip()
     tag = ""
@@ -290,9 +291,9 @@ def label(text, flagged, note=""):
 
 def queued_label(record):
     stamp = time.strftime("%H:%M", time.localtime(record["at"]))
-    reason = record.get("failure")
+    reason = todo_answers.printable(record.get("failure") or "")
     return (
-        f"{label(record['text'], False)}  → answer: {record['answer']}"
+        f"{label(record['text'], False)}  → answer: {todo_answers.printable(record['answer'])}"
         f"  (not delivered yet, queued {stamp}" + (f": {reason})" if reason else ")")
     )
 
@@ -325,7 +326,8 @@ def answer_lines(editor, width):
         rows = wrap(editor.prompt(), width)
         return rows[-4:], []
     entries = tuple(
-        (key, "answer-" + key, value) for key, value in editor.options.items()
+        (key, "answer-" + key, todo_answers.printable(value))
+        for key, value in editor.options.items()
     ) + (("t", "answer-t", "Type answer"),)
     rows, spans = button_rows(width, False, True, entries, "answer")
     return ["Answer:"] + rows, [
@@ -359,7 +361,9 @@ def layout(
         gutter = f"\033[38;5;141m▌{RESET} " if picked else "  "
         head = [
             f"\033[38;5;141m{row}{RESET}"
-            for row in wrap(f"{index + 1}. {owner}", room, indent=0)
+            for row in wrap(
+                f"{index + 1}. {todo_answers.printable(owner)}", room, indent=0
+            )
         ]
         body = wrap(
             queued_label(queued[0]) if queued else label(text, flagged, note),

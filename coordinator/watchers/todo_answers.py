@@ -35,6 +35,13 @@ def choices(text):
     )
 
 
+def printable(text):
+    """The text with ESC, BEL, other control characters and DEL removed and whitespace collapsed."""
+    return " ".join(
+        "".join(c for c in str(text) if c.isprintable() or c == " ").split()
+    )
+
+
 def directory():
     return Path.home() / ".claude/coordinator/todo-answers"
 
@@ -257,11 +264,12 @@ def undelivered():
 
 def describe(record):
     stamp = time.strftime("%H:%M", time.localtime(record["at"]))
-    reason = record.get("failure")
+    reason = printable(record.get("failure") or "")
     return (
         f"Not delivered yet, queued {stamp}"
         + (f" ({reason})" if reason else "")
-        + f": {record['architect']}: {record['text']} = {record['answer']}"
+        + f": {printable(record['architect'])}: {printable(record['text'])}"
+        + f" = {printable(record['answer'])}"
     )
 
 
@@ -356,6 +364,8 @@ class AnswerInput:
         if self.mode == "type":
             return f"Answer: {self.entry}▏ (Enter sends; Esc cancels)"
         return (
-            " · ".join(f"{key}: {value}" for key, value in self.options.items())
+            " · ".join(
+                f"{key}: {printable(value)}" for key, value in self.options.items()
+            )
             + " · t type · Esc cancels"
         )
