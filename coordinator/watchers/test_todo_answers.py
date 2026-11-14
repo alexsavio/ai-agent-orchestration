@@ -304,6 +304,34 @@ class TodoAnswerTests(IsolatedTestCase):
             self.assertNotRegex(plain, r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", line)
         self.assertIn("reason", a.describe(record))
 
+    def test_follow_list_strips_control_characters_from_items(self):
+        import contextlib
+        import io
+
+        module = w.todo_module()
+        (self.base / "status" / f"{OWNER}.md").write_text(
+            "## Waits on the user\n- Audit \x1b[31mred\x07 done [1: \x1b[2Jyes] -> Architect::Tooling\n"
+        )
+        output = self.base / "todo.md"
+        state = self.base / "todo.state.json"
+        module.merge(self.base / "status", output, state)
+        args = argparse.Namespace(output=output, state=state, pane=None)
+        buffer = io.StringIO()
+        with (
+            contextlib.redirect_stdout(buffer),
+            patch.object(module.os, "isatty", return_value=False),
+        ):
+            module.follow(
+                args,
+                wait=lambda *_: ([0], [], []),
+                read=lambda *_: b"",
+                run_jump=lambda *_: self.fail("must not jump"),
+                report=lambda *_: None,
+            )
+        self.assertIn("Audit", buffer.getvalue())
+        for payload in ("\x1b[31m", "\x07", "\x1b[2Jyes"):
+            self.assertNotIn(payload, buffer.getvalue())
+
     def test_demo_has_a_plain_item_and_an_undelivered_answer(self):
         _, view = self.view_app()
         app = view.App(

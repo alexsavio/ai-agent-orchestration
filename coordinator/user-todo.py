@@ -559,7 +559,8 @@ def cell_width(char):
 
 
 def item_line(index, item):
-    return f"{index + 1}. {item['source']}: {item_display(item)}"
+    shown = todo_answers.printable(f"{item['source']}: {item_display(item)}")
+    return f"{index + 1}. {shown}"
 
 
 def wrapped_rows(line, width):
