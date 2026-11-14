@@ -211,8 +211,6 @@ def submit_locked(owner, text, answer, generation, existing):
 
     if not owner or Path(owner).name != owner or owner in (".", ".."):
         raise ValueError("invalid architect name")
-    if not choices(text):
-        raise ValueError("this item has no valid choices")
     if len(answer) > ANSWER_MAX or not answer.strip():
         raise ValueError(f"answer must contain 1-{ANSWER_MAX} characters")
     answer = " ".join(answer.split())
@@ -244,6 +242,47 @@ def submit_locked(owner, text, answer, generation, existing):
     )
     write(directory() / (record["key"] + ".json"), record)
     return record
+
+
+def undelivered():
+    return sorted(
+        (
+            record
+            for record in records()
+            if not record.get("delivered_at") and not record.get("discarded")
+        ),
+        key=lambda record: record["at"],
+    )
+
+
+def describe(record):
+    stamp = time.strftime("%H:%M", time.localtime(record["at"]))
+    reason = record.get("failure")
+    return (
+        f"Not delivered yet, queued {stamp}"
+        + (f" ({reason})" if reason else "")
+        + f": {record['architect']}: {record['text']} = {record['answer']}"
+    )
+
+
+def cancel(record_id):
+    """Removes one undelivered answer and returns its item; a delivered answer stays."""
+    with queue_lock():
+        record = next(
+            (
+                found
+                for found in records()
+                if found["id"] == record_id and not found.get("discarded")
+            ),
+            None,
+        )
+        if record is None:
+            return "answer is no longer queued"
+        if record.get("delivered_at"):
+            return "answer was already delivered; it stays"
+        (directory() / (record["key"] + ".json")).unlink(missing_ok=True)
+        undo_dismissal(record)
+    return "answer cancelled; the item returns"
 
 
 def collect(command):
@@ -288,7 +327,8 @@ def event_line(record):
 
 class AnswerInput:
     def __init__(self, options):
-        self.options, self.mode, self.entry, self.error = options, "choices", "", ""
+        self.options, self.entry, self.error = options, "", ""
+        self.mode = "choices" if options else "type"
 
     def feed(self, char):
         self.error = ""
