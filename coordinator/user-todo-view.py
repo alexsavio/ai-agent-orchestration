@@ -92,7 +92,6 @@ DEMO_QUEUED = [
         "architect": "Architect::Billing",
         "text": "Ship the invoice fix now or after the audit?",
         "answer": "after the audit",
-        "at": 0,
         "failure": "cannot reach Herdr",
     }
 ]
@@ -290,7 +289,6 @@ def label(text, flagged, note=""):
 
 
 def queued_label(record):
-    """The question, the answer and why it has not arrived."""
     stamp = time.strftime("%H:%M", time.localtime(record["at"]))
     reason = record.get("failure")
     return (

@@ -266,7 +266,7 @@ def describe(record):
 
 
 def cancel(record_id):
-    """Removes one undelivered answer and returns its item; a delivered answer stays."""
+    """Removes one undelivered answer and puts its item back; returns a status message. A delivered answer stays."""
     with queue_lock():
         record = next(
             (

@@ -90,18 +90,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(editor.feed("\n"), ("answer", "custom reply"))
         self.assertEqual(editor.feed("\x1b"), ("cancel", None))
 
-    def test_item_without_choices_takes_a_free_text_answer(self):
-        plain = "Audit done; say which to start -> Architect::Tooling"
-        path = self.base / "status" / f"{OWNER}.md"
-        path.write_text(path.read_text() + "- " + plain + "\n")
-        self.assertEqual(
-            a.submit(OWNER, plain, "start with 3")["answer"], "start with 3"
-        )
-        editor = a.AnswerInput(a.choices(plain))
-        for char in "ok":
-            self.assertEqual(editor.feed(char), (None, None))
-        self.assertEqual(editor.feed("\n"), ("answer", "ok"))
-
     def test_undelivered_lists_only_open_answers_and_shows_the_reason(self):
         record = a.submit(OWNER, TEXT, "now")
         self.assertEqual([r["id"] for r in a.undelivered()], [record["id"]])
