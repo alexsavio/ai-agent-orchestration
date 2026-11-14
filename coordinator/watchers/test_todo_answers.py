@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import importlib.util
 import json
 import os
@@ -710,6 +711,7 @@ class TodoAnswerTests(IsolatedTestCase):
             started.join(0.3)
 
         with (
+            patch.object(a, "LOCK_SECONDS", 30),
             patch.object(inbox, "binding", return_value=("/socket", "token")),
             patch.object(inbox, "send_to_socket", side_effect=send),
         ):
@@ -723,6 +725,66 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(len(outcome), 1)
         self.assertIn("already delivered", outcome[0])
         self.assertTrue(a.records()[0].get("delivered_at"))
+
+    def test_send_line_filters_sends_and_marks_under_one_lock(self):
+        record = a.submit(OWNER, TEXT, "now")
+        spec = importlib.util.spec_from_file_location(
+            "lock_span", w.ROOT / "notify-inbox.py"
+        )
+        inbox = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inbox)
+        real_lock, held, seen, enters = a.queue_lock, [], [], []
+
+        @contextlib.contextmanager
+        def lock():
+            enters.append(1)
+            with real_lock():
+                held.append(1)
+                try:
+                    yield
+                finally:
+                    held.pop()
+
+        def probe(name, fn):
+            def run(*args, **kwargs):
+                seen.append((name, bool(held)))
+                return fn(*args, **kwargs)
+
+            return run
+
+        with (
+            patch.object(a, "queue_lock", lock),
+            patch.object(a, "filter_canceled", probe("filter", a.filter_canceled)),
+            patch.object(
+                a, "mark_delivered_locked", probe("mark", a.mark_delivered_locked)
+            ),
+            patch.object(inbox, "binding", return_value=("/socket", "token")),
+            patch.object(
+                inbox, "send_to_socket", side_effect=probe("send", lambda *_: None)
+            ),
+        ):
+            self.assertTrue(
+                inbox.send_line(
+                    self.base / "architect-workspace.json",
+                    a.event_line(dict(record, owner="workspace")),
+                )
+            )
+        self.assertEqual(enters, [1])
+        self.assertEqual(seen, [("filter", True), ("send", True), ("mark", True)])
+
+    def test_panel_cancel_hitting_the_lock_timeout_says_the_queue_is_busy(self):
+        app, _ = self.view_app()
+        app.feed("a1")
+        self.assertEqual(len(a.records()), 1)
+
+        def busy(_):
+            raise TimeoutError("question lock wait timed out")
+
+        app.run_cancel = busy
+        app.feed("c")
+        self.assertIn("busy", app.status)
+        self.assertNotIn("question lock", app.status)
+        self.assertEqual(len(a.records()), 1)
 
     def test_legacy_answer_drops_whole_csi_sequences(self):
         received = []

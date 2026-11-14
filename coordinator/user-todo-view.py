@@ -849,7 +849,9 @@ class App:
             return "demo: answer cancelled; the item returns"
         try:
             return self.run_cancel(record["id"])
-        except (ValueError, OSError, TimeoutError) as error:
+        except TimeoutError:
+            return "answer queue busy (a delivery is in progress); press c again"
+        except (ValueError, OSError) as error:
             return str(error)
 
     def escape(self):
