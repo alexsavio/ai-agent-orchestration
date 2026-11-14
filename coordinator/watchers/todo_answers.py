@@ -254,8 +254,7 @@ def reason_text(text):
 
 
 def record_failures(reasons):
-    """Stores each failed answer's reason and first failure time; clears both for answers now ready. Returns id -> failed_at."""
-    first = {}
+    """Stores each failed answer's reason and first failure time; clears both for answers now ready."""
     with queue_lock():
         for record in records():
             if record.get("delivered_at") or record.get("discarded"):
@@ -270,11 +269,8 @@ def record_failures(reasons):
                 changed = record.get("failure") != reason or "failed_at" not in record
                 record["failure"] = reason
                 record.setdefault("failed_at", time.time())
-            if reason is not None:
-                first[record["id"]] = record["failed_at"]
             if changed:
                 write(directory() / (record["key"] + ".json"), record)
-    return first
 
 
 def collect(command):
@@ -317,22 +313,18 @@ def collect(command):
             )
         else:
             reasons[record["id"]] = reason_text(f"no live architect named {name}")
-    first = record_failures(reasons)
-    failures = {}
+    try:
+        record_failures(reasons)
+    except TimeoutError:
+        pass
+    failed = {}
     for record in current:
         if record["id"] in reasons:
-            entry = failures.setdefault(
-                record["architect"],
-                dict(architect=record["architect"], reason=reasons[record["id"]]),
-            )
-            entry["failed_at"] = min(
-                first.get(record["id"], time.time()),
-                entry.get("failed_at", time.time()),
-            )
+            failed.setdefault(record["architect"], reasons[record["id"]])
     return (
         ready,
         notices,
-        sorted(failures.values(), key=lambda entry: entry["architect"]),
+        [dict(architect=name, reason=failed[name]) for name in sorted(failed)],
     )
 
 

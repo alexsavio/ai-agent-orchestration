@@ -1,6 +1,7 @@
 """Repos of the open work, read through the env adapter; the last discovered set when the adapter cannot answer."""
 
 import importlib.util
+import inspect
 import json
 import os
 import re
@@ -272,9 +273,13 @@ def architect_owners(command, ambiguous_out=None):
 
     A set passed as ambiguous_out receives the names the adapter omitted as ambiguous."""
     try:
-        if ambiguous_out is None:
-            return adapter().architect_owners(command)
-        return adapter().architect_owners(command, ambiguous_out=ambiguous_out)
+        owners = adapter().architect_owners
+        if (
+            ambiguous_out is not None
+            and "ambiguous_out" in inspect.signature(owners).parameters
+        ):
+            return owners(command, ambiguous_out=ambiguous_out)
+        return owners(command)
     except READ_ERRORS as error:
         raise Unavailable(str(error)[:200]) from error
 

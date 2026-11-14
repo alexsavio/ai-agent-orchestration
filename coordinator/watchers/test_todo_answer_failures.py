@@ -62,13 +62,24 @@ class AnswerFailureTests(IsolatedTestCase):
         self.assertEqual(failures[0]["reason"], "herdr agent list exited 1")
         record = a.records()[0]
         self.assertEqual(record["failure"], "herdr agent list exited 1")
-        self.assertEqual(record["failed_at"], failures[0]["failed_at"])
+        self.assertIsInstance(record["failed_at"], float)
+        self.assertEqual(set(failures[0]), {"architect", "reason"})
 
     def test_reason_is_one_line_and_at_most_200_characters(self):
         a.submit(OWNER, TEXT, "now")
         _, _, failures = self.collect_with(error="boom\n" + "x" * 500)
         self.assertNotIn("\n", failures[0]["reason"])
         self.assertEqual(len(failures[0]["reason"]), a.REASON_MAX)
+
+    def test_reason_collapses_every_whitespace_run(self):
+        a.submit(OWNER, TEXT, "now")
+        _, _, failures = self.collect_with(error="boom\r\tx")
+        self.assertEqual(failures[0]["reason"], "boom x")
+
+    def test_empty_herdr_error_still_gets_a_reason(self):
+        a.submit(OWNER, TEXT, "now")
+        _, _, failures = self.collect_with(error=" ")
+        self.assertEqual(failures[0]["reason"], "Herdr is unavailable")
 
     def test_name_missing_from_the_map_says_no_live_architect(self):
         a.submit(OWNER, TEXT, "now")
@@ -87,15 +98,46 @@ class AnswerFailureTests(IsolatedTestCase):
 
     def test_first_failure_time_survives_later_failures_and_clears_on_ready(self):
         a.submit(OWNER, TEXT, "now")
-        _, _, first = self.collect_with(owners={})
-        with patch.object(a.time, "time", return_value=first[0]["failed_at"] + 900):
-            _, _, again = self.collect_with(owners={})
-        self.assertEqual(again[0]["failed_at"], first[0]["failed_at"])
+        self.collect_with(owners={})
+        first = a.records()[0]["failed_at"]
+        with patch.object(a.time, "time", return_value=first + 900):
+            self.collect_with(owners={})
+        self.assertEqual(a.records()[0]["failed_at"], first)
         ready, _, failures = self.collect_with(owners={OWNER: "workspace"})
         self.assertEqual(len(ready), 1)
         self.assertEqual(failures, [])
         self.assertNotIn("failure", a.records()[0])
         self.assertNotIn("failed_at", a.records()[0])
+
+    def test_answer_delivered_between_the_two_lock_phases_keeps_no_failure(self):
+        record = a.submit(OWNER, TEXT, "now")
+
+        def deliver_then_fail(command, ambiguous_out=None):
+            a.mark_delivered(a.event_line(dict(record, owner="workspace")))
+            return {}
+
+        with patch.object(
+            a.discovery, "architect_owners", side_effect=deliver_then_fail
+        ):
+            a.collect(w.command)
+        stored = a.records()[0]
+        self.assertTrue(stored["delivered_at"])
+        self.assertNotIn("failure", stored)
+
+    def test_second_lock_timeout_still_returns_the_ready_answers(self):
+        a.submit(OWNER, TEXT, "now")
+        with patch.object(a, "record_failures", side_effect=TimeoutError("busy")):
+            ready, _, failures = self.collect_with(owners={OWNER: "workspace"})
+            self.assertEqual(len(ready), 1)
+            _, _, failures = self.collect_with(owners={})
+        self.assertEqual(failures[0]["architect"], OWNER)
+
+    def test_adapter_on_the_old_contract_still_maps_owners(self):
+        a.submit(OWNER, TEXT, "now")
+        adapter = type("Old", (), {"architect_owners": lambda command: {OWNER: "w1"}})
+        with patch.object(a.discovery, "adapter", return_value=adapter):
+            ready, _, failures = a.collect(w.command)
+        self.assertEqual(([r["owner"] for r in ready], failures), (["w1"], []))
 
     def test_delivery_clears_failure_fields(self):
         record = a.submit(OWNER, TEXT, "now")
@@ -122,7 +164,7 @@ class AnswerFailureTests(IsolatedTestCase):
         self.assertEqual(events, [f"TODO READFAIL answer:{OWNER}: down"])
 
     def failure(self, reason="down"):
-        return dict(architect=OWNER, reason=reason, failed_at=1)
+        return dict(architect=OWNER, reason=reason)
 
     def raw(self, at, *failures):
         return dict(
@@ -145,11 +187,30 @@ class AnswerFailureTests(IsolatedTestCase):
             _, events = w.reduce_todo(state, self.raw(2860, self.failure()))
             self.assertEqual(events, [])
 
-    def test_failure_ending_or_changing_reason_emits_one_recovered_line(self):
+    def test_wait_repeat_setting_below_the_floor_still_waits_sixty_seconds(self):
+        with patch.dict(os.environ, ORCH_WAIT_REPEAT_S="1"):
+            state, _ = w.reduce_todo(None, self.raw(1000, self.failure()))
+            state, events = w.reduce_todo(state, self.raw(1030, self.failure()))
+            self.assertEqual(events, [])
+            _, events = w.reduce_todo(state, self.raw(1060, self.failure()))
+            self.assertEqual(len(events), 1)
+
+    def test_failure_ending_emits_one_recovered_line(self):
         state, _ = w.reduce_todo(None, self.raw(1000, self.failure("down")))
         _, events = w.reduce_todo(state, self.raw(1060))
         self.assertEqual(events, [f"TODO READ RECOVERED answer:{OWNER}: down"])
-        _, events = w.reduce_todo(state, self.raw(1060, self.failure("gone")))
+
+    def test_reason_flipping_between_cycles_stays_quiet_until_the_next_repeat(self):
+        state, _ = w.reduce_todo(None, self.raw(1000, self.failure("down")))
+        for at, reason in ((1060, "gone"), (1120, "down"), (1180, "gone")):
+            state, events = w.reduce_todo(state, self.raw(at, self.failure(reason)))
+            self.assertEqual(events, [])
+        _, events = w.reduce_todo(state, self.raw(2800, self.failure("gone")))
+        self.assertEqual(events, [f"TODO READFAIL answer:{OWNER}: gone (repeat 1)"])
+
+    def test_reason_changing_at_a_repeat_clears_the_old_line_and_starts_a_new_one(self):
+        state, _ = w.reduce_todo(None, self.raw(1000, self.failure("down")))
+        _, events = w.reduce_todo(state, self.raw(2800, self.failure("gone")))
         self.assertEqual(
             events,
             [
@@ -162,13 +223,14 @@ class AnswerFailureTests(IsolatedTestCase):
         lines = [
             f"TODO READFAIL answer:{OWNER}: down",
             f"TODO READFAIL answer:{OWNER}: down (repeat 1)",
+            f"TODO READFAIL answer:{OWNER}: down (repeat 2)",
         ]
         state, shown = {}, []
-        for at, line in enumerate(lines + [lines[0]], start=1):
+        for at, line in enumerate(lines + [lines[-1]], start=1):
             shown += alert_policy.apply(
                 state, [dict(mode="todo", events=[line], at=at)], at
             )
-        self.assertEqual(len(shown), 2)
+        self.assertEqual(len(shown), 3)
         cleared = alert_policy.apply(
             state,
             [
@@ -181,7 +243,7 @@ class AnswerFailureTests(IsolatedTestCase):
             9,
         )
         cleared += alert_policy.apply(state, [], 100000)
-        self.assertEqual(len(cleared), 2)
+        self.assertEqual(len(cleared), 1)
         self.assertFalse(any(entry["active"] for entry in state["keys"].values()))
 
     def test_every_watcher_service_template_carries_the_herdr_block(self):

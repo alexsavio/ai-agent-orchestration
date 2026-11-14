@@ -1643,8 +1643,8 @@ def answer_failure_events(before, failures, now):
     for failure in failures:
         name, reason = failure["architect"], failure["reason"]
         old = before.get(name)
-        if old and old["reason"] == reason:
-            entry = dict(old)
+        if old and (old["reason"] == reason or now - old["sent_at"] < repeat):
+            entry = dict(old, reason=reason)
             if now - old["sent_at"] >= repeat:
                 entry.update(n=old["n"] + 1, sent_at=now)
                 events.append(
