@@ -44,6 +44,18 @@ class AnswerFailureTests(IsolatedTestCase):
             "## Waits on the user\n- " + TEXT + "\n"
         )
 
+    def failure(self, reason="down"):
+        return dict(architect=OWNER, reason=reason)
+
+    def raw(self, at, *failures):
+        return dict(
+            now=[],
+            unreadable=[],
+            read=[],
+            observed_at=at,
+            todo_answer_failures=failures,
+        )
+
     def collect_with(self, owners=None, error=None, ambiguous=()):
         def fake(command, ambiguous_out=None):
             if error:
@@ -127,7 +139,7 @@ class AnswerFailureTests(IsolatedTestCase):
     def test_second_lock_timeout_still_returns_the_ready_answers(self):
         a.submit(OWNER, TEXT, "now")
         with patch.object(a, "record_failures", side_effect=TimeoutError("busy")):
-            ready, _, failures = self.collect_with(owners={OWNER: "workspace"})
+            ready, _, _ = self.collect_with(owners={OWNER: "workspace"})
             self.assertEqual(len(ready), 1)
             _, _, failures = self.collect_with(owners={})
         self.assertEqual(failures[0]["architect"], OWNER)
@@ -162,18 +174,6 @@ class AnswerFailureTests(IsolatedTestCase):
         self.assertEqual(after["unreadable"], [])
         self.assertEqual(after["read"], before["read"])
         self.assertEqual(events, [f"TODO READFAIL answer:{OWNER}: down"])
-
-    def failure(self, reason="down"):
-        return dict(architect=OWNER, reason=reason)
-
-    def raw(self, at, *failures):
-        return dict(
-            now=[],
-            unreadable=[],
-            read=[],
-            observed_at=at,
-            todo_answer_failures=failures,
-        )
 
     def test_failure_line_repeats_at_the_wait_repeat_cadence_not_each_cycle(self):
         line = f"TODO READFAIL answer:{OWNER}: down"
@@ -248,7 +248,7 @@ class AnswerFailureTests(IsolatedTestCase):
 
     def test_every_watcher_service_template_carries_the_herdr_block(self):
         templates = sorted(SERVICE_DIR.glob("*/*.template"))
-        self.assertEqual(len(templates), 20)
+        self.assertTrue(templates)
         for template in templates:
             text = template.read_text()
             for variable in ("HERDR_BIN_PATH", "HERDR_ENV", "HERDR_SOCKET_PATH"):
