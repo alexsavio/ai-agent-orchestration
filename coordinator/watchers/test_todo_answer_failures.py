@@ -209,8 +209,10 @@ class AnswerFailureTests(IsolatedTestCase):
 
     def test_reason_change_at_a_repeat_gives_one_repeat_line(self):
         state, _ = w.reduce_todo(None, self.raw(1000, self.failure("down")))
-        _, events = w.reduce_todo(state, self.raw(2800, self.failure("gone")))
+        state, events = w.reduce_todo(state, self.raw(2800, self.failure("gone")))
         self.assertEqual(events, [f"TODO READFAIL answer:{OWNER}: gone (repeat 1)"])
+        _, events = w.reduce_todo(state, self.raw(2860))
+        self.assertEqual(events, [f"TODO READ RECOVERED answer:{OWNER}: gone"])
 
     def test_strict_flip_gives_one_repeat_line_per_wait_repeat_window(self):
         state, _ = w.reduce_todo(None, self.raw(1000, self.failure("down")))
