@@ -346,8 +346,8 @@ def layout(
     height=None,
     popup=False,
 ):
-    """Screen lines (none wider than width) and mouse hits for the item rows (owner, text, flagged, note) and, for an undelivered answer, a fifth item, its queue record;
-    hits are (line, first, last, action, index) with 1-based lines and columns. With a height, the selected item's
+    """Screen lines (none wider than width) and mouse hits for the item rows (owner, text, flagged, note);
+    an undelivered answer adds a fifth item, its queue record. Hits are (line, first, last, action, index) with 1-based lines and columns. With a height, the selected item's
     owner line, buttons and picker stay whole and its message is cut to what is left."""
     open_count = len(rows) if open_count is None else open_count
     width = max(1, width)

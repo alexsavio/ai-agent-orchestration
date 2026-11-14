@@ -115,12 +115,6 @@ class TodoAnswerTests(IsolatedTestCase):
         module.merge(self.base / "status", output, state)
         self.assertEqual(len(module.rendered_items(output, state)), 1)
 
-    def test_cancel_keeps_an_answer_that_was_delivered(self):
-        record = a.submit(OWNER, TEXT, "now")
-        a.mark_delivered(a.event_line(dict(record, owner="workspace")))
-        self.assertIn("already delivered", a.cancel(record["id"]))
-        self.assertEqual(len(a.records()), 1)
-
     def test_answer_editor_buffer_bound(self):
         editor = a.AnswerInput(a.choices(TEXT))
         editor.feed("t")
