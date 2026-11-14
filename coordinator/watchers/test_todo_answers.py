@@ -300,7 +300,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertIn("reason", a.describe(record))
 
     def test_follow_list_strips_control_characters_from_items(self):
-        import contextlib
         import io
 
         module = w.todo_module()
@@ -342,7 +341,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertTrue(any(not a.choices(row[1]) for row in app.rows if len(row) == 4))
 
     def test_legacy_list_shows_undelivered_and_answers_plain_item(self):
-        import contextlib
         import io
 
         plain = "Audit done; say which to start -> Architect::Tooling"

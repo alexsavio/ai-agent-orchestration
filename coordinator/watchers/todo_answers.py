@@ -199,7 +199,9 @@ def mark_delivered_locked(text, owner=None):
         )
         if owner is None or target == owner
     }
-    for record in records() if identifiers else []:
+    if not identifiers:
+        return
+    for record in records():
         if (
             record["id"] in identifiers
             and not record.get("delivered_at")
