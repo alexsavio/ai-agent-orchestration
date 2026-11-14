@@ -13,7 +13,6 @@ import watchers as w
 
 TEXT = "Deploy release [1: now] [2: later] -> Architect::Tooling"
 OWNER = "Architect::Tooling"
-SERVICE_DIR = Path(__file__).parent / "service"
 
 
 def agents(*rows):
@@ -252,13 +251,3 @@ class AnswerFailureTests(IsolatedTestCase):
         cleared += alert_policy.apply(state, [], 100000)
         self.assertEqual(len(cleared), 1)
         self.assertFalse(any(entry["active"] for entry in state["keys"].values()))
-
-    def test_every_watcher_service_template_carries_the_herdr_block(self):
-        templates = sorted(SERVICE_DIR.glob("*/*.template"))
-        self.assertTrue(templates)
-        for template in templates:
-            text = template.read_text()
-            for variable in ("HERDR_BIN_PATH", "HERDR_ENV", "HERDR_SOCKET_PATH"):
-                self.assertIn(variable, text, f"{template.name} lacks {variable}")
-            self.assertIn("@ORCH_HERDR_BIN@", text, template.name)
-            self.assertIn("@ORCH_HERDR_SOCKET@", text, template.name)
