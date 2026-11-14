@@ -36,7 +36,7 @@ def choices(text):
 
 
 def printable(text):
-    """The text with ESC, BEL, other control characters and DEL removed and whitespace collapsed."""
+    """The text with every non-printable character removed (ESC, BEL, tab, newline, other controls, DEL) and runs of spaces collapsed."""
     return " ".join(
         "".join(c for c in str(text) if c.isprintable() or c == " ").split()
     )
@@ -186,6 +186,12 @@ def filter_canceled(text):
 
 
 def mark_delivered(text, owner=None):
+    with queue_lock():
+        mark_delivered_locked(text, owner)
+
+
+def mark_delivered_locked(text, owner=None):
+    """Caller holds the queue lock; the lock is not re-entrant in one process."""
     identifiers = {
         identifier
         for target, identifier in re.findall(
@@ -193,17 +199,14 @@ def mark_delivered(text, owner=None):
         )
         if owner is None or target == owner
     }
-    if not identifiers:
-        return
-    with queue_lock():
-        for record in records():
-            if (
-                record["id"] in identifiers
-                and not record.get("delivered_at")
-                and not record.get("discarded")
-            ):
-                record["delivered_at"] = time.time()
-                write(directory() / (record["key"] + ".json"), record)
+    for record in records() if identifiers else []:
+        if (
+            record["id"] in identifiers
+            and not record.get("delivered_at")
+            and not record.get("discarded")
+        ):
+            record["delivered_at"] = time.time()
+            write(directory() / (record["key"] + ".json"), record)
 
 
 def submit(owner, text, answer, generation=None):

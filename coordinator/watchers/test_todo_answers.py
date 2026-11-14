@@ -697,6 +697,39 @@ class TodoAnswerTests(IsolatedTestCase):
             a.collect(w.command)
         self.assertEqual(a.records(), [])
 
+    def test_cancel_during_a_send_waits_and_finds_the_answer_delivered(self):
+        import threading
+
+        record = a.submit(OWNER, TEXT, "now")
+        spec = importlib.util.spec_from_file_location(
+            "answer_race", w.ROOT / "notify-inbox.py"
+        )
+        inbox = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(inbox)
+        outcome = []
+        started = threading.Thread(
+            target=lambda: outcome.append(a.cancel(record["id"]))
+        )
+
+        def send(*_):
+            started.start()
+            started.join(0.3)
+
+        with (
+            patch.object(inbox, "binding", return_value=("/socket", "token")),
+            patch.object(inbox, "send_to_socket", side_effect=send),
+        ):
+            self.assertTrue(
+                inbox.send_line(
+                    self.base / "architect-workspace.json",
+                    a.event_line(dict(record, owner="workspace")),
+                )
+            )
+        started.join(5)
+        self.assertEqual(len(outcome), 1)
+        self.assertIn("already delivered", outcome[0])
+        self.assertTrue(a.records()[0].get("delivered_at"))
+
     def test_legacy_answer_drops_whole_csi_sequences(self):
         received = []
         self.follow_screens(
