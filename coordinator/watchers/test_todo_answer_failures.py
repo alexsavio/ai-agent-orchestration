@@ -208,16 +208,23 @@ class AnswerFailureTests(IsolatedTestCase):
         _, events = w.reduce_todo(state, self.raw(2800, self.failure("gone")))
         self.assertEqual(events, [f"TODO READFAIL answer:{OWNER}: gone (repeat 1)"])
 
-    def test_reason_changing_at_a_repeat_clears_the_old_line_and_starts_a_new_one(self):
+    def test_reason_change_at_a_repeat_gives_one_repeat_line(self):
         state, _ = w.reduce_todo(None, self.raw(1000, self.failure("down")))
         _, events = w.reduce_todo(state, self.raw(2800, self.failure("gone")))
-        self.assertEqual(
-            events,
-            [
-                f"TODO READ RECOVERED answer:{OWNER}: down",
-                f"TODO READFAIL answer:{OWNER}: gone",
-            ],
-        )
+        self.assertEqual(events, [f"TODO READFAIL answer:{OWNER}: gone (repeat 1)"])
+
+    def test_strict_flip_gives_one_repeat_line_per_wait_repeat_window(self):
+        state, _ = w.reduce_todo(None, self.raw(1000, self.failure("down")))
+        lines = []
+        for cycle in range(1, 121):
+            reason = "gone" if cycle % 2 else "down"
+            state, events = w.reduce_todo(
+                state, self.raw(1000 + cycle * 60, self.failure(reason))
+            )
+            lines += events
+        self.assertEqual(len(lines), 4)
+        self.assertTrue(all("(repeat " in line for line in lines))
+        self.assertNotIn("RECOVERED", " ".join(lines))
 
     def test_notifier_shows_each_repeat_and_one_recovered_clears_them_all(self):
         lines = [

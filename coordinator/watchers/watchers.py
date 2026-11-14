@@ -1637,13 +1637,13 @@ def reduce_todo_status(before, raw):
 
 
 def answer_failure_events(before, failures, now):
-    """One READFAIL line per undelivered architect, repeated every ORCH_WAIT_REPEAT_S with its own count, and a RECOVERED line when it ends or its reason changes."""
+    """One READFAIL line per undelivered architect, repeated every ORCH_WAIT_REPEAT_S with its own count, and a RECOVERED line when it ends. A changed reason shows in the next repeat line."""
     repeat = max(60, float(os.environ.get("ORCH_WAIT_REPEAT_S", 1800)))
     state, events = {}, []
     for failure in failures:
         name, reason = failure["architect"], failure["reason"]
         old = before.get(name)
-        if old and (old["reason"] == reason or now - old["sent_at"] < repeat):
+        if old:
             entry = dict(old, reason=reason)
             if now - old["sent_at"] >= repeat:
                 entry.update(n=old["n"] + 1, sent_at=now)
@@ -1651,8 +1651,6 @@ def answer_failure_events(before, failures, now):
                     f"TODO READFAIL answer:{name}: {reason} (repeat {entry['n']})"
                 )
         else:
-            if old:
-                events.append(f"TODO READ RECOVERED answer:{name}: {old['reason']}")
             entry = dict(reason=reason, n=0, sent_at=now)
             events.append(f"TODO READFAIL answer:{name}: {reason}")
         state[name] = entry
