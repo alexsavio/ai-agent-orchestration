@@ -53,8 +53,12 @@ within one workers poll (60 seconds). There is no second notifier or cursor.
 Claude workers run `ask` with `run_in_background` or a Bash timeout above the
 command's `--timeout`, never with shell `&`: a waiter whose parent exits is detached,
 so it types the answer into its own pane (only into an empty composer) and reports a
-failed send to the owner architect as a `WORKER QUESTION` line. On Linux, a subreaper
-that adopts the waiter before it reads its parent hides the detach.
+failed send to the owner architect as a `WORKER QUESTION` line that starts with
+`UNDELIVERED:`; deliver that answer by hand, `orch-signal answer` does not apply. The
+pane send works only for Claude panes, because `composer-state.py` reads only a Claude
+composer: Codex, pi and cursor panes always get the `UNDELIVERED:` line. Under a Linux
+subreaper (for example `systemd --user`) the detach is not seen, so there the only
+guard is never to use shell `&`.
 SIGTERM/SIGINT/SIGHUP cancel the question under the answers lock;
 a re-ask replaces a record whose recorded asker PID is dead. `answer` refuses
 a dead asker with `asker is gone`, including escalation.

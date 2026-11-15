@@ -288,6 +288,8 @@ def new_question(ident, question, options, timeout, deadline=None):
                 old = read(path)
                 if old["pane"] == ident["pane"]:
                     alive = asker_alive(old)
+                    if old.get("undelivered_for"):
+                        continue
                     if old.get("cleanup") and not alive:
                         continue
                     if old.get("cleanup"):
@@ -338,6 +340,7 @@ def mark_detached(record):
 def deliver_to_pane(record, text):
     """Type the answer into the waiter's own pane; return why it could not, or None."""
     pane = record["pane"]
+    line = strip_controls(" ".join(text.split()))
     herdr = (
         os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
     )
@@ -355,7 +358,7 @@ def deliver_to_pane(record, text):
                 else "composer is not readable"
             )
         sent = subprocess.run(
-            [herdr, "agent", "prompt", pane, f"Answer to {record['id']}: {text}"],
+            [herdr, "agent", "prompt", pane, f"Answer to {record['id']}: {line}"],
             capture_output=True,
             text=True,
             timeout=SEND_SECONDS,
@@ -370,13 +373,15 @@ def deliver_to_pane(record, text):
 def report_failed_delivery(record, text, reason):
     """A fresh question record: the owner's workers watcher already turns it into a WORKER QUESTION line."""
     now = time.time()
+    pane = record["pane"]
     failure = dict(
         {key: record[key] for key in IDENTITY_KEYS},
         id="signal-" + uuid.uuid4().hex,
         kind="question",
-        asker_pid=os.getpid(),
+        undelivered_for=record["id"],
         question=strip_controls(
-            f"answer for {record['id']} could not be typed into pane {record['pane']}: {reason}; answer was: {text}"
+            f"UNDELIVERED: answer for {record['id']} could not be typed into pane {pane}: {reason}. "
+            f"Deliver it by hand to pane {pane}; orch-signal answer does not apply. answer was: {text}"
         ),
         options="",
         at=now,
@@ -385,6 +390,18 @@ def report_failed_delivery(record, text, reason):
     print(f"orch-signal: {failure['question']}", file=sys.stderr)
     with answers_lock():
         write(question_path(failure["id"]), failure)
+
+
+def deliver_answer(record, text):
+    """Runs after the ask deadline guard, so its alarm cannot fire inside the send and double-deliver."""
+    if not record.get("detached"):
+        return
+    try:
+        reason = deliver_to_pane(record, text)
+    except KeyboardInterrupt:
+        reason = "interrupted during the send; it may already be typed"
+    if reason:
+        report_failed_delivery(record, text, reason)
 
 
 def wait_answer(record, timeout, deadline=None, parent=None):
@@ -410,10 +427,6 @@ def wait_answer(record, timeout, deadline=None, parent=None):
         pass  # Leave cancellation to bounded retention cleanup when the lock becomes available.
     if text is None:
         raise ValueError(f"question {record['id']} timed out after {timeout:g}s")
-    if record.get("detached"):
-        reason = deliver_to_pane(record, text)
-        if reason:
-            report_failed_delivery(record, text, reason)
     return text
 
 
@@ -433,14 +446,15 @@ def answer(identifier, text, to_user=False):
             raise ValueError("question is missing or expired")
         if caller["workspace"] != record["owner"]:
             raise ValueError("only the owner architect workspace may answer")
+        if record.get("undelivered_for"):
+            raise ValueError(
+                f"nothing to answer: the answer for {record['undelivered_for']} could not be typed into "
+                f"pane {record['pane']}; deliver it by hand"
+            )
         if not asker_alive(record):
             raise ValueError("asker is gone")
         if answer_path(identifier).exists():
             raise ValueError("question already answered")
-        if record.get("detached"):
-            print(
-                f"orch-signal: asker of {identifier} is detached; its waiter will type the answer into pane {record['pane']}"
-            )
         if to_user:
             target = questions_directory() / (identifier + ".md")
             choices = "\n".join(
@@ -464,6 +478,10 @@ def answer(identifier, text, to_user=False):
             if not text or not text.strip():
                 raise ValueError("answer text is required")
             atomic_write(answer_path(identifier), text)
+        if record.get("detached"):
+            print(
+                f"orch-signal: asker of {identifier} is detached; its waiter will type the answer into pane {record['pane']}"
+            )
 
 
 def bridge_user_answer(identifier, text):
@@ -660,6 +678,7 @@ def main():
                             deadline,
                         )
                         result = wait_answer(record, args.timeout, deadline, parent)
+                    deliver_answer(record, result)
                 except TimeoutError:
                     raise ValueError(
                         f"question timed out after {args.timeout:g}s"
@@ -686,6 +705,7 @@ def main():
                     if (
                         caller["workspace"] in (record["workspace"], record["owner"])
                         and not record.get("cleanup")
+                        and not record.get("undelivered_for")
                         and record["deadline"] > time.time()
                         and not answer_path(record["id"]).exists()
                     ):
