@@ -30,6 +30,8 @@ DONE_EVENTS_KEEP_SECONDS = 3600
 ID = re.compile(r"signal-[a-f0-9]{32}\Z")
 IDENTITY_KEYS = ("pane", "workspace", "owner")
 EXIT_UNWRITABLE = 73
+COMPOSER_STATE = Path(__file__).parents[1] / "composer-state.py"
+SEND_SECONDS = 15
 
 
 def directory():
@@ -320,16 +322,86 @@ def new_question(ident, question, options, timeout, deadline=None):
         ) from None
 
 
-def wait_answer(record, timeout, deadline=None):
+def parent_detached(start):
+    """A shell `&` job loses its parent; init, or any change since the start, means nobody waits for this process."""
+    current = os.getppid()
+    return current == 1 or current != start
+
+
+def mark_detached(record):
+    record["detached"] = True
+    current = read(question_path(record["id"]))
+    if current and not current.get("cleanup"):
+        write(question_path(record["id"]), dict(current, detached=True))
+
+
+def deliver_to_pane(record, text):
+    """Type the answer into the waiter's own pane; return why it could not, or None."""
+    pane = record["pane"]
+    herdr = (
+        os.environ.get("HERDR_BIN_PATH") or os.environ.get("ORCH_HERDR_BIN") or "herdr"
+    )
+    try:
+        composer = subprocess.run(
+            [sys.executable, str(COMPOSER_STATE), pane],
+            capture_output=True,
+            text=True,
+            timeout=SEND_SECONDS,
+        )
+        if composer.returncode != 0:
+            return (
+                "composer holds text"
+                if composer.returncode == 1
+                else "composer is not readable"
+            )
+        sent = subprocess.run(
+            [herdr, "agent", "prompt", pane, f"Answer to {record['id']}: {text}"],
+            capture_output=True,
+            text=True,
+            timeout=SEND_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return str(error)
+    if sent.returncode != 0:
+        return f"herdr agent prompt exited {sent.returncode}"
+    return None
+
+
+def report_failed_delivery(record, text, reason):
+    """A fresh question record: the owner's workers watcher already turns it into a WORKER QUESTION line."""
+    now = time.time()
+    failure = dict(
+        {key: record[key] for key in IDENTITY_KEYS},
+        id="signal-" + uuid.uuid4().hex,
+        kind="question",
+        asker_pid=os.getpid(),
+        question=strip_controls(
+            f"answer for {record['id']} could not be typed into pane {record['pane']}: {reason}; answer was: {text}"
+        ),
+        options="",
+        at=now,
+        deadline=now + QUESTION_RETAIN_SECONDS,
+        delivery_failed=True,
+    )
+    print(f"orch-signal: {failure['question']}", file=sys.stderr)
+    with answers_lock():
+        write(question_path(failure["id"]), failure)
+
+
+def wait_answer(record, timeout, deadline=None, parent=None):
     deadline = time.monotonic() + timeout if deadline is None else deadline
+    parent = os.getppid() if parent is None else parent
+    text = None
     try:
         while True:
             with answers_lock(timeout=max(0, deadline - time.monotonic())):
+                if not record.get("detached") and parent_detached(parent):
+                    mark_detached(record)
                 path = answer_path(record["id"])
                 if path.exists():
                     text = read_text(path).strip()
                     remove_question(record, close_panel=False)
-                    return text
+                    break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     remove_question(record, close_panel=False)
@@ -337,7 +409,13 @@ def wait_answer(record, timeout, deadline=None):
             time.sleep(min(POLL_SECONDS, remaining))
     except TimeoutError:
         pass  # Leave cancellation to bounded retention cleanup when the lock becomes available.
-    raise ValueError(f"question {record['id']} timed out after {timeout:g}s")
+    if text is None:
+        raise ValueError(f"question {record['id']} timed out after {timeout:g}s")
+    if record.get("detached"):
+        reason = deliver_to_pane(record, text)
+        if reason:
+            report_failed_delivery(record, text, reason)
+    return text
 
 
 def open_user_question(identifier, path, timeout=None):
@@ -360,6 +438,10 @@ def answer(identifier, text, to_user=False):
             raise ValueError("asker is gone")
         if answer_path(identifier).exists():
             raise ValueError("question already answered")
+        if record.get("detached"):
+            print(
+                f"orch-signal: asker of {identifier} is detached; its waiter will type the answer into pane {record['pane']}"
+            )
         if to_user:
             target = questions_directory() / (identifier + ".md")
             choices = "\n".join(
@@ -558,6 +640,7 @@ def main():
             import watcher_runtime as runtime
 
             deadline = time.monotonic() + args.timeout
+            parent = os.getppid()
             record = None
 
             def interrupted(signum, frame):
@@ -577,7 +660,7 @@ def main():
                             args.timeout,
                             deadline,
                         )
-                        result = wait_answer(record, args.timeout, deadline)
+                        result = wait_answer(record, args.timeout, deadline, parent)
                 except TimeoutError:
                     raise ValueError(
                         f"question timed out after {args.timeout:g}s"

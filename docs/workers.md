@@ -51,7 +51,10 @@ Completion and question messages go through the workers producer, shared notifie
 `bindings/architect-<owner>.json` and its existing outbox. Delivery is normally
 within one workers poll (60 seconds). There is no second notifier or cursor.
 Claude workers run `ask` with `run_in_background` or a Bash timeout above the
-command's `--timeout`. SIGTERM/SIGINT/SIGHUP cancel the question under the answers lock;
+command's `--timeout`, never with shell `&`: a waiter whose parent exits is detached,
+so it types the answer into its own pane (only into an empty composer) and reports a
+failed send to the owner architect as a `WORKER QUESTION` line. On Linux, a subreaper
+that adopts the waiter before it reads its parent hides the detach. SIGTERM/SIGINT/SIGHUP cancel the question under the answers lock;
 a re-ask replaces a record whose recorded asker PID is dead. `answer` refuses
 a dead asker with `asker is gone`, including escalation.
 An owner may answer or escalate a question. Escalation uses the existing questions
