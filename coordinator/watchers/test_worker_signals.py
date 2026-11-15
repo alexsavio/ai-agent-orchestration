@@ -384,6 +384,40 @@ class SignalTests(IsolatedTestCase):
         seen = self.run_ask([777, 888, 888])
         self.assertEqual(seen["parent"], 777)
 
+    def ask_swallowing_the_alarm(self, detached):
+        """Real main with a short --timeout; the wait reads its answer, then swallows the soft alarm as wait_answer does."""
+
+        def wait(record, timeout, deadline, parent):
+            record["detached"] = detached
+            try:
+                s.time.sleep(5)
+            except TimeoutError:
+                pass
+            return "a"
+
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            patch.object(s, "wait_answer", wait),
+            patch.object(
+                sys,
+                "argv",
+                ["orch-signal", "ask", "--question", "q", "--timeout", "0.3"],
+            ),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            return s.main(), out.getvalue(), err.getvalue()
+
+    def test_an_answer_read_in_the_last_poll_is_printed_not_timed_out(self):
+        code, out, err = self.ask_swallowing_the_alarm(detached=False)
+        self.assertEqual((code, out), (0, "a\n"), err)
+
+    def test_an_answer_read_in_the_last_poll_is_still_typed_for_a_detached_waiter(self):
+        calls = self.pane_calls()
+        code, out, err = self.ask_swallowing_the_alarm(detached=True)
+        self.assertEqual((code, out), (0, "a\n"), err)
+        self.assertEqual(len(self.prompts(calls)), 1)
+
     def test_ask_sends_after_the_deadline_guard_is_released(self):
         seen = self.run_ask([777, 888, 888])
         self.assertIs(seen["deliver_inside_guard"], False)

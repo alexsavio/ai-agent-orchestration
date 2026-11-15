@@ -658,7 +658,7 @@ def main():
 
             deadline = time.monotonic() + args.timeout
             parent = os.getppid()
-            record = None
+            record = result = None
 
             def interrupted(signum, frame):
                 raise KeyboardInterrupt
@@ -669,20 +669,24 @@ def main():
             }
             try:
                 try:
-                    with runtime.deadline(args.timeout, "orch-signal ask", soft=True):
-                        record = new_question(
-                            identity(recover=True),
-                            args.question,
-                            args.options,
-                            args.timeout,
-                            deadline,
-                        )
-                        result = wait_answer(record, args.timeout, deadline, parent)
+                    try:
+                        with runtime.deadline(
+                            args.timeout, "orch-signal ask", soft=True
+                        ):
+                            record = new_question(
+                                identity(recover=True),
+                                args.question,
+                                args.options,
+                                args.timeout,
+                                deadline,
+                            )
+                            result = wait_answer(record, args.timeout, deadline, parent)
+                    except TimeoutError:
+                        if result is None:
+                            raise ValueError(
+                                f"question timed out after {args.timeout:g}s"
+                            ) from None
                     deliver_answer(record, result)
-                except TimeoutError:
-                    raise ValueError(
-                        f"question timed out after {args.timeout:g}s"
-                    ) from None
                 except KeyboardInterrupt:
                     # Ignore further interrupts while cancelling under the lock.
                     for number in previous:
