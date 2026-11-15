@@ -381,7 +381,6 @@ def report_failed_delivery(record, text, reason):
         options="",
         at=now,
         deadline=now + QUESTION_RETAIN_SECONDS,
-        delivery_failed=True,
     )
     print(f"orch-signal: {failure['question']}", file=sys.stderr)
     with answers_lock():
