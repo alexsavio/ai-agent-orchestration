@@ -18,7 +18,7 @@ os.environ["ORCH_ENV"] = "none"
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "hooks/guard-bash.py"
-BIG_INPUT_BUDGET = 3  # seconds; 1 s flaked on ubuntu CI runners (#188)
+BIG_INPUT_BUDGET = 3  # seconds
 spec = importlib.util.spec_from_file_location("guard", HOOK)
 guard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(guard)
