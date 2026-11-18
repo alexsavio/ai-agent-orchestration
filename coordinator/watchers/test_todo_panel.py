@@ -158,7 +158,9 @@ class TodoPanelTests(IsolatedTestCase):
             {"id": "b3", "key": key, "answer": "now"},
         ]
 
-    def test_a_non_string_key_is_an_unknown_item_and_earlier_entries_stay_recorded(self):
+    def test_a_non_string_key_is_an_unknown_item_and_earlier_entries_stay_recorded(
+        self,
+    ):
         _, out = self.run_panel("apply", self.answers_file(*self.batch()))
         self.assertIn("queued b1", out)
         self.assertIn("failed b2: unknown item", out)

@@ -102,7 +102,11 @@ def reject(entry, manifest, todo_answers):
     known = manifest.get(key) if isinstance(key, str) else None
     if known is None:
         return "unknown item"
-    if not isinstance(answer, str) or not answer.strip() or len(answer) > todo_answers.ANSWER_MAX:
+    if (
+        not isinstance(answer, str)
+        or not answer.strip()
+        or len(answer) > todo_answers.ANSWER_MAX
+    ):
         return "answer must contain 1-%d characters" % todo_answers.ANSWER_MAX
     choices = todo_answers.choices(known["text"])
     if choices and answer not in choices.values():
