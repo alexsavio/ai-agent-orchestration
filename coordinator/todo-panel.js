@@ -1,0 +1,57 @@
+"use strict";
+
+const ANSWER_MAX = 512;
+
+function pendingKeys(pending) {
+  return new Set(pending.map((entry) => entry.key));
+}
+
+function visibleItems(items, pending) {
+  const sent = pendingKeys(pending);
+  return items.filter((item) => !sent.has(item.key));
+}
+
+function collectAnswers(items, values, makeId) {
+  const entries = [];
+  for (const item of items) {
+    const answer = (values[item.key] || "").trim();
+    if (answer) entries.push({ id: makeId(), key: item.key, answer: answer.slice(0, ANSWER_MAX) });
+  }
+  return entries;
+}
+
+function mergePending(pending, entries) {
+  const merged = new Map(pending.map((entry) => [entry.id, entry]));
+  for (const entry of entries) merged.set(entry.id, entry);
+  return [...merged.values()];
+}
+
+function parseAnswers(text) {
+  try {
+    const list = JSON.parse(text).answers;
+    return Array.isArray(list)
+      ? list.filter((entry) => entry && typeof entry.id === "string" && typeof entry.key === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+const READ_ONLY_CODES = new Set([
+  "not_writer",
+  "not_granted",
+  "capability_disabled",
+  "capability_removed",
+  "consent_required",
+  "not_declared",
+]);
+
+function classifyError(code) {
+  if (code === "conflict") return "reload";
+  if (READ_ONLY_CODES.has(code)) return "read-only";
+  return "failed";
+}
+
+if (typeof module !== "undefined") {
+  module.exports = { visibleItems, collectAnswers, mergePending, parseAnswers, classifyError, ANSWER_MAX };
+}
