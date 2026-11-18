@@ -67,3 +67,16 @@ test("wakePlan sends only when the viewer can send to Claude", () => {
     assert.equal(saved.text, "Saved. Claude applies them at the next /todo-panel run.");
   }
 });
+
+test("wakeFailure stops the wake only on a permanent code", () => {
+  for (const code of ["forbidden", "consent_required", "not_granted", "capability_disabled", "capability_removed"]) {
+    const result = logic.wakeFailure(code);
+    assert.equal(result.stop, true);
+    assert.equal(result.message, logic.WAKE_OFF_MESSAGE);
+  }
+  for (const code of ["claude_unavailable", "rate_limited", "unavailable", undefined]) {
+    const result = logic.wakeFailure(code);
+    assert.equal(result.stop, false);
+    assert.equal(result.message, logic.SAVED_MESSAGE);
+  }
+});

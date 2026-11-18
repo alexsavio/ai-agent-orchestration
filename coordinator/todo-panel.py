@@ -99,7 +99,7 @@ def reject(entry, manifest, todo_answers):
     answer = entry.get("answer")
     key = entry.get("key")
     known = manifest.get(key) if isinstance(key, str) else None
-    if known is None:
+    if not isinstance(known, dict):
         return "unknown item"
     if (
         not isinstance(answer, str)

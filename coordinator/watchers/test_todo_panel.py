@@ -194,6 +194,16 @@ class TodoPanelTests(IsolatedTestCase):
         self.assertIn("skipped b1", out)
         self.assertEqual(len(a.records()), 1)
 
+    def test_a_manifest_value_that_is_not_a_dict_is_an_unknown_item(self):
+        key = self.key_of("Deploy release")
+        (self.dir / "manifest.json").write_text(json.dumps({key: "corrupt"}))
+        code, out = self.run_panel(
+            "apply", self.answers_file({"id": "m1", "key": key, "answer": "now"})
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("failed m1: unknown item", out)
+        self.assertEqual(a.records(), [])
+
     def test_choice_answer_must_be_one_of_the_choices(self):
         key = self.key_of("Deploy release")
         _, out = self.run_panel(

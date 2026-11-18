@@ -94,7 +94,7 @@
 <script src="todo-panel.js"></script>
 <script>
   const STASH = "todo-panel-values";
-  const state = { items: [], pending: [], values: {}, readOnly: false, sending: false, artifact: null };
+  const state = { items: [], pending: [], values: {}, readOnly: false, sending: false, artifact: null, wakeOff: false };
   const $ = (id) => document.getElementById(id);
 
   function stash(values) {
@@ -222,6 +222,7 @@
   }
 
   async function prepareWake(count) {
+    if (state.wakeOff) return { plan: wakePlan("off", count) };
     try {
       const comments = await claude.use("comments");
       if (!comments) return { plan: wakePlan("off", count) };
@@ -238,8 +239,10 @@
     try {
       await wake.comments.sendToClaude({ anchor: wake.anchor, text: wake.plan.text });
       return "Sent. Claude is applying your answers.";
-    } catch {
-      return SAVED_MESSAGE;
+    } catch (error) {
+      const failure = wakeFailure(error && error.code);
+      if (failure.stop) state.wakeOff = true;
+      return failure.message;
     }
   }
 

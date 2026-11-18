@@ -62,6 +62,16 @@ function wakePlan(canSend, count) {
   return canSend === "available" ? { send: true, text: wakeText(count) } : { send: false, text: SAVED_MESSAGE };
 }
 
+const WAKE_OFF_MESSAGE = "Saved. Sending to Claude is off for this page; Claude applies them at the next /todo-panel run.";
+
+const PERMANENT_WAKE_CODES = new Set(["forbidden", "consent_required", "not_granted", "capability_disabled", "capability_removed"]);
+
+function wakeFailure(code) {
+  return PERMANENT_WAKE_CODES.has(code)
+    ? { stop: true, message: WAKE_OFF_MESSAGE }
+    : { stop: false, message: SAVED_MESSAGE };
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { visibleItems, collectAnswers, mergePending, parseAnswers, classifyError, wakePlan, wakeText, SAVED_MESSAGE, ANSWER_MAX };
+  module.exports = { visibleItems, collectAnswers, mergePending, parseAnswers, classifyError, wakePlan, wakeText, wakeFailure, WAKE_OFF_MESSAGE, SAVED_MESSAGE, ANSWER_MAX };
 }
