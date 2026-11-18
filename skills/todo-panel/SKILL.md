@@ -1,6 +1,6 @@
 ---
 name: todo-panel
-description: Publish the user's to-do list as a private claude.ai Artifact panel, apply the answers the user submitted there, and republish. Use as the Coordinator when the user asks for the to-do panel, when a republish notice names the panel URL, and once after each Coordinator recycle.
+description: Publish the user's to-do list as a private claude.ai Artifact panel, apply the answers the user submitted there, and republish. Use as the Coordinator when the user asks for the to-do panel, when a turn carries a comment sent to Claude on the panel URL, and once after each Coordinator recycle.
 user-invocable: true
 ---
 
@@ -44,7 +44,7 @@ Publish with the Artifact tool:
 - `file_path`: `<scratchpad>/todo-panel/todo-panel.html`
 - `root`: `<scratchpad>/todo-panel`
 - `files`: `{"todo-panel.js": "todo-panel.js", "items.json": "items.json", "answers.json": null}`. The `null` clears the answers you just applied.
-- With a URL: pass `url`. First publish only: pass `capabilities: {"artifact": {}}`, `icon: "checklist"` and a one-sentence `description`. Never pass `capabilities` or `icon` on a later publish.
+- With a URL: pass `url`. First publish only: pass `capabilities: {"artifact": {}, "comments": {}}`, `icon: "checklist"` and a one-sentence `description`. Never pass `capabilities` or `icon` on a later publish.
 
 If the publish is refused because a newer version exists, the user's Submit landed after your read, and publishing now would clear answers you have not applied. Go back to step 1, read the new `answers.json`, apply it, render and publish again. Step 2 skips ids it already applied.
 
@@ -54,8 +54,8 @@ Write the artifact URL to `~/.claude/coordinator/todo-panel/panel.json` as `{"ur
 
 ## 5. When to run it again
 
-- On a republish notice for the panel URL. The user's Submit publishes `answers.json`, and the notice reaches the session that published the panel.
-- Once after each Coordinator recycle. The new session has to watch the panel again: it reads the URL from `panel.json` and runs these steps.
+- On a turn that carries a comment sent to Claude on the panel URL. Submit publishes `answers.json`, then the page sends the comment "N answers submitted on the to-do panel. Run /todo-panel." A publish alone starts no turn. Run the steps, then reply in that thread with the `ArtifactComments` tool, one line: `Queued N. Failed M: <reason>.`
+- Once after each Coordinator recycle. A new session must read and publish to the panel to watch it: it reads the URL from `panel.json` and runs these steps.
 - When the user asks to refresh the panel. The list only changes when you render.
 
 If the user's Submit and your publish cross, the page reloads to the newest version and their typed answers come back from that tab's session storage; they press Submit again.

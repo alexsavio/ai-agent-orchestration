@@ -98,12 +98,11 @@ def render(module, directory):
 def reject(entry, manifest, todo_answers):
     """The reason an entry cannot be sent, or an empty string."""
     answer = entry.get("answer")
-    known = manifest.get(entry.get("key"))
+    key = entry.get("key")
+    known = manifest.get(key) if isinstance(key, str) else None
     if known is None:
         return "unknown item"
-    if not isinstance(answer, str) or not answer.strip():
-        return "answer must contain 1-%d characters" % todo_answers.ANSWER_MAX
-    if len(answer) > todo_answers.ANSWER_MAX:
+    if not isinstance(answer, str) or not answer.strip() or len(answer) > todo_answers.ANSWER_MAX:
         return "answer must contain 1-%d characters" % todo_answers.ANSWER_MAX
     choices = todo_answers.choices(known["text"])
     if choices and answer not in choices.values():
@@ -124,6 +123,12 @@ def apply(module, directory, source):
     errors = read_json(directory / "errors.json", {})
     applied = read_json(directory / "applied.json", {})
     generator = module.generator()
+
+    def save():
+        kept = dict(list(applied.items())[-APPLIED_KEEP:])
+        module.atomic_write(directory / "applied.json", json.dumps(kept))
+        module.atomic_write(directory / "errors.json", json.dumps(errors))
+
     for entry in entries:
         identifier = entry.get("id") if isinstance(entry, dict) else None
         if not isinstance(identifier, str) or not 0 < len(identifier) <= ID_MAX:
@@ -148,16 +153,15 @@ def apply(module, directory, source):
                 reason = str(error) or type(error).__name__
         if reason:
             applied[identifier] = "failed"
-            if key in manifest:
+            if isinstance(key, str) and key in manifest:
                 errors[key] = reason
             print(f"failed {identifier}: {reason}")
         else:
             applied[identifier] = "queued"
             errors.pop(key, None)
             print(f"queued {identifier}")
-    kept = dict(list(applied.items())[-APPLIED_KEEP:])
-    module.atomic_write(directory / "applied.json", json.dumps(kept))
-    module.atomic_write(directory / "errors.json", json.dumps(errors))
+        save()
+    save()
     return 0
 
 

@@ -138,7 +138,7 @@ class TodoPanelTests(IsolatedTestCase):
         self.assertIn("failed a1: unknown item", out)
         self.assertEqual(a.records(), [])
 
-    def test_answer_over_512_characters_is_rejected(self):
+    def test_blank_non_string_or_over_512_character_answers_are_rejected(self):
         key = self.key_of("Merge it")
         for answer in ("x" * 513, "   ", 7):
             _, out = self.run_panel(
@@ -149,6 +149,51 @@ class TodoPanelTests(IsolatedTestCase):
             )
             self.assertIn("answer must contain 1-512 characters", out)
         self.assertEqual(a.records(), [])
+
+    def batch(self):
+        key = self.key_of("Deploy release")
+        return [
+            {"id": "b1", "key": key, "answer": "later"},
+            {"id": "b2", "key": ["not", "a", "string"], "answer": "now"},
+            {"id": "b3", "key": key, "answer": "now"},
+        ]
+
+    def test_a_non_string_key_is_an_unknown_item_and_earlier_entries_stay_recorded(self):
+        _, out = self.run_panel("apply", self.answers_file(*self.batch()))
+        self.assertIn("queued b1", out)
+        self.assertIn("failed b2: unknown item", out)
+        applied = json.loads((self.dir / "applied.json").read_text())
+        self.assertEqual(applied["b1"], "queued")
+        self.assertEqual(applied["b2"], "failed")
+
+    def test_a_crash_mid_batch_keeps_earlier_entries_and_a_rerun_skips_them(self):
+        key = self.key_of("Deploy release")
+        path = self.answers_file(
+            {"id": "b1", "key": key, "answer": "later"},
+            {"id": "b2", "key": key, "answer": "now"},
+        )
+        loaded = panel.view()
+        generator = loaded.generator()
+        real = generator.answer_from_view
+        calls = []
+
+        def crash_on_second(*args, **kwargs):
+            calls.append(args)
+            if len(calls) == 2:
+                raise RuntimeError("boom")
+            return real(*args, **kwargs)
+
+        generator.answer_from_view = crash_on_second
+        loaded.generator = lambda: generator
+        with patch.object(panel, "view", lambda: loaded):
+            with self.assertRaises(RuntimeError):
+                self.run_panel("apply", path)
+        applied = json.loads((self.dir / "applied.json").read_text())
+        self.assertEqual(applied, {"b1": "queued"})
+        self.assertEqual(len(a.records()), 1)
+        _, out = self.run_panel("apply", path)
+        self.assertIn("skipped b1", out)
+        self.assertEqual(len(a.records()), 1)
 
     def test_choice_answer_must_be_one_of_the_choices(self):
         key = self.key_of("Deploy release")

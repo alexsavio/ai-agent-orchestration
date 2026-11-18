@@ -55,3 +55,15 @@ test("a reload hides every item in the saved answers.json and shows the rest", (
   const shown = logic.visibleItems(items, logic.parseAnswers(saved));
   assert.deepEqual(shown.map((item) => item.key), ["k2"]);
 });
+
+test("wakePlan sends only when the viewer can send to Claude", () => {
+  const plan = logic.wakePlan("available", 2);
+  assert.equal(plan.send, true);
+  assert.equal(plan.text, "2 answers submitted on the to-do panel. Run /todo-panel.");
+  assert.equal(logic.wakeText(1), "1 answer submitted on the to-do panel. Run /todo-panel.");
+  for (const state of ["writers_only", "no_session", "off", undefined]) {
+    const saved = logic.wakePlan(state, 2);
+    assert.equal(saved.send, false);
+    assert.equal(saved.text, "Saved. Claude applies them at the next /todo-panel run.");
+  }
+});

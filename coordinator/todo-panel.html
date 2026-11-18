@@ -1,7 +1,6 @@
 <title>To-do panel</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
-  /* One column of waits on the user: question on top, answer controls below, one Submit bar. */
   :root {
     --bg: #f6f6f3;
     --surface: #ffffff;
@@ -78,7 +77,7 @@
 
 <main>
   <header>
-    <h1>To-do panel</h1>
+    <h1 id="heading">To-do panel</h1>
     <span id="stamp"></span>
   </header>
   <p id="notice" role="status" hidden></p>
@@ -169,7 +168,6 @@
       const box = document.createElement("textarea");
       box.maxLength = ANSWER_MAX;
       box.rows = 2;
-      box.id = "answer-" + item.key;
       box.setAttribute("aria-label", "Answer for " + item.text);
       box.value = state.values[item.key] || "";
       box.addEventListener("input", () => {
@@ -200,6 +198,7 @@
     state.sending = true;
     refreshBar();
     stash(state.values);
+    const wake = await prepareWake(entries.length);
     try {
       await state.artifact.publish({ "answers.json": JSON.stringify({ answers: merged }) });
     } catch (error) {
@@ -218,8 +217,30 @@
     for (const entry of entries) delete state.values[entry.key];
     stash(null);
     state.sending = false;
-    say(entries.length + (entries.length === 1 ? " answer" : " answers") + " sent. Claude applies them next.");
+    say(await sendWake(wake));
     render();
+  }
+
+  async function prepareWake(count) {
+    try {
+      const comments = await claude.use("comments");
+      if (!comments) return { plan: wakePlan("off", count) };
+      const plan = wakePlan(await comments.canSendToClaude(), count);
+      if (!plan.send) return { plan };
+      return { plan, comments, anchor: await comments.anchorFor($("heading")) };
+    } catch {
+      return { plan: wakePlan("off", count) };
+    }
+  }
+
+  async function sendWake(wake) {
+    if (!wake.plan.send) return wake.plan.text;
+    try {
+      await wake.comments.sendToClaude({ anchor: wake.anchor, text: wake.plan.text });
+      return "Sent. Claude is applying your answers.";
+    } catch {
+      return SAVED_MESSAGE;
+    }
   }
 
   async function fetchText(path) {

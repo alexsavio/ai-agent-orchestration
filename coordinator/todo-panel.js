@@ -52,6 +52,16 @@ function classifyError(code) {
   return "failed";
 }
 
+const SAVED_MESSAGE = "Saved. Claude applies them at the next /todo-panel run.";
+
+function wakeText(count) {
+  return count + (count === 1 ? " answer" : " answers") + " submitted on the to-do panel. Run /todo-panel.";
+}
+
+function wakePlan(canSend, count) {
+  return canSend === "available" ? { send: true, text: wakeText(count) } : { send: false, text: SAVED_MESSAGE };
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { visibleItems, collectAnswers, mergePending, parseAnswers, classifyError, ANSWER_MAX };
+  module.exports = { visibleItems, collectAnswers, mergePending, parseAnswers, classifyError, wakePlan, wakeText, SAVED_MESSAGE, ANSWER_MAX };
 }

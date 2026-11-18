@@ -116,9 +116,12 @@ Flow:
    gets a key, a hash of owner, text and the `first_seen` generation captured at render.
    The manifest maps key to owner, text and generation and stays on disk. `items.json`
    holds only the key, owner name, display text, choices and the last error.
-2. The page declares the `artifact` capability. Submit publishes only `answers.json`
+2. The page declares the `artifact` and `comments` capabilities. Submit publishes only `answers.json`
    (`{"answers": [{"id", "key", "answer"}]}`), merged with answers already pending, and
-   hides those items at once. The new version reaches the Coordinator as a republish notice.
+   hides those items at once. A publish starts no turn, so the page then sends a comment to Claude
+   (`comments` capability, `sendToClaude`: "N answers submitted on the to-do panel. Run /todo-panel.").
+   That comment reaches the session that watches the artifact. If sending is not available, the
+   answers stay saved and the next `/todo-panel` run applies them.
 3. The Coordinator reads `answers.json` to a local file and runs `apply`. Each entry needs a
    known key and an answer of 1-512 characters, and for a choice item one of its choices (sent
    as the label, as the view does). `apply` calls `answer_from_view` with the manifest
