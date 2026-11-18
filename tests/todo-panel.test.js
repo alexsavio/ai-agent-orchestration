@@ -44,3 +44,14 @@ test("classifyError maps each code to one handling", () => {
     assert.equal(logic.classifyError(code), "failed");
   }
 });
+
+test("a reload hides every item in the saved answers.json and shows the rest", () => {
+  const saved = JSON.stringify({
+    answers: [
+      { id: "a", key: "k1", answer: "now" },
+      { id: "b", key: "k3", answer: "later" },
+    ],
+  });
+  const shown = logic.visibleItems(items, logic.parseAnswers(saved));
+  assert.deepEqual(shown.map((item) => item.key), ["k2"]);
+});
