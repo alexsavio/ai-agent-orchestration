@@ -73,13 +73,11 @@ class TodoPanelTests(IsolatedTestCase):
         path.write_text(json.dumps({"answers": list(entries)}))
         return str(path)
 
-    def test_render_lists_the_open_items_with_choices(self):
+    def test_render_lists_the_open_items_keeps_keys_stable_and_drops_hidden_items(self):
         items = {item["text"].split(" ->")[0]: item for item in self.items()}
         self.assertEqual(items["Deploy release"]["choices"], ["now", "later"])
         self.assertEqual(items["Merge it"]["choices"], [])
         self.assertEqual(items["Deploy release"]["owner"], OWNER)
-
-    def test_render_keeps_keys_stable_and_drops_hidden_items(self):
         first = self.key_of("Deploy release")
         self.assertEqual(first, self.key_of("Deploy release"))
         view = panel.view()
@@ -165,6 +163,115 @@ class TodoPanelTests(IsolatedTestCase):
         self.assertEqual(applied["b1"], "queued")
         self.assertEqual(applied["b2"], "failed")
 
+    def test_entries_without_a_valid_id_are_skipped_and_the_batch_goes_on(self):
+        key = self.key_of("Deploy release")
+        entries = [
+            "junk",
+            {"id": 5, "key": key, "answer": "now"},
+            {"id": "", "key": key, "answer": "now"},
+            {"id": "x" * 65, "key": key, "answer": "now"},
+            {"id": "ok", "key": key, "answer": "later"},
+        ]
+        _, out = self.run_panel("apply", self.answers_file(*entries))
+        self.assertEqual(out.count("failed <no id>"), 4)
+        self.assertIn("queued ok", out)
+        self.assertEqual(len(a.records()), 1)
+
+    def test_a_non_list_answers_value_is_an_error(self):
+        path = self.base / "answers.json"
+        path.write_text(json.dumps({"answers": {"id": "a1"}}))
+        with contextlib.redirect_stderr(io.StringIO()):
+            code, _ = self.run_panel("apply", str(path))
+        self.assertEqual(code, 2)
+
+    def test_applied_ids_beyond_the_keep_limit_are_trimmed_oldest_first(self):
+        key = self.key_of("Deploy release")
+        entries = [{"id": f"t{n}", "key": key, "answer": " "} for n in range(3)]
+        with patch.object(panel, "APPLIED_KEEP", 2):
+            self.run_panel("apply", self.answers_file(*entries))
+        applied = json.loads((self.dir / "applied.json").read_text())
+        self.assertEqual(list(applied), ["t1", "t2"])
+
+    def test_render_keeps_errors_only_for_items_still_shown(self):
+        key = self.key_of("Merge it")
+        (self.dir / "errors.json").write_text(
+            json.dumps({key: "kept", "gone-key": "dropped"})
+        )
+        self.run_panel("render")
+        errors = json.loads((self.dir / "errors.json").read_text())
+        self.assertEqual(errors, {key: "kept"})
+
+    def test_a_queued_answer_clears_the_error_kept_for_its_item(self):
+        key = self.key_of("Deploy release")
+        (self.dir / "errors.json").write_text(json.dumps({key: "old reason"}))
+        self.run_panel(
+            "apply", self.answers_file({"id": "c1", "key": key, "answer": "now"})
+        )
+        errors = json.loads((self.dir / "errors.json").read_text())
+        self.assertNotIn(key, errors)
+
+    def test_render_and_apply_run_under_the_exclusive_lock(self):
+        with patch.object(panel.fcntl, "flock") as flock:
+            self.run_panel("render")
+            self.run_panel("apply", self.answers_file())
+        self.assertEqual(
+            [call.args[1] for call in flock.call_args_list],
+            [panel.fcntl.LOCK_EX, panel.fcntl.LOCK_EX],
+        )
+
+    def test_manifest_values_of_the_wrong_type_are_unknown_items(self):
+        key = self.key_of("Deploy release")
+        for bad in ({"owner": 5}, {"generation": "100"}):
+            value = {"owner": OWNER, "text": CHOICE_TEXT, "generation": 100, **bad}
+            (self.dir / "manifest.json").write_text(json.dumps({key: value}))
+            _, out = self.run_panel(
+                "apply",
+                self.answers_file(
+                    {"id": f"w{len(bad)}{list(bad)}", "key": key, "answer": "now"}
+                ),
+            )
+            self.assertIn("unknown item", out)
+        self.assertEqual(a.records(), [])
+
+    def test_a_manifest_generation_of_none_is_a_known_item(self):
+        key = self.key_of("Deploy release")
+        value = {"owner": OWNER, "text": CHOICE_TEXT, "generation": None}
+        (self.dir / "manifest.json").write_text(json.dumps({key: value}))
+        _, out = self.run_panel(
+            "apply", self.answers_file({"id": "n1", "key": key, "answer": "now"})
+        )
+        self.assertNotIn("unknown item", out)
+
+    def test_the_same_item_listed_twice_is_rendered_once(self):
+        self.write_items(CHOICE_TEXT, CHOICE_TEXT)
+        self.merge(101)
+        texts = [item["text"] for item in self.items()]
+        self.assertEqual(texts.count(panel.display_text(a, CHOICE_TEXT)), 1)
+
+    def test_an_item_that_returns_gets_a_new_key(self):
+        first = self.key_of("Deploy release")
+        self.write_items(PLAIN_TEXT)
+        self.merge(101)
+        self.write_items(CHOICE_TEXT, PLAIN_TEXT)
+        self.merge(102)
+        self.assertNotEqual(first, self.key_of("Deploy release"))
+
+    def test_an_os_or_timeout_error_fails_that_entry_and_the_batch_goes_on(self):
+        key = self.key_of("Deploy release")
+        loaded = panel.view()
+        generator = loaded.generator()
+
+        def refuse(*args, **kwargs):
+            raise OSError("disk full")
+
+        generator.answer_from_view = refuse
+        loaded.generator = lambda: generator
+        entries = [{"id": "o1", "key": key, "answer": "now"}]
+        with patch.object(panel, "view", lambda: loaded):
+            code, out = self.run_panel("apply", self.answers_file(*entries))
+        self.assertEqual(code, 0)
+        self.assertIn("failed o1: disk full", out)
+
     def test_a_crash_mid_batch_keeps_earlier_entries_and_a_rerun_skips_them(self):
         key = self.key_of("Deploy release")
         path = self.answers_file(
@@ -192,6 +299,7 @@ class TodoPanelTests(IsolatedTestCase):
         self.assertEqual(len(a.records()), 1)
         _, out = self.run_panel("apply", path)
         self.assertIn("skipped b1", out)
+        self.assertNotIn("failed b1", out)
         self.assertEqual(len(a.records()), 1)
 
     def test_a_manifest_value_that_is_not_a_dict_is_an_unknown_item(self):
@@ -223,15 +331,6 @@ class TodoPanelTests(IsolatedTestCase):
         )
         self.assertIn("not one of the choices", out)
         self.assertEqual(a.records(), [])
-
-    def test_a_repeated_answers_id_is_not_queued_twice(self):
-        key = self.key_of("Deploy release")
-        path = self.answers_file({"id": "a1", "key": key, "answer": "now"})
-        self.run_panel("apply", path)
-        _, out = self.run_panel("apply", path)
-        self.assertIn("skipped a1", out)
-        self.assertNotIn("failed", out)
-        self.assertEqual(len(a.records()), 1)
 
     def test_free_text_fails_before_187_and_the_reason_stays_on_the_item(self):
         key = self.key_of("Merge it")

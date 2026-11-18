@@ -9,6 +9,14 @@ const makeId = () => "id" + ++counter;
 test("visibleItems hides the items already sent", () => {
   const shown = logic.visibleItems(items, [{ id: "a", key: "k2", answer: "x" }]);
   assert.deepEqual(shown.map((item) => item.key), ["k1", "k3"]);
+  const saved = JSON.stringify({
+    answers: [
+      { id: "a", key: "k1", answer: "now" },
+      { id: "b", key: "k3", answer: "later" },
+    ],
+  });
+  const reloaded = logic.visibleItems(items, logic.parseAnswers(saved));
+  assert.deepEqual(reloaded.map((item) => item.key), ["k2"]);
 });
 
 test("collectAnswers takes only the items that have an answer", () => {
@@ -33,27 +41,19 @@ test("parseAnswers survives a missing or broken file", () => {
   assert.deepEqual(logic.parseAnswers("not json"), []);
   assert.deepEqual(logic.parseAnswers("{}"), []);
   assert.deepEqual(logic.parseAnswers('{"answers":[{"id":"a","key":"k"},{"id":1}]}'), [{ id: "a", key: "k" }]);
+  assert.deepEqual(logic.parseAnswers('{"answers":{"id":"a","key":"k"}}'), []);
+  const mixed = '{"answers":[null,{"id":1,"key":"k"},{"id":"a","key":2},{"id":"b","key":"k"}]}';
+  assert.deepEqual(logic.parseAnswers(mixed), [{ id: "b", key: "k" }]);
 });
 
 test("classifyError maps each code to one handling", () => {
   assert.equal(logic.classifyError("conflict"), "reload");
-  for (const code of ["not_writer", "not_granted", "capability_disabled"]) {
+  for (const code of ["not_writer", "not_granted", "capability_disabled", "capability_removed", "consent_required", "not_declared"]) {
     assert.equal(logic.classifyError(code), "read-only");
   }
   for (const code of ["rate_limited", "too_large", "upstream_error", undefined]) {
     assert.equal(logic.classifyError(code), "failed");
   }
-});
-
-test("a reload hides every item in the saved answers.json and shows the rest", () => {
-  const saved = JSON.stringify({
-    answers: [
-      { id: "a", key: "k1", answer: "now" },
-      { id: "b", key: "k3", answer: "later" },
-    ],
-  });
-  const shown = logic.visibleItems(items, logic.parseAnswers(saved));
-  assert.deepEqual(shown.map((item) => item.key), ["k2"]);
 });
 
 test("wakePlan sends only when the viewer can send to Claude", () => {
