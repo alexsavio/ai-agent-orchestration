@@ -54,7 +54,7 @@ Write the artifact URL to `~/.claude/coordinator/todo-panel/panel.json` as `{"ur
 
 ## 5. When to run it again
 
-- On a turn that carries a comment sent to Claude on the panel URL. Submit publishes `answers.json`, then the page sends the comment "N answers submitted on the to-do panel. Run /todo-panel." A publish alone starts no turn. Run the steps, then reply in that thread with the `ArtifactComments` tool, one line: `Queued N. Failed M: <reason>.`
+- On a turn that carries a comment sent to Claude on the panel URL. Submit publishes `answers.json`, then the page sends the comment "N answers submitted on the to-do panel. Run /todo-panel." A publish alone starts no turn. The platform posts the first reply in the thread itself, so do not post another. Run the steps, and when the republish is done resolve the thread with the `ArtifactComments` tool (`action: "resolve"`). Put `Queued N. Failed M: <reason>.` in your answer to the user, not in the thread.
 - Once after each Coordinator recycle. A new session must read and publish to the panel to watch it: it reads the URL from `panel.json` and runs these steps.
 - When the user asks to refresh the panel. The list only changes when you render.
 
