@@ -116,7 +116,7 @@ Flow:
    gets a key, a hash of owner, text and the `first_seen` generation captured at render.
    The manifest maps key to owner, text and generation and stays on disk. `items.json`
    holds only the render time, and per item the key, owner name, display text, choices and the last error.
-2. The page declares the `artifact` and `comments` capabilities. Submit publishes only `answers.json`
+2. The first publish declares the `artifact` and `comments` capabilities. Submit publishes only `answers.json`
    (`{"answers": [{"id", "key", "answer"}]}`), merged with answers already pending, and
    hides those items at once. A publish starts no turn, so the page then sends a comment to Claude
    (`comments` capability, `sendToClaude`: "N answers submitted on the to-do panel. Run /todo-panel.").

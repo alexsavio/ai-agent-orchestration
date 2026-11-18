@@ -276,7 +276,7 @@
       state.artifact = null;
     }
     if (!state.artifact) lockNotice("Sending is not available in this view. You can read the list.");
-    if (state.pending.length) say(state.pending.length + " answers wait for Claude to apply them.");
+    if (state.pending.length) say(state.pending.length + (state.pending.length === 1 ? " answer waits" : " answers wait") + " for Claude to apply.");
     render();
   }
 

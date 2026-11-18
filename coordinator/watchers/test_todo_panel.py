@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -233,6 +234,11 @@ class TodoPanelTests(IsolatedTestCase):
             self.assertIn("unknown item", out)
         self.assertEqual(a.records(), [])
 
+    def test_the_js_and_python_answer_limits_agree(self):
+        page = (Path(panel.__file__).parent / "todo-panel.js").read_text()
+        limit = int(re.search(r"ANSWER_MAX = (\d+)", page).group(1))
+        self.assertEqual(limit, a.ANSWER_MAX)
+
     def test_a_manifest_generation_of_none_is_a_known_item(self):
         key = self.key_of("Deploy release")
         value = {"owner": OWNER, "text": CHOICE_TEXT, "generation": None}
@@ -241,6 +247,7 @@ class TodoPanelTests(IsolatedTestCase):
             "apply", self.answers_file({"id": "n1", "key": key, "answer": "now"})
         )
         self.assertNotIn("unknown item", out)
+        self.assertIn("failed n1: stale answer", out)
 
     def test_the_same_item_listed_twice_is_rendered_once(self):
         self.write_items(CHOICE_TEXT, CHOICE_TEXT)
