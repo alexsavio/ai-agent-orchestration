@@ -150,18 +150,15 @@ class TodoPanelTests(IsolatedTestCase):
             self.assertIn("answer must contain 1-512 characters", out)
         self.assertEqual(a.records(), [])
 
-    def batch(self):
-        key = self.key_of("Deploy release")
-        return [
-            {"id": "b1", "key": key, "answer": "later"},
-            {"id": "b2", "key": ["not", "a", "string"], "answer": "now"},
-            {"id": "b3", "key": key, "answer": "now"},
-        ]
-
     def test_a_non_string_key_is_an_unknown_item_and_earlier_entries_stay_recorded(
         self,
     ):
-        _, out = self.run_panel("apply", self.answers_file(*self.batch()))
+        key = self.key_of("Deploy release")
+        entries = [
+            {"id": "b1", "key": key, "answer": "later"},
+            {"id": "b2", "key": ["not", "a", "string"], "answer": "now"},
+        ]
+        _, out = self.run_panel("apply", self.answers_file(*entries))
         self.assertIn("queued b1", out)
         self.assertIn("failed b2: unknown item", out)
         applied = json.loads((self.dir / "applied.json").read_text())

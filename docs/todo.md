@@ -115,7 +115,7 @@ Flow:
 1. `render` lists the items the terminal view shows (no dismissed or snoozed items). Each
    gets a key, a hash of owner, text and the `first_seen` generation captured at render.
    The manifest maps key to owner, text and generation and stays on disk. `items.json`
-   holds only the key, owner name, display text, choices and the last error.
+   holds only the render time, and per item the key, owner name, display text, choices and the last error.
 2. The page declares the `artifact` and `comments` capabilities. Submit publishes only `answers.json`
    (`{"answers": [{"id", "key", "answer"}]}`), merged with answers already pending, and
    hides those items at once. A publish starts no turn, so the page then sends a comment to Claude

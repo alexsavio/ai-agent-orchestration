@@ -88,7 +88,6 @@ def render(module, directory):
     )
     page = {
         "rendered_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "answer_max": todo_answers.ANSWER_MAX,
         "items": items,
     }
     module.atomic_write(directory / "items.json", json.dumps(page, indent=1))
@@ -165,7 +164,6 @@ def apply(module, directory, source):
             errors.pop(key, None)
             print(f"queued {identifier}")
         save()
-    save()
     return 0
 
 
