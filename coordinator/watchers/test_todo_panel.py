@@ -204,6 +204,18 @@ class TodoPanelTests(IsolatedTestCase):
         self.assertIn("failed m1: unknown item", out)
         self.assertEqual(a.records(), [])
 
+    def test_a_manifest_dict_without_the_render_keys_is_an_unknown_item(self):
+        key = self.key_of("Deploy release")
+        (self.dir / "manifest.json").write_text(
+            json.dumps({key: {"owner": OWNER, "generation": 100}})
+        )
+        code, out = self.run_panel(
+            "apply", self.answers_file({"id": "m2", "key": key, "answer": "now"})
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("failed m2: unknown item", out)
+        self.assertEqual(a.records(), [])
+
     def test_choice_answer_must_be_one_of_the_choices(self):
         key = self.key_of("Deploy release")
         _, out = self.run_panel(

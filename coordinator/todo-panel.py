@@ -94,12 +94,22 @@ def render(module, directory):
     return len(items)
 
 
+def well_formed(known):
+    """True for a manifest value shaped as render writes it."""
+    return (
+        isinstance(known, dict)
+        and isinstance(known.get("owner"), str)
+        and isinstance(known.get("text"), str)
+        and (known.get("generation") is None or isinstance(known["generation"], int))
+    )
+
+
 def reject(entry, manifest, todo_answers):
     """The reason an entry cannot be sent, or an empty string."""
     answer = entry.get("answer")
     key = entry.get("key")
     known = manifest.get(key) if isinstance(key, str) else None
-    if not isinstance(known, dict):
+    if not well_formed(known):
         return "unknown item"
     if (
         not isinstance(answer, str)
