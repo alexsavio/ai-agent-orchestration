@@ -35,7 +35,12 @@ EOF
   write docs/guide.md 6
   commit feature
   HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  export ORCH_CONFIG="$TMP/none.toml"
+  : >"$ORCH_CONFIG"
+  unset ORCH_REVIEW_FINALIZE_COMMANDS
   PR=https://github.com/acme/app/pull/7
+  printf %s "$HEAD_SHA" >"$TMP/pr_head"
+  printf %s "$BASE_SHA" >"$TMP/pr_base_sha"
 }
 
 teardown() {
@@ -57,14 +62,22 @@ commit() {
 stub_gh() {
   cat >"$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TMP/gh.calls"
+[ -z "${GH_DOWN:-}" ] || { echo "gh down" >&2; exit 1; }
 case "$*" in
-  'api repos/acme/app/pulls/7') echo '{"title":"Add alpha","body":"Adds alpha and its test.","base":{"ref":"main"},"user":{"login":"author"}}' ;;
+  'api repos/acme/app/pulls/7') printf '{"title":"Add alpha","body":"%s","user":{"login":"author"},"base":{"ref":"%s","sha":"%s"},"head":{"sha":"%s"}}\n' "$(cat "$TMP/pr_body" 2>/dev/null || echo 'Adds alpha and its test.')" "$(cat "$TMP/pr_base" 2>/dev/null || echo main)" "$(cat "$TMP/pr_base_sha")" "$(cat "$TMP/pr_head" 2>/dev/null)" ;;
+  'api user') echo '{"login":"me"}' ;;
   'api --paginate --slurp repos/acme/app/issues/7/comments') cat "$TMP/comments.json" 2>/dev/null || echo '[[]]' ;;
   'api --paginate --slurp repos/acme/app/pulls/7/comments') echo '[[]]' ;;
   'api --paginate --slurp repos/acme/app/pulls/7/reviews') cat "$TMP/reviews.json" 2>/dev/null || echo '[[]]' ;;
   'api -X POST repos/acme/app/issues/7/comments --input -')
     cat >"$TMP/posted.json"
+    [ -z "${COMMENT_POST_FAIL:-}" ] || { echo "comment transport failed" >&2; exit 1; }
     echo '{"html_url":"https://github.com/acme/app/pull/7#issuecomment-1"}' ;;
+  'api -X POST repos/acme/app/pulls/7/reviews --input -')
+    cat >"$TMP/review.json"
+    [ -z "${REVIEW_POST_FAIL:-}" ] || { echo "transport outcome unknown" >&2; exit 1; }
+    echo '{"html_url":"https://github.com/acme/app/pull/7#pullrequestreview-1"}' ;;
   *) echo "gh stub: unexpected $*" >&2; exit 1 ;;
 esac
 EOF
@@ -79,6 +92,42 @@ sweep() {
 run_sweep() {
   sweep run --pr "$PR" --head "$HEAD_SHA" --base-ref main --record "$TMP/record.json" "$@"
 }
+
+# as_comment [login]: adds the posted sweep comment to $TMP/comments.json, by login (default me).
+as_comment() {
+  python3 -c 'import json,os,sys
+path = os.path.join(sys.argv[1], "comments.json")
+pages = json.load(open(path)) if os.path.exists(path) else [[]]
+pages[0].append({"id": len(pages[0]) + 1, "user": {"login": sys.argv[2]}, "body": json.load(open(os.path.join(sys.argv[1], "posted.json")))["body"]})
+json.dump(pages, open(path, "w"))' "$TMP" "${1:-me}"
+}
+
+# edit_comments <code>: runs Python code over the record r of each sweep comment in $TMP/comments.json.
+edit_comments() {
+  python3 -c 'import json,re,sys
+path = sys.argv[1]
+pages = json.load(open(path))
+for c in pages[0]:
+    m = re.search(r"```json\n(.*?)\n```", c["body"], re.S)
+    r = json.loads(m.group(1))
+    exec(sys.argv[2])
+    c["body"] = c["body"][: m.start(1)] + json.dumps(r) + c["body"][m.end(1) :]
+json.dump(pages, open(path, "w"))' "$TMP/comments.json" "$1"
+}
+
+gate() {
+  cd "$REPO" || return 1
+  run --separate-stderr "$ROOT/orch-sweep-record" gate --pr "$PR" --head "${1:-$HEAD_SHA}"
+}
+
+# review <event> [payload]: posts a review through orch-sweep post-review.
+review() {
+  local input=${2:-'{"body": "ok", "comments": []}'}
+  cd "$REPO" || return 1
+  run --separate-stderr "$ROOT/orch-sweep" post-review --pr "$PR" --head "$HEAD_SHA" --event "$1" --input - <<<"$input"
+}
+
+cache_file() { echo "$XDG_CACHE_HOME/review-prs/sweeps/acme/app/7/$HEAD_SHA.json"; }
 
 # field <expr>: a Python expression over the record r.
 field() {
@@ -1299,4 +1348,456 @@ p.write_text("\n".join(map(json.dumps,rows))+"\n")' "$TMP/record.json" "$CODEX_H
   run --separate-stderr "$ROOT/orch-sweep-record" check --record "$TMP/record.json" --head "$HEAD_SHA" --session worker-session
   [ "$status" -eq 1 ]
   [[ "$stderr" == *'sweep job manifest'* ]]
+}
+
+@test "the gate passes a swept head with no open fix finding" {
+  run_sweep
+  [ "$status" -eq 0 ]
+  as_comment
+  gate
+  [ "$status" -eq 0 ]
+  [ "$output" = "RECORD_COMMENT 1"$'\n'"OK: the sweep of $HEAD_SHA allows APPROVE" ]
+}
+
+@test "an open kept fix finding blocks the gate and a nit does not" {
+  FAKE_FINDINGS=1 run_sweep
+  as_comment
+  gate
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: the full sweep of $HEAD_SHA has "*" open fix findings"* ]]
+  rm "$TMP/comments.json"
+  FAKE_FINDINGS=1 FAKE_CLASS=nit run_sweep
+  as_comment
+  gate
+  [ "$status" -eq 0 ]
+}
+
+@test "the gate needs a sweep comment for the exact PR head" {
+  run_sweep
+  as_comment
+  write lib/alpha.py 21
+  commit fix
+  NEW=$(git -C "$REPO" rev-parse HEAD)
+  gate "$NEW"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: the PR head is $HEAD_SHA, not $NEW" ]]
+  printf %s "$NEW" >"$TMP/pr_head"
+  gate "$NEW"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: no full orch-sweep comment by the reviewer or PR author for the exact head $NEW" ]]
+}
+
+@test "the gate exits 2 when GitHub cannot be read, and 1 for a finding" {
+  run_sweep
+  as_comment
+  GH_DOWN=1 gate
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == "ERROR: cannot check the gate: gh api repos/acme/app/pulls/7 failed: gh down" ]]
+  gate
+  [ "$status" -eq 0 ]
+}
+
+@test "the gate exits 2 when the live base SHA is unavailable" {
+  run_sweep
+  as_comment
+  : >"$TMP/pr_base_sha"
+  gate
+  [ "$status" -eq 2 ]
+  [ "$stderr" = "ERROR: cannot check the gate: the PR response has no valid base.sha" ]
+}
+
+@test "post-review exits 2 and posts nothing when the gate cannot be checked" {
+  run_sweep
+  as_comment
+  GH_DOWN=1 review APPROVE
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == "ERROR: APPROVE refused: cannot check the gate: "* ]]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "the gate runs the record checks on the comment's record" {
+  run_sweep
+  as_comment
+  edit_comments 'r["sweep_agents"] += 1'
+  python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); r["sweep_agents"] += 1; json.dump(r, open(sys.argv[1], "w"))' "$(cache_file)"
+  gate
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: the full sweep record of $HEAD_SHA: "*"sweep_agents"* ]]
+}
+
+@test "post-review refuses APPROVE when the gate fails and posts nothing" {
+  review APPROVE
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: APPROVE refused: no full orch-sweep comment by the reviewer or PR author for the exact head $HEAD_SHA" ]]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "post-review refuses an unswept newer head even when PR metadata lags" {
+  run_sweep
+  [ "$status" -eq 0 ]
+  as_comment
+  local swept=$HEAD_SHA
+  write lib/alpha.py 21
+  commit newer
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  [ "$swept" != "$HEAD_SHA" ]
+  [ ! -e "$(cache_file)" ]
+  for live in "$HEAD_SHA" "$swept"; do
+    printf %s "$live" >"$TMP/pr_head"
+    : >"$TMP/gh.calls"
+    review APPROVE
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == "ERROR: APPROVE refused: "* ]]
+    [ -s "$TMP/gh.calls" ]
+    ! grep -q '^api -X POST ' "$TMP/gh.calls"
+    [ ! -e "$TMP/review.json" ]
+  done
+}
+
+@test "post-review posts APPROVE at the head when the gate passes" {
+  run_sweep
+  as_comment
+  review APPROVE
+  [ "$status" -eq 0 ]
+  [ "$output" = "REVIEW APPROVE https://github.com/acme/app/pull/7#pullrequestreview-1" ]
+  python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); assert (r["commit_id"], r["event"], r["body"], r["comments"]) == (sys.argv[2], "APPROVE", "ok", []), r' "$TMP/review.json" "$HEAD_SHA"
+}
+
+@test "post-review posts REQUEST_CHANGES and COMMENT without a sweep" {
+  for event in REQUEST_CHANGES COMMENT; do
+    review "$event"
+    [ "$status" -eq 0 ]
+    grep -q "\"event\": \"$event\"" "$TMP/review.json"
+  done
+}
+
+@test "post-review takes only a body and comments on stdin" {
+  review COMMENT '{"body": "ok", "event": "APPROVE"}'
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == 'ERROR: the review on stdin is {"body": "...", "comments": [...]}' ]]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "the gate runs the git checks of the record check on the full record" {
+  run_sweep
+  as_comment
+  other=$(git -C "$REPO" commit-tree "$(git -C "$REPO" mktree </dev/null)" -m other)
+  edit_comments "r['base'] = '$other'"
+  gate
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"base $other is not an ancestor"* ]]
+  edit_comments "r['base'] = 'ffffffffffffffffffffffffffffffffffffffff'"
+  gate
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"git rev-parse"* ]]
+}
+
+@test "git execution failures keep gate and post-review unavailable" {
+  run_sweep
+  [ "$status" -eq 0 ]
+  as_comment
+  run python3 -c '
+import io, os, subprocess, sys
+sys.path.insert(0, sys.argv[1])
+import sweep_record, sweep_run
+original = subprocess.run
+for fault in ("timeout", "oserror", "nonzero"):
+    def broken(args, **kwargs):
+        if args[0] == sweep_record.GIT and "log" in args:
+            if fault == "timeout":
+                raise subprocess.TimeoutExpired(args, 30)
+            if fault == "oserror":
+                raise OSError("git could not execute")
+            return subprocess.CompletedProcess(args, 128, "", "git log unavailable")
+        return original(args, **kwargs)
+    subprocess.run = broken
+    assert sweep_record.main(["record", "gate", "--pr", sys.argv[2], "--head", sys.argv[3]]) == 2, fault
+    sys.stdin = io.StringIO("{\"body\":\"ok\"}")
+    assert sweep_run.main(["sweep", "post-review", "--pr", sys.argv[2], "--head", sys.argv[3], "--event", "APPROVE", "--input", "-"]) == 2, fault
+    assert not os.path.exists(os.path.join(os.environ["TMP"], "review.json"))
+' "$ROOT/lib" "$PR" "$HEAD_SHA"
+  [ "$status" -eq 0 ]
+}
+
+@test "an author record unlocks approval without a local cache copy" {
+  run_sweep
+  [ "$status" -eq 0 ]
+  as_comment author
+  rm -rf "$XDG_CACHE_HOME/review-prs/sweeps"
+  review APPROVE
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/review.json" ]
+}
+
+@test "the finalize opt-out permits posting without a sweep" {
+  ORCH_REVIEW_FINALIZE_COMMANDS='' review APPROVE
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/review.json" ]
+}
+
+@test "review body disputes need a reason and the exact sweep comment" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  [ "$status" -eq 0 ]
+  as_comment author
+  for body in 'Sweep dispute 1/F1: ' 'Sweep dispute 999/F1: false finding'; do
+    review APPROVE "{\"body\":\"$body\"}"
+    [ "$status" -eq 3 ]
+    [ ! -e "$TMP/review.json" ]
+  done
+  review APPROVE '{"body":"Sweep dispute 1/F1: covered by the existing guard"}'
+  [ "$status" -eq 0 ]
+  gate
+  [ "$status" -eq 1 ]
+  for wrong in "someone:$HEAD_SHA" "me:$BASE_SHA"; do
+    IFS=: read -r reviewer reviewed <<<"$wrong"
+    printf '[[{"id":1,"user":{"login":"%s"},"commit_id":"%s","submitted_at":"2099-01-01T00:00:00Z","body":"Sweep dispute 1/F1: covered"}]]' "$reviewer" "$reviewed" >"$TMP/reviews.json"
+    gate
+    [ "$status" -eq 1 ]
+  done
+  printf '[[{"id":1,"user":{"login":"me"},"commit_id":"%s","submitted_at":"2099-01-01T00:00:00Z","body":"Sweep dispute 1/F1: covered"},{"id":2,"user":{"login":"me"},"commit_id":"%s","submitted_at":"2020-01-01T00:00:00Z","body":""}]]' "$HEAD_SHA" "$HEAD_SHA" >"$TMP/reviews.json"
+  gate
+  [ "$status" -eq 0 ]
+}
+
+@test "live base SHA overrides a stale local branch and missing objects are tool errors" {
+  run_sweep
+  as_comment
+  git -C "$REPO" branch stale "$HEAD_SHA"
+  printf %s "$HEAD_SHA" >"$TMP/pr_base_sha"
+  review APPROVE
+  [ "$status" -eq 1 ]
+  [ ! -e "$TMP/review.json" ]
+  printf %s ffffffffffffffffffffffffffffffffffffffff >"$TMP/pr_base_sha"
+  review APPROVE
+  [ "$status" -eq 2 ]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "a review POST transport failure is a tool error and is never replayed" {
+  run_sweep
+  as_comment
+  : >"$TMP/gh.calls"
+  REVIEW_POST_FAIL=1 review APPROVE
+  [ "$status" -eq 2 ]
+  [ "$(grep -c '^api -X POST .*reviews ' "$TMP/gh.calls")" -eq 1 ]
+}
+
+@test "head finalize opt-out cannot disable base review checks" {
+  printf '[review]\nfinalize_commands = []\n' >"$REPO/.orchestration.toml"
+  commit opt-out
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  printf %s "$HEAD_SHA" >"$TMP/pr_head"
+  review APPROVE
+  [ "$status" -eq 1 ]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "disputes follow visible Markdown rather than examples or comments" {
+  run python3 - "$ROOT/lib" <<'PYTEST'
+import sys
+sys.path.insert(0, sys.argv[1])
+from sweep_record import review_disputes
+line = "Sweep dispute 1/F1: covered by a guard"
+for prefix in ("", "  ", "- ", "* ", "+ ", "1. ", "2) ", "  - "):
+    assert review_disputes(prefix + line) == {(1, "F1")}, prefix
+for body in (f"```text\n{line}\n```", f"~~~\n{line}\n~~~", f"<!--\n{line}\n-->", f"> {line}", f"  > {line}", f"> quoted example\n{line}", "Sweep dispute 1/F1: <!-- invisible -->", "Sweep dispute 1/F1: **<!-- hidden -->**", f"<!-- unclosed\n{line}"):
+    assert not review_disputes(body), repr(body)
+assert review_disputes("Sweep dispute 1/F1: <!-- note --> visible") == {(1,"F1")}
+assert review_disputes("> quote\n\n- " + line) == {(1,"F1")}
+assert review_disputes("> quote\n- " + line) == {(1,"F1")}
+PYTEST
+  [ "$status" -eq 0 ]
+}
+
+@test "a fenced example cannot unlock approval and refusals count parsed disputes" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment author
+  review APPROVE '{"body":"The fix stays open.\n```\nSweep dispute 1/F1: example only\n```"}'
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"disputes parsed: 0"* ]]
+  [ ! -e "$TMP/review.json" ]
+  review APPROVE '{"body":"- Sweep dispute 1/F99: different finding"}'
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"disputes parsed: 1"* ]]
+  review APPROVE '{"body":"  1. Sweep dispute 1/F1: already covered by a guard"}'
+  [ "$status" -eq 0 ]
+}
+
+@test "a base opt-out survives its removal from the PR checkout" {
+  git -C "$REPO" switch -q main
+  printf '[review]\nfinalize_commands = []\n' >"$REPO/.orchestration.toml"
+  commit base-opt-out
+  BASE_SHA=$(git -C "$REPO" rev-parse HEAD)
+  printf %s "$BASE_SHA" >"$TMP/pr_base_sha"
+  git -C "$REPO" switch -q feature
+  review APPROVE
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/review.json" ]
+}
+
+@test "a copied record from another PR cannot unlock approval" {
+  run_sweep
+  as_comment author
+  edit_comments 'r["pr"] = "https://github.com/acme/app/pull/8"'
+  review APPROVE
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"by the reviewer or PR author"* ]]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "open fixes expose a stable record reuse marker" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment
+  gate
+  [ "$status" -eq 1 ]
+  [ "$output" = "RECORD_COMMENT 1"$'\n'RECORD_REUSABLE ]
+}
+
+@test "post-review distinguishes open fixes from process refusals" {
+  review APPROVE
+  [ "$status" -eq 1 ]
+  [ ! -e "$TMP/review.json" ]
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment author
+  review APPROVE
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"open fix findings; disputes parsed: 0"* ]]
+  [ ! -e "$TMP/review.json" ]
+}
+
+@test "the real gate keeps its diagnostic last when stdout is piped" {
+  run python3 - "$ROOT/lib" <<'PYTEST'
+import subprocess, sys
+code = '''import sys
+sys.path.insert(0, sys.argv[1])
+import sweep_record
+sweep_record.gate = lambda *args, **kwargs: sweep_record.OpenFix("has 1 open fix findings; disputes parsed: 0")
+sys.exit(sweep_record.main(["record", "gate", "--pr", "https://github.com/acme/app/pull/7", "--head", "a"*40]))
+'''
+done = subprocess.run([sys.executable, "-c", code, sys.argv[1]], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+assert done.returncode == 1, done.stdout
+assert done.stdout.splitlines()[-1] == "ERROR: has 1 open fix findings; disputes parsed: 0", done.stdout
+assert "RECORD_REUSABLE" in done.stdout, done.stdout
+PYTEST
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "a dispute reason needs visible letters or digits" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment author
+  for reason in '...' '---' '[]()' '[](https://example.invalid)'; do
+    review APPROVE "{\"body\":\"Sweep dispute 1/F1: $reason\"}"
+    [ "$status" -eq 3 ]
+    [ ! -e "$TMP/review.json" ]
+  done
+  for reason in 'handled at line 7' '7' 'é'; do
+    review APPROVE "{\"body\":\"Sweep dispute 1/F1: $reason\"}"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "the gate reports the exact reused comment id" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment author
+  as_comment author
+  gate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"RECORD_COMMENT 2"* ]]
+  [[ "$output" == *"RECORD_REUSABLE"* ]]
+  review APPROVE '{"body":"Sweep dispute 2/F1: covered by existing code"}'
+  [ "$status" -eq 0 ]
+}
+
+@test "PR text edits reuse the exact-head full record" {
+  run_sweep
+  [ "$status" -eq 0 ]
+  as_comment author
+  echo 'edited while reviewing' >"$TMP/pr_body"
+  gate
+  [ "$status" -eq 0 ]
+  review APPROVE
+  [ "$status" -eq 0 ]
+  [ -s "$TMP/review.json" ]
+}
+
+@test "a sweep comment by another login does not count" {
+  run_sweep
+  as_comment someone
+  gate
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == "ERROR: no full orch-sweep comment by the reviewer or PR author for the exact head"* ]]
+}
+
+
+@test "a new full sweep replaces the previous full findings" {
+  FAKE_PR_FINDINGS=1 run_sweep
+  as_comment
+  gate
+  [ "$status" -eq 1 ]
+  run_sweep
+  [ "$status" -eq 0 ]
+  as_comment
+  gate
+  [ "$status" -eq 0 ]
+}
+
+
+@test "the gate refuses more than 25 slices" {
+  run_sweep
+  as_comment
+  edit_comments 'r["plan"] = [{"name": f"s{n}", "lines": 1, "files": [{"path": f"d{n}/x.py", "old": None, "lines": 1}]} for n in range(26)]; r["slices"], r["sweep_agents"] = 26, 53; r["sweep_agent_ids"] = [f"a{n}" for n in range(53)]'
+  gate
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"26 slices pass the limit of 25" ]]
+}
+
+
+@test "a PR retargeted to another base after the sweep fails the gate" {
+  layer=$HEAD_SHA
+  git -C "$REPO" branch layer "$layer"
+  write lib/alpha.py 30
+  commit top
+  HEAD_SHA=$(git -C "$REPO" rev-parse HEAD)
+  printf %s "$HEAD_SHA" >"$TMP/pr_head"
+  printf layer >"$TMP/pr_base"
+  printf %s "$layer" >"$TMP/pr_base_sha"
+  sweep run --pr "$PR" --head "$HEAD_SHA" --base-ref layer --record "$TMP/record.json"
+  [ "$status" -eq 0 ]
+  as_comment
+  gate
+  [ "$status" -eq 0 ]
+  printf main >"$TMP/pr_base"
+  printf %s "$BASE_SHA" >"$TMP/pr_base_sha"
+  gate
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "ERROR: the PR base changed since the full sweep: it swept from $layer, and main gives $BASE_SHA; run orch-sweep run" ]
+}
+
+
+@test "sweep comment POST failure has the GitHub retry exit code" {
+  COMMENT_POST_FAIL=1 run_sweep
+  [ "$status" -eq 6 ]
+  [[ "$stderr" == *"posting the sweep comment failed"* ]]
+  [ -s "$TMP/record.json" ]
+}
+
+
+@test "script records accept only full sweeps with null deviation" {
+  run_sweep
+  [ "$status" -eq 0 ]
+  run python3 - "$ROOT/lib" "$TMP/record.json" <<'PYTEST'
+import copy, json, sys
+sys.path.insert(0, sys.argv[1])
+from sweep_record import script_problem
+record = json.load(open(sys.argv[2]))
+assert script_problem(record) is None
+text = copy.deepcopy(record)
+text.update(kind="text", slices=0, plan=[], sweep_agents=1, sweep_agent_ids=record["sweep_agent_ids"][:1])
+assert script_problem(text), "text record accepted"
+deviation = copy.deepcopy(record)
+deviation["deviation"] = {"what":"slices-over-25", "reason":"approved", "sha256":"a"*64}
+assert script_problem(deviation), "deviation accepted"
+PYTEST
+  [ "$status" -eq 0 ]
 }

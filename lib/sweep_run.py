@@ -1134,14 +1134,90 @@ def run(args):
         try:
             stdout, stderr = Runner.communicate(posted, json.dumps({"body": body}), 245)
         except subprocess.TimeoutExpired:
-            raise Failure("posting the sweep comment timed out") from None
+            raise Failure("posting the sweep comment timed out", 6) from None
         finally:
             stop(posted)
             ACTIVE_GH.discard(posted)
         if posted.returncode:
-            raise Failure(f"posting the sweep comment failed: {stderr.strip()}")
+            raise Failure(f"posting the sweep comment failed: {stderr.strip()}", 6)
         print(f"COMMENT {json.loads(stdout).get('html_url', '')}")
     print(f"OK open_fix={record['open_fix']} kept={len(items)} findings={len(found)}")
+    return 0
+
+
+def pr_ref(url):
+    match = PR_URL.fullmatch(url)
+    if not match:
+        raise Failure(f"--pr {url!r} is not a GitHub pull request URL")
+    return match.group(1), int(match.group(2))
+
+
+def post_review(args):
+    """Posts one review at --head; APPROVE only when the sweep gate passes."""
+    repo, number = pr_ref(args.pr)
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError as error:
+        raise Failure(f"the review on stdin is not JSON: {error}") from error
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("body"), str)
+        or not isinstance(payload.get("comments", []), list)
+        or set(payload) - {"body", "comments"}
+    ):
+        raise Failure('the review on stdin is {"body": "...", "comments": [...]}')
+    if args.event == "APPROVE":
+        try:
+            why = sweep_record.gate(args.pr, args.head, review_body=payload["body"])
+        except sweep_record.GateError as error:
+            raise Failure(
+                f"APPROVE refused: cannot check the gate: {error}", 2
+            ) from error
+        if why:
+            raise Failure(
+                f"APPROVE refused: {why}",
+                3 if isinstance(why, sweep_record.OpenFix) else 1,
+            )
+    review = {
+        "commit_id": args.head,
+        "event": args.event,
+        "body": payload["body"],
+        "comments": payload.get("comments", []),
+    }
+    try:
+        posted = start_github(
+            [
+                sys.executable,
+                "-I",
+                str(LIB / "github_write_isolated.py"),
+                "--timeout",
+                "240",
+                "api",
+                "-X",
+                "POST",
+                f"repos/{repo}/pulls/{number}/reviews",
+                "--input",
+                "-",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            stdout, stderr = Runner.communicate(posted, json.dumps(review), 245)
+        finally:
+            stop(posted)
+            ACTIVE_GH.discard(posted)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise Failure(f"review POST outcome unknown: {error}", 2) from error
+    if posted.returncode:
+        raise Failure(f"review POST outcome unknown: {stderr.strip()}", 2)
+    try:
+        review_url = json.loads(stdout).get("html_url", "")
+    except (ValueError, AttributeError) as error:
+        raise Failure("review POST outcome unknown: invalid response", 2) from error
+    print(f"REVIEW {args.event} {review_url}")
     return 0
 
 
@@ -1168,10 +1244,19 @@ def main(argv):
     show.add_argument("--base", required=True)
     show.add_argument("--head", default="HEAD")
     commands.add_parser("tree")
+    review = commands.add_parser("post-review")
+    review.add_argument("--pr", required=True)
+    review.add_argument("--head", required=True)
+    review.add_argument(
+        "--event", required=True, choices=("APPROVE", "REQUEST_CHANGES", "COMMENT")
+    )
+    review.add_argument("--input", required=True, choices=("-",))
     args = parser.parse_args(argv[1:])
     if getattr(args, "record", None):
         args.record = os.path.abspath(args.record)
     try:
+        if args.command == "post-review":
+            return post_review(args)
         os.chdir(git("rev-parse", "--show-toplevel").strip())
         if args.command == "plan":
             print(json.dumps({"slices": plan(changes(args.base, args.head))}, indent=1))
