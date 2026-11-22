@@ -12,7 +12,7 @@ How the roles fit together: [`architecture.md`](architecture.md).
 
 ## Explicit worker signals
 
-`orch-signal` works for Claude, Codex, pi and cursor. Identity is the caller's
+`orch-signal` works for Claude, Codex, pi, cursor and gemini. Identity is the caller's
 `HERDR_PANE_ID`, `HERDR_WORKSPACE_ID` and the workspace's `owner` token, read
 through the env adapter. It needs no Claude session ID. A shared Codex
 app-server daemon can retain a dead pane environment for later tool shells.
@@ -84,3 +84,29 @@ successful `ask` prints only its answer to stdout; timeout exits nonzero with on
 clear line. The architect should use `list` to recover pending IDs after recycle.
 
 Codex has no automatic watcher usage sensor; its architect checks native context readings at idle/done and before new work, and sends asks through `codex queue`. Model-window lookup and the complete decision procedure are in [`worker-recycle.md`](../skills/architect/references/worker-recycle.md).
+
+## Gemini workers (agy)
+
+A gemini worker runs the `agy` CLI through `gemini-start.sh`, which starts `herdr agent start --kind agy` with `--model` from settings and `--mode auto`, and takes no extra arguments. It never passes `--dangerously-skip-permissions` (no gate at all), `--remote-agent` or `--remote-control`.
+
+`--mode auto` is the safest mode in which a worker can still edit, test and commit. agy's `--mode auto` auto-approves workspace file edits and runs terminal commands inside the terminal sandbox without prompting; a command that would leave the sandbox is judged by a separate reviewing agent, which lets safe, reversible ones through and still prompts for irreversible or high-risk actions (destructive Git and file commands). `--mode accept-edits` approves edits but still asks before every terminal command, so a worker cannot run tests or commits unattended; `--sandbox` alone (in the default mode) still asks before every edit. Auto mode turns the terminal sandbox on automatically, so `gemini-start.sh` passes no `--sandbox`.
+
+For the commands a worker runs outside the sandbox, add `allow` rules to `~/.gemini/antigravity-cli/settings.json` under `permissions` (rules are `action(target)`; `command(prefix)` matches any command whose leading tokens are that prefix):
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "command(orch-signal)",
+      "command(heavy-slot)",
+      "command(git)",
+      "command(gh)",
+      "command(python3)",
+      "command(uv)",
+      "command(bats)"
+    ]
+  }
+}
+```
+
+Do not edit agy's own settings files; a worker asks the user for the allow rules it needs.
