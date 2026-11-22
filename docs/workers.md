@@ -89,9 +89,9 @@ Codex has no automatic watcher usage sensor; its architect checks native context
 
 A gemini worker runs the `agy` CLI through `gemini-start.sh`, which starts `herdr agent start --kind agy` with `--model` from settings and `--mode auto`, and takes no extra arguments. It never passes `--dangerously-skip-permissions` (no gate at all), `--remote-agent` or `--remote-control`.
 
-`--mode auto` is the safest mode in which a worker can still edit, test and commit. agy's `--mode auto` auto-approves workspace file edits and runs terminal commands inside the terminal sandbox without prompting; a command that would leave the sandbox is judged by a separate reviewing agent, which lets safe, reversible ones through and still prompts for irreversible or high-risk actions (destructive Git and file commands). `--mode accept-edits` approves edits but still asks before every terminal command, so a worker cannot run tests or commits unattended; `--sandbox` alone (in the default mode) still asks before every edit. Auto mode turns the terminal sandbox on automatically, so `gemini-start.sh` passes no `--sandbox`.
+`--mode auto` is the safest mode in which a worker can still edit, test and commit. agy's `--mode auto` auto-approves workspace file edits and runs terminal commands inside the terminal sandbox without prompting; a command that would leave the sandbox is automatically evaluated by agy itself (a model check, not a second agent session), which lets safe, reversible ones through and still prompts for irreversible or high-risk actions (destructive Git and file commands). `--mode accept-edits` approves edits but still asks before every terminal command, so a worker cannot run tests or commits unattended; `--sandbox` alone (in the default mode) still asks before every edit. Auto mode turns the terminal sandbox on automatically, so `gemini-start.sh` passes no `--sandbox`. Auto mode needs the terminal sandbox and is not available for business or enterprise accounts; without it agy silently starts in default mode and asks before every edit, so a worker stalls — a gemini worker needs a personal account and a sandbox-capable host.
 
-For the commands a worker runs outside the sandbox, add `allow` rules to `~/.gemini/antigravity-cli/settings.json` under `permissions` (rules are `action(target)`; `command(prefix)` matches any command whose leading tokens are that prefix):
+For the commands a worker runs outside the sandbox, add `allow` rules to `~/.gemini/antigravity-cli/settings.json` under `permissions` (rules are `action(target)`; `command(prefix)` matches any command whose leading tokens are that prefix, so a broad `command(git)` would also approve `git push --force`):
 
 ```json
 {
@@ -99,14 +99,35 @@ For the commands a worker runs outside the sandbox, add `allow` rules to `~/.gem
     "allow": [
       "command(orch-signal)",
       "command(heavy-slot)",
-      "command(git)",
-      "command(gh)",
+      "command(git status)",
+      "command(git diff)",
+      "command(git log)",
+      "command(git show)",
+      "command(git fetch)",
+      "command(git add)",
+      "command(git commit)",
+      "command(git push)",
+      "command(git worktree)",
+      "command(gh pr view)",
+      "command(gh pr checks)",
+      "command(gh pr diff)",
+      "command(gh pr create)",
+      "command(gh pr edit)",
+      "command(gh pr comment)",
       "command(python3)",
       "command(uv)",
+      "command(uvx)",
       "command(bats)"
+    ],
+    "deny": [
+      "command(git push --force)",
+      "command(git push -f)",
+      "command(git reset --hard)",
+      "command(git clean)",
+      "command(gh pr merge)"
     ]
   }
 }
 ```
 
-Do not edit agy's own settings files; a worker asks the user for the allow rules it needs.
+`command(python3)` stays broad because a worker runs its own scripts and the test runners (`python3 -m unittest`, `python3 lib/…`), which an agent's own code execution cannot be narrowed per-script; the risky, narrowable surface is git and gh, which the rules pin to subcommands and back-stop with `deny`. Do not edit agy's own settings files; a worker asks the user for the allow and deny rules it needs. For `close_worker.py`'s recovery line to carry the agy conversation id instead of `unknown`, run `herdr integration install antigravity-cli`.
