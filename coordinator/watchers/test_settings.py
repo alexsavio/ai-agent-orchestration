@@ -986,7 +986,7 @@ class ProvidersTest(SettingsTest):
             "claude,codex,cursor",
         )
         self.assertEqual(
-            self.resolve('[models]\ngemini_worker = "gemini-3.8-flash-medium"\n')[
+            self.resolve('[models]\ngemini_worker = "gemini-4-neon-medium"\n')[
                 "ORCH_PROVIDERS"
             ],
             "claude,codex,gemini",

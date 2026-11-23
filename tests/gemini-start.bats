@@ -11,7 +11,7 @@ setup() {
   export ORCH_CONFIG="$TMP/orchestration.toml"
   unset ORCH_GEMINI_WORKER_MODEL ORCH_GEMINI_SMART_MODEL ORCH_PROVIDERS
   mkdir -p "$HOME" "$TMP/bin"
-  printf '[models]\ngemini_worker = "gemini-3.8-flash-medium"\ngemini_smart = "gemini-3.8-flash-high"\n' >"$ORCH_CONFIG"
+  printf '[models]\ngemini_worker = "gemini-4-neon-medium"\ngemini_smart = "gemini-4-neon-high"\n' >"$ORCH_CONFIG"
   cat >"$TMP/bin/herdr" <<'SH'
 #!/bin/sh
 printf '%s\n' "$*" >>"$HERDR_CALLS"
@@ -27,20 +27,20 @@ teardown() {
 @test "worker tier starts agy with --model and --mode auto" {
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-3.8-flash-medium --mode auto" ]
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-medium --mode auto" ]
 }
 
 @test "smart tier starts agy with the smart model" {
   run "$SCRIPT" w1 pane1 smart
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-3.8-flash-high --mode auto" ]
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-high --mode auto" ]
 }
 
 @test "one set Gemini model serves both tiers" {
-  printf '[models]\ngemini_worker = ""\ngemini_smart = "gemini-3.8-flash-high"\n' >"$ORCH_CONFIG"
+  printf '[models]\ngemini_worker = ""\ngemini_smart = "gemini-4-neon-high"\n' >"$ORCH_CONFIG"
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-3.8-flash-high --mode auto" ]
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-high --mode auto" ]
 }
 
 @test "an empty tier setting with no fallback means gemini is not configured" {
@@ -77,8 +77,8 @@ teardown() {
 
 @test "empty providers.enabled turns gemini on when a model is set" {
   : >"$ORCH_CONFIG"
-  printf '[models]\ngemini_worker = "gemini-3.8-flash-medium"\n' >"$ORCH_CONFIG"
+  printf '[models]\ngemini_worker = "gemini-4-neon-medium"\n' >"$ORCH_CONFIG"
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]
-  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-3.8-flash-medium --mode auto" ]
+  [ "$(cat "$HERDR_CALLS")" = "agent start w1 --kind agy --pane pane1 -- --model gemini-4-neon-medium --mode auto" ]
 }

@@ -346,14 +346,14 @@ SETTINGS = [
         "ORCH_GEMINI_WORKER_MODEL",
         "str",
         "",
-        "Gemini model for routine work through the agy CLI (for example gemini-3.8-flash-medium); empty or a placeholder means gemini_smart serves it too. With gemini on, set at least one of the two",
+        "Gemini model for routine work through the agy CLI (for example gemini-4-neon-medium); empty or a placeholder means gemini_smart serves it too. With gemini on, set at least one of the two",
     ),
     _g(
         "models.gemini_smart",
         "ORCH_GEMINI_SMART_MODEL",
         "str",
         "",
-        "Gemini model for hard work through the agy CLI (for example gemini-3.8-flash-high); empty or a placeholder means gemini_worker serves it too. With gemini on, set at least one of the two",
+        "Gemini model for hard work through the agy CLI (for example gemini-4-neon-high); empty or a placeholder means gemini_worker serves it too. With gemini on, set at least one of the two",
     ),
     _g(
         "remote_control.architects",

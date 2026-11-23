@@ -75,9 +75,9 @@ pi_models = []
 cursor_worker = ""
 # Cursor CLI model for hard work (for example grok-4.7-high); empty or a placeholder means cursor_worker serves it too. With cursor on, set at least one of the two
 cursor_smart = ""
-# Gemini model for routine work through the agy CLI (for example gemini-3.8-flash-medium); empty or a placeholder means gemini_smart serves it too. With gemini on, set at least one of the two
+# Gemini model for routine work through the agy CLI (for example gemini-4-neon-medium); empty or a placeholder means gemini_smart serves it too. With gemini on, set at least one of the two
 gemini_worker = ""
-# Gemini model for hard work through the agy CLI (for example gemini-3.8-flash-high); empty or a placeholder means gemini_worker serves it too. With gemini on, set at least one of the two
+# Gemini model for hard work through the agy CLI (for example gemini-4-neon-high); empty or a placeholder means gemini_worker serves it too. With gemini on, set at least one of the two
 gemini_smart = ""
 
 [remote_control]
