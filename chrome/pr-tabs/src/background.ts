@@ -62,6 +62,7 @@ import type {
   PrStateName,
   RepoChoices,
   RepoName,
+  RepoNumbersCache,
   Reply,
   RequestOf,
   Rules,
@@ -83,6 +84,8 @@ const STORED_DEFAULTS: StoredState = {
   failures: 0,
   cursor: 0,
   prTabsRepo: "",
+  prTabsRepoNumbers: { newest: {} },
+  prTabsCollapsed: [],
 };
 
 const HOST = "orch.pr_tabs";
@@ -795,20 +798,63 @@ export function closePr(key: PrKey, tabId: TabId): Promise<Reply<"closePr">> {
   return serial(() => closeKnownPr(key, tabId));
 }
 
-// What the popup needs for the repo dropdown: the listed repos, the selected one, and whether to
-// show it.
+let repoNumbersRefresh: Promise<{ cache: RepoNumbersCache | null; failed: boolean }> | undefined;
+
+async function refreshRepoNumbers(
+  rules: Rules,
+): Promise<{ cache: RepoNumbersCache | null; failed: boolean }> {
+  const repos = effectiveRepos(rules);
+
+  if (!rules.org || !repos.length) {
+    return { cache: null, failed: false };
+  }
+
+  try {
+    const { newest } = await askHost({ type: "repoNumbers", org: rules.org, repos });
+
+    if (newest && typeof newest === "object") {
+      const cache = { newest };
+      await writeStored({ prTabsRepoNumbers: cache });
+
+      return { cache, failed: false };
+    }
+  } catch (error) {
+    warn(error);
+  }
+
+  return { cache: null, failed: true };
+}
+
+function refreshRepoNumbersNow(
+  rules: Rules,
+): Promise<{ cache: RepoNumbersCache | null; failed: boolean }> {
+  const refresh = (repoNumbersRefresh ??= refreshRepoNumbers(rules).finally(() => {
+    repoNumbersRefresh = undefined;
+  }));
+
+  return refresh;
+}
+
+// Repo choices for the popup; stored newest numbers fill in when no fresh fetch succeeds.
 export async function repoChoices(): Promise<RepoChoices> {
   const rules = await loadRules();
-  const stored = await readStored("prTabsRepo");
+  const [stored, cache] = await Promise.all([
+    readStored("prTabsRepo"),
+    readStored("prTabsRepoNumbers"),
+  ]);
+  const show = showRepoPicker(rules);
+  const refreshed = show ? await refreshRepoNumbersNow(rules) : { cache: null, failed: false };
 
   return {
     repos: effectiveRepos(rules),
     selected: pickedRepo(rules, stored),
-    show: showRepoPicker(rules),
+    show,
+    newest: refreshed.cache?.newest || cache.newest,
+    guessUnavailable: refreshed.failed,
   };
 }
 
-// Remembers the dropdown pick when it is a listed repo.
+// Remembers the repo pick when it is a listed repo.
 export async function pickRepo(repo?: RepoName): Promise<void> {
   const rules = await loadRules();
 

@@ -15,12 +15,10 @@ export const COMPONENTS: readonly string[] = [
   "iconfield",
   "inputicon",
   "inputtext",
-  "message",
+  "menu",
   "progressbar",
   "ripple",
-  "select",
   "tag",
-  "virtualscroller",
 ];
 
 async function loadStyle(specifier: string): Promise<ThemeStyleModule> {

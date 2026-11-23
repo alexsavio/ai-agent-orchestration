@@ -27,6 +27,7 @@ import type {
   PrState,
   PrStateName,
   RepoName,
+  RepoNumbers,
   RepoRules,
   Rules,
   SearchResult,
@@ -147,8 +148,40 @@ export function pickedRepo(rules: RepoRules, stored?: RepoName): RepoName {
   return listedRepo(rules, stored) || effectiveRepos(rules)[0] || "";
 }
 
+const BARE_NUMBER = /^#?(\d{1,9})$/;
+
+export function bareNumber(input: string): PrNumber | null {
+  const match = BARE_NUMBER.exec(input.trim());
+  const number = Number(match?.[1]);
+
+  return number > 0 ? number : null;
+}
+
 export function isBareNumber(input: string): boolean {
-  return /^\d+$/.test(input.trim());
+  return bareNumber(input) !== null;
+}
+
+// Selected repo if newest >= target, else the smallest repo with newest >= target, else selected.
+export interface RepoSuggestion {
+  fallback: RepoName;
+  newest: RepoNumbers;
+}
+
+export function suggestedRepo(
+  repos: readonly RepoName[],
+  target: PrNumber,
+  { fallback, newest }: RepoSuggestion,
+): RepoName {
+  const newestOf = (repo: RepoName): number => newest[repo] ?? 0;
+  const fits = (repo: RepoName): boolean => newestOf(repo) >= target;
+
+  if (fits(fallback)) {
+    return fallback;
+  }
+
+  const [smallest] = repos.filter(fits).toSorted((a, b) => newestOf(a) - newestOf(b));
+
+  return smallest ?? fallback;
 }
 
 export const MAX_TARGETS = 20;
@@ -159,22 +192,28 @@ export function splitTargets(input: string | undefined): string[] {
   return [...new Set((input || "").split(/[\s,]+/).filter(Boolean))];
 }
 
-export function hasBareNumber(input: string): boolean {
-  return splitTargets(input).some(isBareNumber);
-}
-
-// The popup shows a repo dropdown only when there is a choice.
+// The popup offers repo options only when there is a choice.
 export function showRepoPicker(rules: RepoRules): boolean {
   return effectiveRepos(rules).length >= 2;
 }
 
-const BARE_NUMBER = /^#?(\d{1,9})$/;
 const REPO_NUMBER = /^([A-Za-z0-9_.-]{1,100})#(\d{1,9})$/;
 
 function prIn(org: OrgName, repo: RepoName | null, digits: string | undefined): Pr | null {
   const number = Number(digits);
 
   return repo && number > 0 ? makePr(org, repo, number) : null;
+}
+
+function isTarget(text: string): boolean {
+  return BARE_NUMBER.test(text) || REPO_NUMBER.test(text) || isPrUrl(text);
+}
+
+// Input the popup opens rather than searches: PR numbers, <repo>#<number> or PR URLs.
+export function isGoToInput(input: string): boolean {
+  const targets = splitTargets(input);
+
+  return targets.length > 0 && targets.every(isTarget);
 }
 
 // The PR named by popup input: a number (#123 or 123) in the picked repo (default: pickedRepo),
