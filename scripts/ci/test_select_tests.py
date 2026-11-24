@@ -75,6 +75,9 @@ class SelectionTests(unittest.TestCase):
                 self.assertTrue(plan["full"])
                 self.assertTrue(plan["macos"])
 
+    def test_poll_deadline_code_runs_on_macos(self):
+        self.assertTrue(ci.select(["lib/github_poll.py"])["macos"])
+
     def test_documentation_keeps_readers_on_linux(self):
         for path in [
             "docs/settings.md",
