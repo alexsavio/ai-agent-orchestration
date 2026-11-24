@@ -415,5 +415,71 @@
   },
   "closeStatus": {
     "message": "Schließen"
+  },
+  "hideFilesTitle": {
+    "message": "Dateien auf Pull-Request-Seiten ausblenden"
+  },
+  "hideFilesEnabled": {
+    "message": "Passende Dateien ausblenden"
+  },
+  "hideFilesHelp": {
+    "message": "Muster gelten für den vollständigen Pfad. * = beliebige Zeichen."
+  },
+  "filePattern": {
+    "message": "Glob-Muster"
+  },
+  "addPattern": {
+    "message": "Hinzufügen"
+  },
+  "removePattern": {
+    "message": "$PATTERN$ entfernen",
+    "placeholders": {
+      "pattern": {
+        "content": "$1"
+      }
+    }
+  },
+  "showHiddenFiles": {
+    "message": "Anzeigen"
+  },
+  "fileSettingsError": {
+    "message": "Einstellungen konnten nicht gespeichert oder geladen werden. Neu laden und erneut versuchen."
+  },
+  "settingsMenu": {
+    "message": "Einstellungen"
+  },
+  "filesHidden": {
+    "message": "$COUNT$ Dateien von PR Tabs ausgeblendet ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "settingsPageTitle": {
+    "message": "PR Tabs Einstellungen"
+  },
+  "filePatternsLabel": {
+    "message": "Dateimuster"
+  },
+  "filePatternPlaceholder": {
+    "message": "z. B. *.test.ts"
+  },
+  "filePatternEmpty": {
+    "message": "Ein Muster eingeben."
+  },
+  "filePatternDuplicate": {
+    "message": "Dieses Muster ist bereits in der Liste."
+  },
+  "hideHiddenFiles": {
+    "message": "Ausblenden"
+  },
+  "hiddenFilesShown": {
+    "message": "$COUNT$ ausgeblendete Dateien angezeigt ·",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
   }
 }
