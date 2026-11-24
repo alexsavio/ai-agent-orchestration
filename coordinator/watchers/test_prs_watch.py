@@ -47,28 +47,24 @@ class PrsWatchTests(IsolatedTestCase):
         started = time.monotonic()
         with self.assertRaises(Outer):
             with github_poll.call_deadline(5, expired_error=Outer):
+                remaining = signal.getsignal(signal.SIGALRM).remaining
                 with patch.object(time, "time", lambda: real() + 100):
+                    self.assertLess(remaining(), 0)
                     with github_poll.call_deadline(1.0):
                         time.sleep(0.6)
         self.assertLess(time.monotonic() - started, 0.5)
 
-    def assert_outer_remaining_follows(self, clock):
+    def test_outer_remaining_follows_the_monotonic_clock(self):
+        real = time.monotonic
         with github_poll.call_deadline(10):
             remaining = signal.getsignal(signal.SIGALRM).remaining
-            real = getattr(time, clock)
             signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
             try:
-                with patch.object(time, clock, lambda: real() + 9):
+                with patch.object(time, "monotonic", lambda: real() + 9):
                     left = remaining()
             finally:
                 signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGALRM})
         self.assertLess(left, 1.5)
-
-    def test_outer_remaining_follows_the_wall_clock(self):
-        self.assert_outer_remaining_follows("time")
-
-    def test_outer_remaining_follows_the_monotonic_clock(self):
-        self.assert_outer_remaining_follows("monotonic")
 
     def test_hung_child_is_killed_and_next_cycle_saves_a_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
