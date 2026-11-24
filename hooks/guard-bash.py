@@ -2152,7 +2152,7 @@ def pi_kind(args):
 
 
 def guard_pi(executable, args, where=".", disabled=()):
-    """Enforce the pi and Cursor launchers and model restrictions on agent starts."""
+    """Enforce the pi, Cursor and agy launchers and model restrictions on agent starts."""
     if executable == "agy":
         if any(a.split("=", 1)[0] in AGY_BYPASS_FLAGS for a in args):
             return AGY_REASON

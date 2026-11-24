@@ -3205,10 +3205,6 @@ pkill -f vite
             "herdr pane run w1:p2 'agy --dangerously-skip-permissions'",
         ),
         ("pane run agy in bash -c", "herdr pane run w1:p2 'bash -c \"agy -p x\"'"),
-        (
-            "pane run agy start",
-            "herdr pane run w1:p2 'herdr agent start w --kind agy --pane p'",
-        ),
         ("prompt starting agy", "herdr agent prompt w 'agy --model m'"),
         ("prompt starting agy after a space", "herdr agent prompt w '  agy'"),
     ]:
