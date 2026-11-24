@@ -60,6 +60,23 @@ teardown() {
   [ ! -e "$HERDR_CALLS" ]
 }
 
+@test "a bad tier is refused with the script's own message" {
+  run "$SCRIPT" w1 pane1 fast
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"tier must be worker or smart, not 'fast'"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+}
+
+@test "sourcing from zsh is refused" {
+  if ! command -v zsh >/dev/null 2>&1; then
+    skip "zsh not installed"
+  fi
+  run zsh -c 'source "$1"' -- "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"run it, do not source it"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+}
+
 @test "gemini left out of providers.enabled is refused" {
   printf '[providers]\nenabled = ["claude", "codex"]\n' >>"$ORCH_CONFIG"
   run "$SCRIPT" w1 p1 worker
