@@ -70,10 +70,27 @@ export interface PrHead {
 export interface PrState extends PrHead {
   state?: PrStateName;
   title?: string;
+  closedAt?: string | null;
 }
 
 export type States = Partial<Record<PrKey, PrState | null>>;
 export type Meta = Partial<Record<PrKey, PrState>>;
+
+// Start of the tab's current PR visit in epoch milliseconds; a move to another PR resets it.
+export interface TabVisit {
+  key: PrKey;
+  since: number;
+}
+
+export type TabVisits = Partial<Record<TabId, TabVisit>>;
+
+export interface TabScan {
+  entries: Entry[];
+  scannedAt: number;
+  // Tabs the scan found but did not record, because they navigated during it.
+  moved: TabId[];
+}
+
 export type Owners = Partial<Record<OwnerKey, GroupTitle>>;
 
 export interface SearchHit extends PrHead {
@@ -413,6 +430,15 @@ export interface StoredState {
   prTabsRepo: RepoName;
   prTabsRepoNumbers: RepoNumbersCache;
   prTabsCollapsed: string[];
+}
+
+export interface SessionState {
+  tabVisits: TabVisits;
+}
+
+export interface Closing {
+  key: PrKey;
+  revision: number;
 }
 
 export interface FetchedStates {

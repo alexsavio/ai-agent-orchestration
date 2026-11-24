@@ -28,6 +28,7 @@ const realNow = Date.now;
 afterEach(() => {
   vi.restoreAllMocks();
   Date.now = realNow;
+  world.session = {};
   world.hostSettings = CONFIGURED;
 });
 
@@ -435,6 +436,31 @@ test("existing check cadence regroups tabs after ownership changes or disappears
   await chromeMessageCheck();
 
   assert.equal(world.grouped.at(-1)?.title, "webapp");
+});
+
+test("a tab open before its PR finished closes, while a tab opened after it stays", async () => {
+  const clock = fakeClock();
+  world.tabs = [{ id: 11, url: `${PR}/7`, active: false }];
+  world.store = {};
+  Object.assign(world.store, { tabVisits: { 12: { key: "acme/webapp#7", since: 0 } } });
+
+  let reply: { state: "OPEN" | "MERGED"; closedAt?: string } = { state: "OPEN" };
+  world.nativeHandler = async () => ({ ok: true, prs: { "acme/webapp#7": reply } });
+
+  await chromeMessageCheck();
+  clock.advance(1);
+  reply = { state: "MERGED", closedAt: new Date(Date.now()).toISOString() };
+  clock.advance(1);
+  world.tabs.push({ id: 12, url: `${PR}/7`, active: false });
+
+  assert.deepEqual(await chromeMessageCheck(), {
+    tabs: 2,
+    prs: 1,
+    checked: 1,
+    closed: [{ key: "acme/webapp#7", state: "MERGED" }],
+    inView: [],
+  });
+  assert.deepEqual(ids(), [12]);
 });
 
 test("a restarted worker restores ownership before grouping persisted PR metadata", async () => {
