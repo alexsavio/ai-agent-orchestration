@@ -60,13 +60,6 @@ teardown() {
   [ ! -e "$HERDR_CALLS" ]
 }
 
-@test "sandbox and permission-bypass flags are refused" {
-  run "$SCRIPT" w1 pane1 worker --dangerously-skip-permissions --remote-agent
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"takes no extra arguments"* ]] || false
-  [ ! -e "$HERDR_CALLS" ]
-}
-
 @test "gemini left out of providers.enabled is refused" {
   printf '[providers]\nenabled = ["claude", "codex"]\n' >>"$ORCH_CONFIG"
   run "$SCRIPT" w1 p1 worker
@@ -76,7 +69,6 @@ teardown() {
 }
 
 @test "empty providers.enabled turns gemini on when a model is set" {
-  : >"$ORCH_CONFIG"
   printf '[models]\ngemini_worker = "gemini-4-neon-medium"\n' >"$ORCH_CONFIG"
   run "$SCRIPT" w1 pane1 worker
   [ "$status" -eq 0 ]

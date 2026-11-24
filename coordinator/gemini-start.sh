@@ -2,8 +2,8 @@
 # Starts a Gemini (agy) worker in an existing herdr pane:
 #   gemini-start.sh <agent-name> <pane-id> <worker|smart>
 # The model comes from models.gemini_worker or models.gemini_smart (agy model ids, e.g. gemini-4-neon-medium).
-# The worker runs in agy's Auto mode: workspace edits and safe commands run without asking, and the
-# allow rules a worker needs (orch-signal, heavy-slot, git, gh, python3, uv, bats) go in agy's settings.
+# The worker runs in agy's Auto mode; its only allow rule is command(orch-signal), and git and gh
+# commands that leave the sandbox go through agy Auto's own check.
 case ${ZSH_EVAL_CONTEXT:-} in *:file*) echo "run it, do not source it" >&2; return 1 ;; esac
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail

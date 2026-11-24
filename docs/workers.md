@@ -12,7 +12,7 @@ How the roles fit together: [`architecture.md`](architecture.md).
 
 ## Explicit worker signals
 
-`orch-signal` works for Claude, Codex, pi, cursor and gemini. The Herdr env adapter
+`orch-signal` works for Claude, Codex, pi and cursor; for gemini it is untested until a live agy worker runs (see the Gemini workers section). The Herdr env adapter
 verifies the caller's process ancestry against live pane foreground processes,
 then reads the pane's workspace and its `owner` token. Inherited pane IDs only
 prioritize the lookup: cached shell environments and session IDs can belong to
