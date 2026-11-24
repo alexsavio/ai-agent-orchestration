@@ -98,20 +98,7 @@ Merge this `permissions` object into `~/.gemini/antigravity-cli/settings.json`, 
 {
   "permissions": {
     "allow": [
-      "command(orch-signal)",
-      "command(git status)",
-      "command(git diff)",
-      "command(git log)",
-      "command(git show)",
-      "command(git fetch)",
-      "command(git add)",
-      "command(git commit)",
-      "command(gh pr view)",
-      "command(gh pr checks)",
-      "command(gh pr diff)",
-      "command(gh pr create)",
-      "command(gh pr edit)",
-      "command(gh pr comment)"
+      "command(orch-signal)"
     ],
     "deny": [
       "command(git push --force)",
@@ -124,6 +111,6 @@ Merge this `permissions` object into `~/.gemini/antigravity-cli/settings.json`, 
 }
 ```
 
-An `allow` rule switches off Auto's review for every command it matches, so this list holds only commands safe in every form; `git push`, `heavy-slot` and the test runners (`python3`, `uv`, `uvx`, `bats`) are left out and go through Auto's check outside the sandbox, which may prompt, while test runners and scripts inside the sandbox need no rule. Do not edit agy's own settings files; a worker asks the user for the rules it needs. For `close_worker.py`'s recovery line to carry the agy conversation id instead of `unknown`, run `herdr integration install antigravity-cli`.
+An `allow` rule switches off Auto's check for every command it matches, and matching is by token prefix, so a flag cannot be excluded: `git fetch --upload-pack`, `git log|diff|show --output`, and `gh pr … --body-file` each run any program, write any path, or post a local file. Start with this list; add a rule only after a prompt stalls a worker, knowing it removes the check for every form of that command. Do not edit agy's own settings files; a worker asks the user for the rules it needs. For `close_worker.py`'s recovery line to carry the agy conversation id instead of `unknown`, run `herdr integration install antigravity-cli`.
 
 Two things are untested and stay so until a live agy worker runs: agy may show its workspace trust dialog in a new worktree, so the user trusts the worktree root or a parent folder once before the first gemini worker; and `orch-signal` from inside agy's terminal sandbox is untested, so the first gemini worker runs `orch-signal heartbeat --new-job` and `orch-signal done` as its first check.
