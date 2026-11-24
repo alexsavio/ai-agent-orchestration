@@ -219,6 +219,26 @@ class ReusedPidTests(IsolatedTestCase):
                 self.assertEqual(len(self.lines()), 1)
                 self.assertEqual(self.lines(), [])
 
+    def test_torn_session_read_does_not_alert(self):
+        self.alive = True
+        self.write_session()
+        self.assertEqual(self.lines(), [])
+        for torn in (b"", b'{"sessionId": "', b"\xff\xfe"):
+            with self.subTest(torn=torn):
+                (self.sessions / "1234.json").write_bytes(torn)
+                self.assertEqual(self.lines(), [])
+                self.assertNotIn("stale_bindings", self.cursor)
+
+    def test_deeply_nested_session_file_does_not_raise(self):
+        self.alive = True
+        (self.sessions / "1234.json").write_text("[" * 100000)
+        self.assertEqual(self.lines(), [])
+
+    def test_pid_too_large_for_kill_does_not_raise(self):
+        self.write_binding("architect-session", pid=2**70)
+        args = type("Args", (), {"bindings_dir": self.bindings})()
+        self.assertEqual(inbox.stale_binding_alerts(args, self.cursor), ([], False))
+
     def test_each_session_field_mismatch_makes_a_live_binding_stale(self):
         self.alive = True
         for field in ("procStart", "messagingSocketPath"):

@@ -139,6 +139,8 @@ def stale_binding_alerts(args, cursor):
             try:
                 os.kill(int(value["pid"]), 0)
                 owns_session(value)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                raise
             except (ProcessLookupError, ValueError, FileNotFoundError):
                 fingerprint = hashlib.sha256(
                     json.dumps(value, sort_keys=True).encode()
@@ -149,7 +151,14 @@ def stale_binding_alerts(args, cursor):
                     events.append(
                         f"bindings: BINDING STALE {architect} {match[1]} (start)"
                     )
-        except (OSError, ValueError, KeyError, TypeError):
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            OverflowError,
+            RecursionError,
+        ):
             if path.name in old:
                 current[path.name] = old[path.name]
     if current:
