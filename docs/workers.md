@@ -6,22 +6,23 @@
 - A worker that is done is closed by its architect with `close-worker.sh`, which leaves a recovery line (pane, task, report, branch, worktree, and the resume command of its agent: `claude --resume <id>`, `codex resume <id>`, else `session <id>`) in the architect's status file. After `workers.idle_s` seconds (2 h) idle or done with no open PR, the architect gets `WORKER IDLE <pane> owner=<workspace>` and checks the worker ([`worker-close.md`](../skills/architect/references/worker-close.md)).
 - Claude worker and reviewer panes set `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` before the start, so they show no prompt suggestions; architect and Coordinator sessions keep theirs.
 - To switch models, recycle onto the new model. A live session is never switched.
-- A worker runs each `review.finalize_commands` command (by default the shipped `/finalize-sweep`) over the complete PR diff before calling its PR done or ready, and again after every merge or rebase of the base into the PR branch. It sends the architect each findings table, waits for approval, and applies only the approved findings. With commands set, a PR, and `review.finalize_comment` not `false`, it then posts one PR comment with one table per configured command (every finding, approved or rejected, what changed, the commit SHA) ending with the tool's attribution trailer. `/finalize-sweep` writes a record with `head`, `base`, `findings`, and `validator_ids`; the worker reports its path and `orch-sweep-record check --record <path> --head <sha> [--base <sha>] --session <worker-session-id>` must pass. Its validator contract is defined in `/finalize-sweep` sections 5 (Validate) and 6 (Report, steps 4–5). The session id is `.result.agent.agent_session.value` from `herdr agent get "$HERDR_PANE_ID"`. `--no-transcripts` is CI attestation only.
+- A worker runs each `review.finalize_commands` command (by default the shipped `/finalize-sweep`) over the complete PR diff before calling its PR done or ready, and again after every merge or rebase of the base into the PR branch. It sends the architect each findings table, waits for approval, and applies only the approved findings. With commands set, a PR, and `review.finalize_comment` not `false`, it then posts one PR comment with one table per configured command (every finding, approved or rejected, what changed, the commit SHA) ending with the tool's attribution trailer. `/finalize-sweep` writes a record with `head`, `base`, `findings`, and `validator_ids`; the worker reports its path and `orch-sweep-record check --record <path> --head <sha> [--base <sha>] --session <worker-session-id>` must pass. Its validator contract is defined in `/finalize-sweep` sections 5 (Validate) and 6 (Report, steps 4–5). The session id is `.result.agent.agent_session.value` from `herdr agent get "$HERDR_PANE_ID"`. `--no-transcripts` is CI attestation only. A worker can use `orch-sweep` for the headless script flow described in [the sweep script](sweep-script.md); its script record is checked in full, including every sweep-agent transcript even when there are no findings.
 
 How the roles fit together: [`architecture.md`](architecture.md).
 
 ## Explicit worker signals
 
-`orch-signal` works for Claude, Codex, pi and cursor. Identity is the caller's
-`HERDR_PANE_ID`, `HERDR_WORKSPACE_ID` and the workspace's `owner` token, read
-through the env adapter. It needs no Claude session ID. A shared Codex
-app-server daemon can retain a dead pane environment for later tool shells.
-When that stale pane ID is absent from Herdr, `orch-signal` recovers only a
-single live Codex pane whose Git worktree matches the shell's current directory;
-a present pane in another workspace is still refused. Identity failures name the
-claimed pane, workspace, Herdr socket and pane count.
-Recovery applies only to worker `heartbeat`, `done` and `ask` signals, never to
-the architect-facing `answer` or `list` commands.
+`orch-signal` works for Claude, Codex, pi and cursor. The Herdr env adapter
+verifies the caller's process ancestry against live pane foreground processes,
+then reads the pane's workspace and its `owner` token. Inherited pane IDs only
+prioritize the lookup: cached shell environments and session IDs can belong to
+another terminal after a restart or concurrent session resume. A corrected pane
+is logged and preserved as `recovered_from` in the signal record. Neither a
+matching working directory nor a live inherited pane proves caller identity.
+All commands, including architect `answer` and `list`, require a verified caller;
+an unverifiable caller fails without writing a signal. If the sandbox blocks
+process inspection, run the command escalated. Tool shells must descend from
+the pane's foreground process (Codex workers start with `--no-daemon`).
 
 `orch-signal` writes `~/.claude/coordinator`, outside the Codex sandbox. Codex
 workers run every `orch-signal` command as an escalated command, like

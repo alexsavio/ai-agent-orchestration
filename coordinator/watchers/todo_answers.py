@@ -36,6 +36,13 @@ def choices(text):
     )
 
 
+def printable(text):
+    """The text with every non-printable character removed (ESC, BEL, tab, newline, other controls, DEL) and runs of spaces collapsed."""
+    return " ".join(
+        "".join(c for c in str(text) if c.isprintable() or c == " ").split()
+    )
+
+
 def directory():
     return Path.home() / ".claude/coordinator/todo-answers"
 
@@ -180,6 +187,12 @@ def filter_canceled(text):
 
 
 def mark_delivered(text, owner=None):
+    with queue_lock():
+        mark_delivered_locked(text, owner)
+
+
+def mark_delivered_locked(text, owner=None):
+    """Caller holds the queue lock; the lock is not re-entrant in one process."""
     identifiers = {
         identifier
         for target, identifier in re.findall(
@@ -189,17 +202,16 @@ def mark_delivered(text, owner=None):
     }
     if not identifiers:
         return
-    with queue_lock():
-        for record in records():
-            if (
-                record["id"] in identifiers
-                and not record.get("delivered_at")
-                and not record.get("discarded")
-            ):
-                record["delivered_at"] = time.time()
-                record.pop("failure", None)
-                record.pop("failed_at", None)
-                write(directory() / (record["key"] + ".json"), record)
+    for record in records():
+        if (
+            record["id"] in identifiers
+            and not record.get("delivered_at")
+            and not record.get("discarded")
+        ):
+            record["delivered_at"] = time.time()
+            record.pop("failure", None)
+            record.pop("failed_at", None)
+            write(directory() / (record["key"] + ".json"), record)
 
 
 def submit(owner, text, answer, generation=None):
@@ -214,8 +226,6 @@ def submit_locked(owner, text, answer, generation, existing):
 
     if not owner or Path(owner).name != owner or owner in (".", "..") or ": " in owner:
         raise ValueError("invalid architect name")
-    if not choices(text):
-        raise ValueError("this item has no valid choices")
     if len(answer) > ANSWER_MAX or not answer.strip():
         raise ValueError(f"answer must contain 1-{ANSWER_MAX} characters")
     answer = " ".join(answer.split())
@@ -271,6 +281,48 @@ def record_failures(reasons):
                 record.setdefault("failed_at", time.time())
             if changed:
                 write(directory() / (record["key"] + ".json"), record)
+
+
+def undelivered():
+    return sorted(
+        (
+            record
+            for record in records()
+            if not record.get("delivered_at") and not record.get("discarded")
+        ),
+        key=lambda record: record["at"],
+    )
+
+
+def describe(record):
+    stamp = time.strftime("%H:%M", time.localtime(record["at"]))
+    reason = printable(record.get("failure") or "")
+    return (
+        f"Not delivered yet, queued {stamp}"
+        + (f" ({reason})" if reason else "")
+        + f": {printable(record['architect'])}: {printable(record['text'])}"
+        + f" = {printable(record['answer'])}"
+    )
+
+
+def cancel(record_id):
+    """Removes one undelivered answer and puts its item back; returns a status message. A delivered answer stays."""
+    with queue_lock():
+        record = next(
+            (
+                found
+                for found in records()
+                if found["id"] == record_id and not found.get("discarded")
+            ),
+            None,
+        )
+        if record is None:
+            return "answer is no longer queued"
+        if record.get("delivered_at"):
+            return "answer was already delivered; it stays"
+        (directory() / (record["key"] + ".json")).unlink(missing_ok=True)
+        undo_dismissal(record)
+    return "answer cancelled; the item returns"
 
 
 def collect(command):
@@ -337,7 +389,8 @@ def event_line(record):
 
 class AnswerInput:
     def __init__(self, options):
-        self.options, self.mode, self.entry, self.error = options, "choices", "", ""
+        self.options, self.entry, self.error = options, "", ""
+        self.mode = "choices" if options else "type"
 
     def feed(self, char):
         self.error = ""
@@ -365,6 +418,8 @@ class AnswerInput:
         if self.mode == "type":
             return f"Answer: {self.entry}▏ (Enter sends; Esc cancels)"
         return (
-            " · ".join(f"{key}: {value}" for key, value in self.options.items())
+            " · ".join(
+                f"{key}: {printable(value)}" for key, value in self.options.items()
+            )
             + " · t type · Esc cancels"
         )

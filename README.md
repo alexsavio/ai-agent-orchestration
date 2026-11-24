@@ -79,7 +79,7 @@ Workers get a soft recycle ask and a hard limit capped at 60% of their known mod
 
 ### 📝 The to-do pane
 
-The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). Items with numbered choices can be answered there: select one, press `a`, then choose a number or `t` for free text. Details, keys and settings: [docs/todo.md](docs/todo.md).
+The Coordinator opens a to-do pane at start, and `prefix+t` opens the same list as a popup (on by default; `todo_popup = false` turns the popup off). Every item can be answered there: select one, press `a`, then type (items with numbered choices also take a number key). Answers not delivered yet show as rows you can cancel. Details, keys and settings: [docs/todo.md](docs/todo.md).
 
 ### ❓ User questions
 
@@ -87,7 +87,7 @@ Every question for you gets its own pane under the to-do pane, with keys to answ
 
 ### 🔍 Review PRs
 
-`/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`, or `ORCH_CODEX_SMART_MODEL` when only that one is set) in a Herdr pane for every PR that is ready; on a first review and on a head it would APPROVE, Codex also runs `/finalize-sweep` (the repo's `review.finalize_commands`; `[]` skips it) and puts the findings in the review body; a `fix` finding blocks APPROVE and a `nit` never does. A PR that asks for your review again at a reviewed head is reviewed again. Codex posts a commit-pinned `review.json` with `gh api .../reviews --input review.json` and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. A PR absent from one search is checked directly before it is cleared; at most 10 checks run per poll and an unconfirmed absence clears after five misses. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
+`/review-prs` lists the open PRs that request your review, bucketed by CI, conflicts and drafts. `/review-prs watch` reports each change and starts a Codex review (`ORCH_CODEX_WORKER_MODEL`, or `ORCH_CODEX_SMART_MODEL` when only that one is set) in a Herdr pane for every PR that is ready; `dispatch.sh` first reuses an acceptable author/reviewer sweep record and runs [`orch-sweep`](docs/sweep-script.md) only when evidence is missing or stale; only undisputed kept `fix` findings block APPROVE. The repo can opt out with `review.finalize_commands = []`. A PR that asks for your review again at a reviewed head is reviewed again. Codex posts the review only through `orch-sweep post-review`, which refuses APPROVE unless the sweep gate passes, and ends its turn, and the pane closes through `close-pane.sh`, so the workers watcher reports it as closed, not dead. A PR absent from one search is checked directly before it is cleared; at most 10 checks run per poll and an unconfirmed absence clears after five misses. Scope: `--repo`, `--org`, `--all`, else the current repo, else `watchers.pr_scope`. Details: [`skills/review-prs/SKILL.md`](skills/review-prs/SKILL.md).
 
 ### 🐘 Heavy jobs
 
