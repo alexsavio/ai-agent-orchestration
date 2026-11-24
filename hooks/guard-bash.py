@@ -2119,8 +2119,8 @@ HERDR_PAIRS = (
     ("pane", "send-text"),
 )
 CURSOR_REASON = "Cursor starts only through ~/.claude/coordinator/cursor-start.sh <name> <pane> <worker|smart>; the provider and model come from settings."
-AGY_REASON = "agy (Gemini) starts only through ~/.claude/coordinator/gemini-start.sh; a raw agy start, or an agy bypass flag, is denied."
-AGY_INFO_ARGS = {"--version", "-v", "--help", "-h", "help", "models"}
+AGY_REASON = "agy (Gemini) starts only through ~/.claude/coordinator/gemini-start.sh <name> <pane> <worker|smart>; the model comes from settings, and a raw agy start or an agy bypass flag is denied."
+AGY_INFO_ARGS = {"--version", "--help", "-h", "help", "models"}
 AGY_BYPASS_FLAGS = (
     "--dangerously-skip-permissions",
     "--remote-agent",
@@ -2154,7 +2154,9 @@ def pi_kind(args):
 def guard_pi(executable, args, where=".", disabled=()):
     """Enforce the pi, Cursor and agy launchers and model restrictions on agent starts."""
     if executable == "agy":
-        if any(a.split("=", 1)[0] in AGY_BYPASS_FLAGS for a in args):
+        if any(
+            re.sub(r"^-+", "--", a.split("=", 1)[0]) in AGY_BYPASS_FLAGS for a in args
+        ):
             return AGY_REASON
         return None if args[:1] and args[0] in AGY_INFO_ARGS else AGY_REASON
     if executable in ("cursor-agent", "agent"):
@@ -2296,6 +2298,19 @@ GUARDED_EXECUTABLES = {
 }
 
 
+SHELL_KEYWORDS = {"then", "do", "else", "elif", "{", "}", "!"}
+PLAIN_PROGRAMS = (GUARDED_EXECUTABLES - {"agy", "pi", "herdr"}) | {"echo", "printf"}
+
+
+def argument_word(words, index):
+    """True when a later `agy` or `pi` word is an argument of a known program (`timeout 30 rg -n agy hooks/`), not a command: no shell keyword stands between."""
+    return (
+        os.path.basename(words[index]) in ("agy", "pi")
+        and os.path.basename(words[0]) in PLAIN_PROGRAMS
+        and not SHELL_KEYWORDS & set(words[1:index])
+    )
+
+
 def evaluate_words(words, where, command, disabled, pipeline):
     executable = os.path.basename(words[0])
     args = words[1:]
@@ -2380,6 +2395,7 @@ def evaluate(command, cwd, disabled=()):
                     words[index:]
                     for index, word in enumerate(words)
                     if os.path.basename(word) in GUARDED_EXECUTABLES
+                    and not argument_word(words, index)
                 ]
             for candidate in candidates:
                 reason = evaluate_words(
