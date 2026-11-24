@@ -54,6 +54,10 @@ class TodoAnswerTests(IsolatedTestCase):
                 a.submit(OWNER, TEXT, text)
         a.submit(OWNER, TEXT, "x" * 512)
 
+    def test_architect_name_with_colon_space_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "invalid architect name"):
+            a.submit("Architect: Ops", TEXT, "now")
+
     def test_one_pending_answer_per_item(self):
         a.submit(OWNER, TEXT, "now")
         with self.assertRaisesRegex(ValueError, "already queued"):
@@ -130,8 +134,8 @@ class TodoAnswerTests(IsolatedTestCase):
 
     def test_existing_producer_routes_and_dedupes_answer(self):
         a.submit(OWNER, TEXT, "now")
-        records, failed = a.collect(w.command)
-        self.assertEqual(failed, [])
+        records, notices, _ = a.collect(w.command)
+        self.assertEqual(notices, [])
         raw = dict(now=[], unreadable=[], read=[], scanned=True, todo_answers=records)
         after, lines = w.reduce_todo(None, raw)
         self.assertEqual(len(lines), 1)
@@ -167,9 +171,10 @@ class TodoAnswerTests(IsolatedTestCase):
             "architect_owners",
             side_effect=a.discovery.Unavailable("offline"),
         ):
-            records, failed = a.collect(w.command)
+            records, notices, failures = a.collect(w.command)
         self.assertEqual(records, [])
-        self.assertTrue(failed)
+        self.assertEqual(notices, [])
+        self.assertEqual([entry["reason"] for entry in failures], ["offline"])
         self.assertEqual(len(list(a.directory().glob("*.json"))), 1)
 
     def test_answer_submission_dismisses_like_successful_jump(self):
@@ -426,7 +431,7 @@ class TodoAnswerTests(IsolatedTestCase):
         with patch.object(
             a.time, "time", return_value=record["at"] + a.KEEP_SECONDS + 1
         ):
-            self.assertEqual(a.collect(w.command), ([], []))
+            self.assertEqual(a.collect(w.command), ([], [], []))
         self.assertEqual(a.records(), [])
 
     def test_submission_lock_wait_is_bounded(self):
@@ -626,7 +631,7 @@ class TodoAnswerTests(IsolatedTestCase):
             self.assertEqual(a.collect(w.command)[0], [])
             self.assertEqual(a.records()[0]["answer"], "now")
         with patch.object(a.time, "time", return_value=now):
-            ready, _ = a.collect(w.command)
+            ready, _, _ = a.collect(w.command)
             raw = dict(
                 now=[],
                 unreadable=[],
@@ -863,14 +868,14 @@ class TodoAnswerTests(IsolatedTestCase):
         # An unreadable state cannot establish a generation change: preserve the answer.
         saved = state.read_text()
         state.write_text("{")
-        ready, notices = a.collect(w.command)
+        ready, notices, _ = a.collect(w.command)
         self.assertEqual([record["id"] for record in ready], [obsolete["id"]])
         self.assertEqual(notices, [])
         state.write_text(saved)
         module.answer_item(
             module.rendered_items(output, state)[0], "later", state, output
         )
-        ready, notices = a.collect(w.command)
+        ready, notices, _ = a.collect(w.command)
         self.assertEqual([record["answer"] for record in ready], ["later"])
         self.assertEqual(ready[0]["generation"], 102)
         self.assertEqual(len(notices), 1)
