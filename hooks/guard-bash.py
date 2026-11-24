@@ -1734,9 +1734,15 @@ WRAPPER_OPTIONS = {
         "--chdir": 1,
         "-S": 1,
         "--split-string": 1,
-        "--default-signal": 1,
-        "--ignore-signal": 1,
-        "--block-signal": 1,
+        "-P": 1,
+        "-a": 1,
+        "--argv0": 1,
+        "--env0-from": 1,
+        "-v": 0,
+        "--debug": 0,
+        "--default-signal": "optional",
+        "--ignore-signal": "optional",
+        "--block-signal": "optional",
         "--list-signal-handling": 0,
         "--help": 0,
         "--version": 0,
@@ -1756,6 +1762,9 @@ WRAPPER_OPTIONS = {
         "--verbose": 0,
         "-q": 0,
         "--quiet": 0,
+        "-l": 0,
+        "-h": 0,
+        "-V": 0,
         "--help": 0,
         "--version": 0,
     },
@@ -1764,8 +1773,12 @@ WRAPPER_OPTIONS = {
         "--kill-after": 1,
         "-s": 1,
         "--signal": 1,
+        "-f": 0,
         "--foreground": 0,
+        "-p": 0,
         "--preserve-status": 0,
+        "-v": 0,
+        "--verbose": 0,
         "--help": 0,
         "--version": 0,
     },
@@ -1818,6 +1831,15 @@ WRAPPER_OPTIONS = {
         "--stdin": 0,
         "-s": 0,
         "--shell": 0,
+        "-e": 0,
+        "--edit": 0,
+        "-l": 0,
+        "--list": 0,
+        "-N": 0,
+        "--no-update": 0,
+        "-V": 0,
+        "-v": 0,
+        "--validate": 0,
     },
     "xargs": {
         "-0": 0,
@@ -1844,6 +1866,10 @@ WRAPPER_OPTIONS = {
         "--interactive": 0,
         "-r": 0,
         "--no-run-if-empty": 0,
+        "-R": 1,
+        "-S": 1,
+        "-o": 0,
+        "--open-tty": 0,
         "-s": 1,
         "--max-chars": 1,
         "-t": 0,
@@ -1870,6 +1896,11 @@ def unwrap_wrapper_options(words, wrapper):
             for index in range(1, len(option)):
                 short_arity = options.get("-" + option[index])
                 if short_arity in (1, "optional"):
+                    if any(
+                        options.get("-" + letter) is None for letter in option[1:index]
+                    ):
+                        return [option, *words]
+                    name = "-" + option[index]
                     arity = short_arity
                     attached = option[index + 1 :]
                     break
