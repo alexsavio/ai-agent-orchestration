@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 cd "$ROOT"
+command -v node >/dev/null 2>&1 || { printf 'node not found; the to-do panel page logic tests need it\n' >&2; exit 1; }
 jobs=${ORCH_TEST_JOBS:-1}
 [ -n "${ORCH_TEST_JOBS:-}" ] || [ "${CI:-}" != true ] || jobs=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 1)
 if [ "$jobs" -gt 1 ] && parallel --version 2>/dev/null | grep -q '^GNU parallel'; then
@@ -11,9 +12,5 @@ else
   bats tests/
 fi
 python3 tests/guard-bash.test.py
-if command -v node >/dev/null 2>&1; then
-  node --test tests/todo-panel.test.js
-else
-  printf 'node not found; the to-do panel page logic tests did not run\n'
-fi
+node --test tests/todo-panel.test.js
 (cd coordinator/watchers && python3 run_tests.py)

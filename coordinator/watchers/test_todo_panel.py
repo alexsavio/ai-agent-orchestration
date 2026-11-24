@@ -128,6 +128,10 @@ class TodoPanelTests(IsolatedTestCase):
         self.assertIn("failed a1", out)
         self.assertIn("stale answer", out)
         self.assertEqual(a.records(), [])
+        self.assertIn(key, json.loads((self.dir / "errors.json").read_text()))
+        shown = self.items()
+        self.assertNotIn(key, [i["key"] for i in shown])
+        self.assertEqual([i["error"] for i in shown], [""] * len(shown))
 
     def test_unknown_key_is_rejected(self):
         self.items()

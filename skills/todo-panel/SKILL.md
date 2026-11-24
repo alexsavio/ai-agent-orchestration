@@ -29,7 +29,7 @@ If step 1 saved an answers file, run one Bash call on its own (no `&&`, `;` or p
 python3 ~/.claude/coordinator/todo-panel.py apply <saved answers.json path>
 ```
 
-It prints one line per answer: `queued`, `failed <reason>` or `skipped` (an id already applied; never queued twice). The reasons are kept and shown on the item at the next render. Apply uses the item's generation from the last render, so an item that changed since then fails with a stale reason instead of sending a wrong answer.
+It prints one line per answer: `queued`, `failed <reason>` or `skipped` (an id already applied; never queued twice). The reasons are kept and shown on the item at the next render. Apply uses the item's generation from the last render, so an item that changed since then fails with a stale reason instead of sending a wrong answer. The changed item has a new key, so the next render shows it without that reason; tell the user in your answer.
 
 ## 3. Render and publish
 

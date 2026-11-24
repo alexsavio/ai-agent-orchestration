@@ -127,7 +127,8 @@ Flow:
    as the label, as the view does). `apply` calls `answer_from_view` with the manifest
    generation, so an item that changed since the render is rejected as stale.
 4. A queued item is dismissed by the same call and is gone from the next render. A failed
-   answer keeps its reason, shown on the item after the next render. An answer id already
+   answer keeps its reason, shown on the item after the next render, except a stale one: the
+   changed item has a new key, so it comes back without the reason (apply prints it). An answer id already
    applied is skipped, never queued twice.
 5. `render` and a files publish with `answers.json: null` replace the panel data.
 
