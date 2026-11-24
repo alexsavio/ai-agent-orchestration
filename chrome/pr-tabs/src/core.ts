@@ -27,6 +27,7 @@ import type {
   PrState,
   PrStateName,
   RepoName,
+  RepoNumbers,
   RepoRules,
   Rules,
   SearchResult,
@@ -35,6 +36,9 @@ import type {
   TabChange,
   TabId,
   TabLike,
+  TabScan,
+  TabVisit,
+  TabVisits,
   UrlTab,
   WindowId,
 } from "#/types";
@@ -110,15 +114,35 @@ export function tabUpdateMatters(
   return isPrUrl(tab?.url) || knownPrTab;
 }
 
-// The PR a URL points at when it belongs to org, else null.
-export function parsePrUrl(url: string | null | undefined, org: OrgName | undefined): Pr | null {
+// Matches the configured owner or an explicitly listed repository.
+export function parsePrUrl(
+  url: string | null | undefined,
+  scope: OrgName | Pick<Rules, "org" | "repos"> | undefined,
+): Pr | null {
   const match = matchPrUrl(url);
 
-  if (!org || !match || match.number < 1 || match.owner.toLowerCase() !== org.toLowerCase()) {
+  if (!match || match.number < 1 || !repositoryInScope(match, scope)) {
     return null;
   }
 
-  return makePr(org, match.repo, match.number);
+  return makePr(match.owner, match.repo, match.number);
+}
+
+function repositoryInScope(
+  pr: PrRef,
+  scope: OrgName | Pick<Rules, "org" | "repos"> | undefined,
+): boolean {
+  const org = typeof scope === "string" ? scope : scope?.org;
+  if (pr.owner.toLowerCase() === org?.toLowerCase()) {
+    return true;
+  }
+
+  return (
+    typeof scope === "object" &&
+    Boolean(
+      scope.repos?.some((repo) => repo.toLowerCase() === `${pr.owner}/${pr.repo}`.toLowerCase()),
+    )
+  );
 }
 
 // Repos a bare number can go to: defaultRepo first, then rules.repos, without case-insensitive
@@ -147,8 +171,40 @@ export function pickedRepo(rules: RepoRules, stored?: RepoName): RepoName {
   return listedRepo(rules, stored) || effectiveRepos(rules)[0] || "";
 }
 
+const BARE_NUMBER = /^#?(\d{1,9})$/;
+
+export function bareNumber(input: string): PrNumber | null {
+  const match = BARE_NUMBER.exec(input.trim());
+  const number = Number(match?.[1]);
+
+  return number > 0 ? number : null;
+}
+
 export function isBareNumber(input: string): boolean {
-  return /^\d+$/.test(input.trim());
+  return bareNumber(input) !== null;
+}
+
+// Selected repo if newest >= target, else the smallest repo with newest >= target, else selected.
+export interface RepoSuggestion {
+  fallback: RepoName;
+  newest: RepoNumbers;
+}
+
+export function suggestedRepo(
+  repos: readonly RepoName[],
+  target: PrNumber,
+  { fallback, newest }: RepoSuggestion,
+): RepoName {
+  const newestOf = (repo: RepoName): number => newest[repo] ?? 0;
+  const fits = (repo: RepoName): boolean => newestOf(repo) >= target;
+
+  if (fits(fallback)) {
+    return fallback;
+  }
+
+  const [smallest] = repos.filter(fits).toSorted((a, b) => newestOf(a) - newestOf(b));
+
+  return smallest ?? fallback;
 }
 
 export const MAX_TARGETS = 20;
@@ -159,22 +215,30 @@ export function splitTargets(input: string | undefined): string[] {
   return [...new Set((input || "").split(/[\s,]+/).filter(Boolean))];
 }
 
-export function hasBareNumber(input: string): boolean {
-  return splitTargets(input).some(isBareNumber);
-}
-
-// The popup shows a repo dropdown only when there is a choice.
+// The popup offers repo options only when there is a choice.
 export function showRepoPicker(rules: RepoRules): boolean {
   return effectiveRepos(rules).length >= 2;
 }
 
-const BARE_NUMBER = /^#?(\d{1,9})$/;
-const REPO_NUMBER = /^([A-Za-z0-9_.-]{1,100})#(\d{1,9})$/;
+const REPO_NUMBER = /^(?:([A-Za-z0-9-]{1,39})\/)?([A-Za-z0-9_.-]{1,100})#(\d{1,9})$/;
 
 function prIn(org: OrgName, repo: RepoName | null, digits: string | undefined): Pr | null {
   const number = Number(digits);
 
-  return repo && number > 0 ? makePr(org, repo, number) : null;
+  const [owner, name] = repo?.includes("/") ? repo.split("/") : [org, repo];
+
+  return owner && name && number > 0 ? makePr(owner, name, number) : null;
+}
+
+function isTarget(text: string): boolean {
+  return BARE_NUMBER.test(text) || REPO_NUMBER.test(text) || isPrUrl(text);
+}
+
+// Input the popup opens rather than searches: PR numbers, <repo>#<number> or PR URLs.
+export function isGoToInput(input: string): boolean {
+  const targets = splitTargets(input);
+
+  return targets.length > 0 && targets.every(isTarget);
 }
 
 // The PR named by popup input: a number (#123 or 123) in the picked repo (default: pickedRepo),
@@ -199,10 +263,14 @@ export function parseTarget(
   const named = REPO_NUMBER.exec(text);
 
   if (named) {
-    return prIn(rules.org, listedRepo(rules, named[1]), named[2]);
+    return prIn(
+      rules.org,
+      listedRepo(rules, named[1] ? `${named[1]}/${named[2]}` : named[2]),
+      named[3],
+    );
   }
 
-  return parsePrUrl(text, rules.org);
+  return parsePrUrl(text, rules);
 }
 
 // The open tab for key, preferring one in the focused window.
@@ -263,28 +331,48 @@ export function isGroupColor(name: string | undefined): name is GroupColor {
   return GROUP_COLORS.some((color) => color === name);
 }
 
-// FNV-1a over the group name, independent of tab order and ownership refreshes.
-export function groupColor(name: GroupTitle): GroupColor {
-  let hash = 2166136261;
-
-  for (const char of name) {
-    hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 16777619) >>> 0;
-  }
-
-  return GROUP_COLORS[hash % GROUP_COLORS.length] ?? "grey";
+function leastUsedColor(uses: Map<GroupColor, number>): GroupColor {
+  return GROUP_COLORS.toSorted((a, b) => (uses.get(a) ?? 0) - (uses.get(b) ?? 0))[0] ?? "grey";
 }
 
-export function groupForPr(owners: Owners, pr: PrBranch): GroupPlacement {
+export function allocateGroupColors(
+  names: readonly GroupTitle[],
+  previous: Record<GroupTitle, GroupColor>,
+): Record<GroupTitle, GroupColor> {
+  const next = new Map<GroupTitle, GroupColor>();
+  const unique = [...new Set(names)].toSorted();
+  const uses = new Map(GROUP_COLORS.map((color) => [color, 0]));
+
+  for (const name of unique) {
+    const color = previous[name];
+    if (color && isGroupColor(color)) {
+      next.set(name, color);
+      uses.set(color, (uses.get(color) ?? 0) + 1);
+    }
+  }
+  for (const name of unique) {
+    if (next.has(name)) {
+      continue;
+    }
+    const color = leastUsedColor(uses);
+    next.set(name, color);
+    uses.set(color, (uses.get(color) ?? 0) + 1);
+  }
+
+  return Object.fromEntries(next);
+}
+
+export function groupForPr(owners: Owners, pr: PrBranch): Pick<GroupPlacement, "name"> {
   const { owner, repo, number, branch = "", headRepository } = pr;
   const repository = (headRepository?.nameWithOwner || `${owner}/${repo}`).toLowerCase();
   const statusKey = (`${owner}/${repo}`.toLowerCase() + `#${number}`) as PrKey;
   const name =
     (headRepository !== null && owners[`${repository}:${branch}`]) || owners[statusKey] || repo;
 
-  return { name, color: groupColor(name) };
+  return { name };
 }
 
-// A PR tab closes once its PR is merged or closed, unless it is the tab in view.
+// A PR tab may close once its PR is merged or closed, unless it is the tab in view.
 export function shouldClose(tab: Pick<TabLike, "active">, state: PrStateName | undefined): boolean {
   return (state === "MERGED" || state === "CLOSED") && !tab.active;
 }
@@ -293,15 +381,74 @@ export function shouldClose(tab: Pick<TabLike, "active">, state: PrStateName | u
 export function stillShowsPr(
   tab: UrlTab | null | undefined,
   key: PrKey | undefined,
-  org: OrgName,
+  org: OrgName | Pick<Rules, "org" | "repos">,
 ): boolean {
   return parsePrUrl(tab?.url, org)?.key === key;
 }
 
-export function tabsToClose(entries: Entry[], states: States): TabId[] {
+export function closedDuringVisit(
+  state: PrState | null | undefined,
+  visit: TabVisit | undefined,
+  key: PrKey,
+): boolean {
+  const closedAt = Date.parse(state?.closedAt ?? "");
+
+  return visit?.key === key && closedAt > visit.since;
+}
+
+export function tabsToClose(entries: Entry[], states: States, visits: TabVisits): TabId[] {
   return entries
-    .filter((entry) => shouldClose(entry.tab, states[entry.pr.key]?.state))
+    .filter((entry) => {
+      const state = states[entry.pr.key];
+
+      return (
+        shouldClose(entry.tab, state?.state) &&
+        closedDuringVisit(state, visits[entry.tab.id], entry.pr.key)
+      );
+    })
     .map((entry) => entry.tab.id);
+}
+
+// Merges a tab scan: a visit newer than the scan wins, a scanned tab keeps a visit on its PR or
+// starts one at now, a moved tab keeps its visit, and an older visit of a tab not found is dropped.
+export function recordVisits(visits: TabVisits, scan: TabScan, now: number): TabVisits {
+  const { entries, scannedAt, moved } = scan;
+  const scanned = new Map(entries.map((entry) => [entry.tab.id, entry.pr.key]));
+  const found = new Set([...scanned.keys(), ...moved]);
+  const next: TabVisits = {};
+
+  for (const [id, visit] of visitsOf(visits)) {
+    if (found.has(id) || visit.since >= scannedAt) {
+      next[id] = visit;
+    }
+  }
+
+  for (const [id, key] of scanned) {
+    const visit = next[id];
+
+    if (!visit || (visit.key !== key && visit.since < scannedAt)) {
+      next[id] = { key, since: now };
+    }
+  }
+
+  return next;
+}
+
+// A tab that moves to another PR starts the given visit; one that leaves PRs has none.
+export function navigateVisit(visits: TabVisits, id: TabId, visit: TabVisit | null): TabVisits {
+  const next = { ...visits };
+
+  if (visit === null) {
+    delete next[id];
+  } else if (next[id]?.key !== visit.key) {
+    next[id] = visit;
+  }
+
+  return next;
+}
+
+function visitsOf(visits: TabVisits): [TabId, TabVisit][] {
+  return Object.entries(visits).flatMap(([id, visit]) => (visit ? [[Number(id), visit]] : []));
 }
 
 function keysOf(record: Partial<Record<PrKey, unknown>>): PrKey[] {
