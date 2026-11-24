@@ -39,6 +39,19 @@ class PrsWatchTests(IsolatedTestCase):
                     finished.append(True)
         self.assertEqual(finished, [True])
 
+    def test_nested_deadline_stops_at_an_outer_deadline_the_wall_clock_passed(self):
+        class Outer(BaseException):
+            pass
+
+        real = time.time
+        started = time.monotonic()
+        with self.assertRaises(Outer):
+            with github_poll.call_deadline(5, expired_error=Outer):
+                with patch.object(time, "time", lambda: real() + 100):
+                    with github_poll.call_deadline(1.0):
+                        time.sleep(0.6)
+        self.assertLess(time.monotonic() - started, 0.5)
+
     def assert_outer_remaining_follows(self, clock):
         with github_poll.call_deadline(10):
             remaining = signal.getsignal(signal.SIGALRM).remaining

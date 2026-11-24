@@ -160,8 +160,8 @@ def call_deadline(seconds, *, expired_error=_Expired):
     previous_timer = signal.getitimer(signal.ITIMER_REAL)
     started = time.time()
     outer_left = getattr(previous_handler, "remaining", None)
-    left = outer_left() if outer_left and previous_timer[0] else previous_timer[0]
-    inherited = 0 < left <= seconds
+    left = outer_left() if outer_left else previous_timer[0]
+    inherited = previous_timer[0] > 0 and left <= seconds
     inherited_fired = False
     duration = left if inherited else seconds
     expires = started + duration
