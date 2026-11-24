@@ -209,6 +209,15 @@ class ReusedPidTests(IsolatedTestCase):
         self.assertEqual(len(self.lines()), 1)
         self.assertEqual(self.lines(), [])
 
+    def test_live_pid_with_non_object_session_file_alerts_once(self):
+        self.alive = True
+        for payload in ("[]", "null"):
+            with self.subTest(payload=payload):
+                self.cursor.clear()
+                (self.sessions / "1234.json").write_text(payload)
+                self.assertEqual(len(self.lines()), 1)
+                self.assertEqual(self.lines(), [])
+
     def test_each_session_field_mismatch_makes_a_live_binding_stale(self):
         self.alive = True
         for field in ("procStart", "messagingSocketPath"):

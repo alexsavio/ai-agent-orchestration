@@ -104,6 +104,8 @@ def owns_session(value):
     session = json.loads(
         (Path.home() / ".claude/sessions" / f"{int(value['pid'])}.json").read_text()
     )
+    if not isinstance(session, dict):
+        raise ValueError("session file is not an object")
     if (
         value["session_id"] != session.get("sessionId")
         or value["proc_start"] != session.get("procStart")
