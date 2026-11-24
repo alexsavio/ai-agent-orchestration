@@ -53,6 +53,10 @@ class TodoAnswerTests(IsolatedTestCase):
                 a.submit(OWNER, TEXT, text)
         a.submit(OWNER, TEXT, "x" * 512)
 
+    def test_architect_name_with_colon_space_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "invalid architect name"):
+            a.submit("Architect: Ops", TEXT, "now")
+
     def test_one_pending_answer_per_item(self):
         a.submit(OWNER, TEXT, "now")
         with self.assertRaisesRegex(ValueError, "already queued"):

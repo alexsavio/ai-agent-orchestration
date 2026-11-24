@@ -212,7 +212,7 @@ def submit_locked(owner, text, answer, generation, existing):
     """Caller holds the queue lock; prune before acquiring a to-do state lock."""
     from watchers import todo_module
 
-    if not owner or Path(owner).name != owner or owner in (".", ".."):
+    if not owner or Path(owner).name != owner or owner in (".", "..") or ": " in owner:
         raise ValueError("invalid architect name")
     if not choices(text):
         raise ValueError("this item has no valid choices")
