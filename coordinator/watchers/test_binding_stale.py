@@ -193,8 +193,9 @@ class ReusedPidTests(IsolatedTestCase):
         self.assertEqual(self.lines(), [])
 
     def test_live_pid_with_matching_session_is_not_stale(self):
-        self.alive = True
         self.write_session()
+        self.assertEqual(len(self.lines()), 1)
+        self.alive = True
         self.assertEqual(self.lines(), [])
         self.assertNotIn("stale_bindings", self.cursor)
 
