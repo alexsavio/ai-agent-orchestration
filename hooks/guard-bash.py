@@ -2119,6 +2119,14 @@ HERDR_PAIRS = (
     ("pane", "send-text"),
 )
 CURSOR_REASON = "Cursor starts only through ~/.claude/coordinator/cursor-start.sh <name> <pane> <worker|smart>; the provider and model come from settings."
+AGY_REASON = "agy (Gemini) starts only through ~/.claude/coordinator/gemini-start.sh; a raw agy start, or an agy bypass flag, is denied."
+AGY_INFO_ARGS = {"--version", "-v", "--help", "-h", "help", "models"}
+AGY_BYPASS_FLAGS = (
+    "--dangerously-skip-permissions",
+    "--remote-agent",
+    "--remote-control",
+)
+AGY_PROMPT = re.compile(r"\s*agy(?:\s|$)")
 PI_INFO_FLAGS = {"--list-models", "--help", "-h", "--version", "-v"}
 
 
@@ -2145,6 +2153,10 @@ def pi_kind(args):
 
 def guard_pi(executable, args, where=".", disabled=()):
     """Enforce the pi and Cursor launchers and model restrictions on agent starts."""
+    if executable == "agy":
+        if any(a.split("=", 1)[0] in AGY_BYPASS_FLAGS for a in args):
+            return AGY_REASON
+        return None if args[:1] and args[0] in AGY_INFO_ARGS else AGY_REASON
     if executable in ("cursor-agent", "agent"):
         return None if pi_info(args) else CURSOR_REASON
     if executable == "cursor":
@@ -2158,6 +2170,8 @@ def guard_pi(executable, args, where=".", disabled=()):
             kinds = pi_kind(args)
             if "cursor" in kinds:
                 return CURSOR_REASON
+            if "agy" in kinds or "gemini" in kinds:
+                return AGY_REASON
             agent_args = rest[rest.index("--") + 1 :] if "--" in rest else []
             if "codex" in kinds and (
                 codex_widened(agent_args)
@@ -2182,8 +2196,11 @@ def guard_pi(executable, args, where=".", disabled=()):
             return evaluate(text, where, disabled) or guard_pi_text(
                 text, where, disabled, 0, strict=True
             )
-        elif pair == ("agent", "prompt") and MODEL_COMMAND.match(text):
-            return PI_REASON
+        elif pair == ("agent", "prompt"):
+            if MODEL_COMMAND.match(text):
+                return PI_REASON
+            if AGY_PROMPT.match(text):
+                return AGY_REASON
     elif not pi_info(args):
         names_model = any(
             a in ("--provider", "--model") or a.startswith(("--provider=", "--model="))
@@ -2210,7 +2227,7 @@ def pi_candidates(words, wrapped):
         for candidate in found
         if candidate
         and os.path.basename(candidate[0])
-        in ("herdr", "pi", "cursor", "cursor-agent", "agent")
+        in ("herdr", "pi", "cursor", "cursor-agent", "agent", "agy")
     ]
 
 
@@ -2263,6 +2280,7 @@ def guard_pi_text(text, where, disabled, depth, direct=True, strict=False):
 GUARDED_EXECUTABLES = {
     "herdr",
     "pi",
+    "agy",
     "git",
     "gh",
     "pkill",
@@ -2313,7 +2331,7 @@ def evaluate_words(words, where, command, disabled, pipeline):
             return GITHUB_WRITE_OPTION_REASON
         args = unwrap_gh(wrapped_args)
         guards = (guard_attribution,)
-    elif executable in ("herdr", "pi", "cursor", "cursor-agent", "agent"):
+    elif executable in ("herdr", "pi", "cursor", "cursor-agent", "agent", "agy"):
         return (
             None
             if "guard_pi" in disabled

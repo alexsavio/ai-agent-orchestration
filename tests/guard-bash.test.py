@@ -3126,6 +3126,112 @@ pkill -f vite
                 f"cursor pane command position {wrapper}{command}",
                 f"herdr pane run w1:p2 '{wrapper}{command}'",
             )
+    for kind in ("agy", "gemini"):
+        for name, command in [
+            ("start", f"herdr agent start w --kind {kind} --pane w1:p2 -- --model m"),
+            ("equals kind", f"herdr agent start w --kind={kind} --pane w1:p2"),
+            (
+                "upper trimmed kind",
+                f"herdr agent start w --kind ' {kind.upper()} ' --pane w1:p2",
+            ),
+            ("quoted kind", f"herdr agent start w --kind '{kind}' --pane w1:p2"),
+            (
+                "herdr by path",
+                f"/opt/bin/herdr agent start w --kind {kind} --pane w1:p2",
+            ),
+            (
+                "wrapped",
+                f"env FOO=1 herdr --socket /tmp/s agent start w --kind {kind} --pane p",
+            ),
+            ("bash -c", f"bash -c 'herdr agent start w --kind {kind} --pane p'"),
+            ("sh -c", f"sh -c 'herdr agent start w --kind {kind} --pane p'"),
+            ("eval", f"eval 'herdr agent start w --kind {kind} --pane p'"),
+            ("chain", f"true && herdr agent start w --kind {kind} --pane p"),
+            ("pipe", f"echo x | herdr agent start w --kind {kind} --pane p"),
+            (
+                "heredoc into bash",
+                f"bash <<'EOF'\nherdr agent start w --kind {kind} --pane p\nEOF",
+            ),
+            (
+                "redirect after herdr",
+                f"herdr >/dev/null agent start x --kind {kind} --pane p",
+            ),
+            (
+                "redirect inside the verb",
+                f"herdr agent 2>/dev/null start x --kind {kind} --pane p",
+            ),
+            (
+                "via pane run",
+                f"herdr pane run w1:p2 'herdr agent start w --kind {kind} --pane p3'",
+            ),
+            (
+                "lookup then start",
+                f"command -v herdr && herdr agent start x --kind {kind} --pane p",
+            ),
+        ]:
+            case(f"agy {kind} {name}", command, True)
+    for name, command in [
+        ("bare agy", "agy"),
+        ("agy with a prompt", "agy -p hi"),
+        ("agy with a model", "agy --model m --mode auto"),
+        ("agy by path", "/opt/bin/agy --model m"),
+        ("agy wrapped", "env FOO=1 agy --model m"),
+        ("agy command", "command agy --model m"),
+        ("agy exec", "exec agy --model m"),
+        ("agy behind an unparsed env option", "env -S 'x' agy --model m"),
+        ("agy behind an unparsed sudo option", "sudo --foo bar agy --model m"),
+        ("agy bash -c", "bash -c 'agy --model m'"),
+        ("agy eval", "eval 'agy --model m'"),
+        ("agy pipe", "echo x | agy --model m"),
+        ("agy redirect first", ">/dev/null agy --model m"),
+        ("agy redirect after the name", "agy >/dev/null --model m"),
+        ("agy lookup then run", "command -v agy && agy --model m"),
+        ("agy skip permissions", "agy --dangerously-skip-permissions"),
+        ("agy remote agent", "agy --remote-agent"),
+        ("agy remote control", "agy --remote-control"),
+        ("agy remote control value", "agy --remote-control=1"),
+        (
+            "agy version with a bypass flag",
+            "agy --version --dangerously-skip-permissions",
+        ),
+        ("agy models with a bypass flag", "agy models --remote-agent"),
+        ("agy models with a valued bypass flag", "agy models --remote-agent=1"),
+        ("agy help with a bypass flag", "agy help --remote-control"),
+        ("agy version as a later argument", "agy --model m --version"),
+        ("pane run agy", "herdr pane run w1:p2 'agy --model m'"),
+        ("pane send-text agy", "herdr pane send-text w1:p2 'agy --model m'"),
+        (
+            "pane run agy bypass",
+            "herdr pane run w1:p2 'agy --dangerously-skip-permissions'",
+        ),
+        ("pane run agy in bash -c", "herdr pane run w1:p2 'bash -c \"agy -p x\"'"),
+        (
+            "pane run agy start",
+            "herdr pane run w1:p2 'herdr agent start w --kind agy --pane p'",
+        ),
+        ("prompt starting agy", "herdr agent prompt w 'agy --model m'"),
+        ("prompt starting agy after a space", "herdr agent prompt w '  agy'"),
+    ]:
+        case(name, command, True)
+    for command in (
+        "command -v agy",
+        "command -V agy",
+        "command -v agy >/dev/null 2>&1",
+        "if command -v agy >/dev/null 2>&1; then echo y; fi",
+        "agy --version",
+        "agy -v",
+        "agy --help",
+        "agy -h",
+        "agy help",
+        "agy models",
+        "/opt/bin/agy models",
+        "herdr pane run w1:p2 'agy --version'",
+        "herdr agent prompt w 'use agy for this'",
+        "herdr agent start w --kind claude --pane w1:p2",
+        "echo agy",
+        "~/.claude/coordinator/gemini-start.sh w p worker",
+    ):
+        case(f"allowed agy {command}", command)
     for name, command in [
         (
             "cursor start",
