@@ -2385,6 +2385,8 @@ def evaluate(command, cwd, disabled=()):
         for words, where, pipeline in commands(normalized_command, cwd):
             # Familiar wrappers may have incomplete option parsing. Inspect every later
             # guarded executable too, so a leftover option value cannot hide a command.
+            # A later agy or pi word that is an argument of grep, echo, printf, ps or
+            # pgrep is skipped.
             words, wrapped = unwrap(words, lookup_ok)
             if not words:
                 continue

@@ -3276,6 +3276,7 @@ pkill -f vite
         "xargs echo agy",
         "timeout 5 pgrep -fl agy",
         "timeout 30 grep -rn agy hooks/",
+        "timeout 30 grep -rn pi hooks/",
         "env -S 'grep -c' agy docs/bash-guard.md",
         "x=$(timeout 5 grep -c agy docs/bash-guard.md)",
         "nice ps -p agy",
