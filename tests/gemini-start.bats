@@ -51,6 +51,14 @@ teardown() {
   [ ! -e "$HERDR_CALLS" ]
 }
 
+@test "placeholder models with gemini listed are refused" {
+  printf '[providers]\nenabled = ["claude", "gemini"]\n[models]\ngemini_worker = "<gemini-worker-model>"\ngemini_smart = "<gemini-smart-model>"\n' >"$ORCH_CONFIG"
+  run "$SCRIPT" w1 pane1 worker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gemini is not configured"* ]] || false
+  [ ! -e "$HERDR_CALLS" ]
+}
+
 @test "extra args cannot change the model or mode" {
   for arg in --model --model=x --mode --mode=plan --dangerously-skip-permissions --remote-agent --remote-control --sandbox --continue --conversation --settings --unknown; do
     run "$SCRIPT" w1 pane1 worker "$arg"
