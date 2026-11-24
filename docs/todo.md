@@ -73,13 +73,15 @@ delivered records are retained for the retention window to prevent a second stal
 from submitting the same item again. The ordinary dismissal state preserves
 removal after that window.
 
-An answer with no `delivered_at` shows in the buttons view as its own row: the
-architect, the item, your answer, "not delivered yet" with the queue time, and the
-`failure` reason when the record has one. It disappears once delivered. Select it
-and press **c** (or click **Cancel answer**) to remove the record and bring the
-item back unanswered; an answer delivered in the meantime stays. On that row
-**d**, **r**, **a** and **Enter** do not act; the status line points to **c**. The
-`--follow` list shows one line per undelivered answer, with no cancel.
+A queued answer that is not delivered and not discarded shows in the buttons view
+as its own row: the architect, the item, your answer, "not delivered yet" with the
+queue time, and the `failure` reason when the record has one. It disappears once
+delivered. If its status item changes or goes away first, the record is marked
+discarded and the row leaves without a delivery. Select it and press **c** (or
+click **Cancel answer**) to remove the record and bring the item back unanswered;
+an answer delivered in the meantime stays. On that row **d**, **r**, **a** and
+**Enter** do not act; the status line points to **c**. The `--follow` list shows
+one line per undelivered, non-discarded answer, with no cancel.
 
 Undelivered answers retry through the same notifier after its outbox retention window.
 A status-item change includes a new `first_seen` generation when an identical line

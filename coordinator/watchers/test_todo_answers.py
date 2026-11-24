@@ -370,7 +370,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertIn("a answer selected item", buffer.getvalue().split("\x1b[2J")[1])
 
     def test_legacy_list_answers_choice_and_free_text(self):
-        import contextlib
         import io
 
         module = w.todo_module()

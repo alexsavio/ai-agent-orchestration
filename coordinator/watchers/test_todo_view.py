@@ -310,7 +310,7 @@ class ClickTest(ViewCase):
         )
         self.assertIn("Dismiss", self.plain(lines)[by_action["dismiss"] - 1])
 
-    def test_two_actions_and_the_toggle_are_reachable(self):
+    def test_the_actions_and_the_toggle_are_reachable(self):
         _lines, hits = self.layout(80)
         self.assertEqual(
             {action for _l, _f, _t, action, _i in hits if _i == 0},
