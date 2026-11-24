@@ -100,17 +100,22 @@ def binding_data(path):
     return value
 
 
-def binding(path):
-    value = binding_data(path)
-    pid = int(value["pid"])
-    os.kill(pid, 0)
-    session = json.loads((Path.home() / ".claude/sessions" / f"{pid}.json").read_text())
+def owns_session(value):
+    session = json.loads(
+        (Path.home() / ".claude/sessions" / f"{int(value['pid'])}.json").read_text()
+    )
     if (
         value["session_id"] != session.get("sessionId")
         or value["proc_start"] != session.get("procStart")
         or value["socket"] != session.get("messagingSocketPath")
     ):
         raise ValueError("session binding changed; owner must rebind")
+
+
+def binding(path):
+    value = binding_data(path)
+    os.kill(int(value["pid"]), 0)
+    owns_session(value)
     return Path(value["socket"]), value["token"]
 
 
@@ -131,7 +136,8 @@ def stale_binding_alerts(args, cursor):
             value = binding_data(path)
             try:
                 os.kill(int(value["pid"]), 0)
-            except ProcessLookupError:
+                owns_session(value)
+            except (ProcessLookupError, ValueError, FileNotFoundError):
                 fingerprint = hashlib.sha256(
                     json.dumps(value, sort_keys=True).encode()
                 ).hexdigest()
