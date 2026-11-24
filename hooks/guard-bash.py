@@ -2299,16 +2299,15 @@ GUARDED_EXECUTABLES = {
 
 
 SHELL_KEYWORDS = {"then", "do", "else", "elif", "{", "}", "!"}
-PLAIN_PROGRAMS = {"grep", "echo", "printf", "ps", "pgrep", "rg"}
+PLAIN_PROGRAMS = {"grep", "echo", "printf", "ps", "pgrep"}
 
 
 def argument_word(words, index):
-    """True when a later `agy` or `pi` word is an argument of a program that does not run its arguments (`timeout 30 rg -n agy hooks/`), not a command: no shell keyword stands between, and `rg` has no `--pre`."""
+    """True when a later `agy` or `pi` word is an argument of a program that does not run its arguments (`timeout 30 rg -n agy hooks/`), not a command: no shell keyword stands between."""
     return (
         os.path.basename(words[index]) in ("agy", "pi")
         and os.path.basename(words[0]) in PLAIN_PROGRAMS
         and not SHELL_KEYWORDS & set(words[1:index])
-        and not any(word.startswith("--pre") for word in words[1:])
     )
 
 
