@@ -1907,6 +1907,12 @@ pkill -f vite
         assert result.returncode == 2, (result, elapsed)
         assert elapsed < 1, f"128000 option letters {name} took {elapsed:.3f}s"
         print(f"128000 option letters {name} before a push: {elapsed:.3f}s")
+    start = time.perf_counter()
+    result = hook("timeout 5 echo" + " agy" * 32000, scripts, timeout=1)
+    elapsed = time.perf_counter() - start
+    assert result.returncode == 0, (result, elapsed)
+    assert elapsed < 1, f"32000 agy arguments took {elapsed:.3f}s"
+    print(f"32000 agy arguments after a wrapper: {elapsed:.3f}s")
     started = time.perf_counter()
     log_path = Path.home() / ".claude/hooks/guard-bash.log"
     assert not guard.evaluate(f"bash {scripts}/fan.sh", repo)
@@ -3184,6 +3190,19 @@ pkill -f vite
         ("agy behind nice", "nice agy -p hi"),
         ("agy behind env", "env agy -p hi"),
         ("agy behind xargs", "xargs agy"),
+        ("agy behind xargs -tI", "xargs -tI grep agy -p hi"),
+        ("agy behind xargs -0I", "xargs -0I grep agy -p hi"),
+        ("agy behind timeout xargs -tI", "timeout 5 xargs -tI grep agy -p hi"),
+        ("agy behind exec -ca", "exec -ca grep agy -p hi"),
+        ("agy behind env -iu", "env -iu grep agy -p hi"),
+        ("agy behind env -vu", "env -vu grep agy -p hi"),
+        ("agy behind env time -ao", "env time -ao grep agy -p hi"),
+        ("agy behind time -ao", "time -ao grep agy -p hi"),
+        ("agy behind sudo -np", "sudo -np grep agy -p hi"),
+        ("agy behind xargs -J", "xargs -J grep agy -p hi"),
+        ("agy behind nice xargs -J", "nice -n 5 xargs -J grep agy -p hi"),
+        ("agy behind sudo -R", "sudo -R grep agy -p hi"),
+        ("agy behind sudo --chroot", "sudo --chroot grep agy -p hi"),
         ("agy run by find -exec", "timeout 5 find . -exec agy -p x \\;"),
         ("agy run by fd -x", "timeout 5 fd -x agy"),
         ("agy run by rg --pre", "timeout 5 rg --pre agy x f"),
@@ -3194,6 +3213,10 @@ pkill -f vite
         ("pi word behind timeout rg", "timeout 30 rg -n pi hooks/"),
         ("git grep for agy under env", "env FOO=1 git log --grep agy"),
         ("agy after a shell keyword", "if { command -v git } then agy -p x; fi"),
+        (
+            "agy after a zsh always block",
+            "{ timeout 5 grep -q x /dev/null } always { agy -p hi }",
+        ),
         (
             "agy version with a single-dash bypass flag",
             "agy --version -dangerously-skip-permissions",
@@ -3252,6 +3275,9 @@ pkill -f vite
         "env LC_ALL=C grep -rn agy docs/",
         "xargs echo agy",
         "timeout 5 pgrep -fl agy",
+        "timeout 30 grep -rn agy hooks/",
+        "env -S 'grep -c' agy docs/bash-guard.md",
+        "x=$(timeout 5 grep -c agy docs/bash-guard.md)",
         "nice ps -p agy",
         "time printf '%s\\n' agy",
         "timeout 5 grep -c agy docs/bash-guard.md",

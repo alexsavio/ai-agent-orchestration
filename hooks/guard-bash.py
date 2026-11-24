@@ -1780,6 +1780,8 @@ WRAPPER_OPTIONS = {
         "--close-from": 1,
         "-D": 1,
         "--chdir": 1,
+        "-R": 1,
+        "--chroot": 1,
         "-h": 1,
         "--host": 1,
         "-p": 1,
@@ -1829,6 +1831,7 @@ WRAPPER_OPTIONS = {
         "-e": "optional",
         "-I": 1,
         "--replace": 1,
+        "-J": 1,
         "-i": "optional",
         "-L": 1,
         "--max-lines": 1,
@@ -1863,17 +1866,13 @@ def unwrap_wrapper_options(words, wrapper):
             break
         name, equals, attached = option.partition("=")
         arity = options.get(name)
-        if arity is None and not equals:
-            for short, short_arity in options.items():
-                if (
-                    short.startswith("--")
-                    or not option.startswith(short)
-                    or len(option) == len(short)
-                ):
-                    continue
-                arity = short_arity
-                attached = option[len(short) :]
-                break
+        if arity is None and not equals and not option.startswith("--"):
+            for index in range(1, len(option)):
+                short_arity = options.get("-" + option[index])
+                if short_arity in (1, "optional"):
+                    arity = short_arity
+                    attached = option[index + 1 :]
+                    break
         if arity is None:
             continue
         if arity == 1:
@@ -2302,12 +2301,12 @@ SHELL_KEYWORDS = {"then", "do", "else", "elif", "{", "}", "!"}
 PLAIN_PROGRAMS = {"grep", "echo", "printf", "ps", "pgrep"}
 
 
-def argument_word(words, index):
-    """True when a later `agy` or `pi` word is an argument of a program that does not run its arguments (`timeout 30 rg -n agy hooks/`), not a command: no shell keyword stands between."""
+def argument_word(words, index, keyword):
+    """True when a later `agy` or `pi` word is an argument of a program that does not run its arguments (`timeout 30 grep -rn agy hooks/`), not a command: no shell keyword stands before it. `keyword` is the index of the first shell keyword after the first word, or len(words)."""
     return (
-        os.path.basename(words[index]) in ("agy", "pi")
+        index < keyword
+        and os.path.basename(words[index]) in ("agy", "pi")
         and os.path.basename(words[0]) in PLAIN_PROGRAMS
-        and not SHELL_KEYWORDS & set(words[1:index])
     )
 
 
@@ -2391,11 +2390,15 @@ def evaluate(command, cwd, disabled=()):
                 continue
             candidates = [words]
             if wrapped:
+                keyword = next(
+                    (i for i, w in enumerate(words) if i and w in SHELL_KEYWORDS),
+                    len(words),
+                )
                 candidates += [
                     words[index:]
                     for index, word in enumerate(words)
                     if os.path.basename(word) in GUARDED_EXECUTABLES
-                    and not argument_word(words, index)
+                    and not argument_word(words, index, keyword)
                 ]
             for candidate in candidates:
                 reason = evaluate_words(
