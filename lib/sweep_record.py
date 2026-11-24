@@ -682,6 +682,247 @@ def transcript_problem(
     return newest_problem
 
 
+MARKER = "<!-- orch-sweep v1 -->"
+GATE_PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
+GH_TIMEOUT = 45
+
+
+def gate_git(*args, ancestor=False):
+    try:
+        done = subprocess.run(
+            [GIT, *git_config(), *args],
+            capture_output=True,
+            env=GIT_ENV,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise GateError(f"git {' '.join(args)}: {error}") from error
+    if ancestor and done.returncode == 1:
+        return False
+    if done.returncode:
+        raise GateError(f"git {' '.join(args)} failed: {done.stderr.strip()}")
+    return done.stdout
+
+
+def gate_since(base, head):
+    for commit in (base, head):
+        gate_git("rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}")
+    if gate_git("merge-base", "--is-ancestor", base, head, ancestor=True) is False:
+        return f"base {base} is not an ancestor of the swept {head}"
+    gate_git("log", "--oneline", f"{head}..{head}")
+    return None
+
+
+def comment_record(body):
+    """The orch-sweep record in a sweep comment, else None."""
+    if MARKER not in body:
+        return None
+    block = re.search(r"<!-- orch-sweep-record\n(.*?)\n-->", body, re.S)
+    if not block:
+        block = re.search(r"```json\n(.*?)\n```", body, re.S)
+    try:
+        record = json.loads(block.group(1)) if block else None
+    except ValueError:
+        return None
+    if not isinstance(record, dict) or record.get("tool") != "orch-sweep":
+        return None
+    return record
+
+
+class GateError(Exception):
+    """A gate that cannot read GitHub, Git or its settings."""
+
+
+def gh_json(*args):
+    try:
+        done = subprocess.run(
+            ["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        raise GateError(f"gh {' '.join(args)} timed out after {GH_TIMEOUT}s") from None
+    except OSError as error:
+        raise GateError(f"cannot run gh: {error}") from error
+    if done.returncode:
+        tail = done.stderr.strip().splitlines()[-1:] or [""]
+        raise GateError(f"gh {' '.join(args)} failed: {tail[0]}")
+    try:
+        return json.loads(done.stdout)
+    except ValueError as error:
+        raise GateError(f"gh {' '.join(args)}: not JSON: {error}") from error
+
+
+def record_problem(record, head):
+    """Why a published record fails schema validation, else None."""
+    with tempfile.TemporaryDirectory(prefix="orch-gate-") as scratch:
+        path = Path(scratch, "record.json")
+        path.write_text(json.dumps(record))
+        why, _ = problem(str(path), head)
+    if why:
+        return (
+            f"the {record.get('kind')} sweep record of {head}: {why.split(': ', 1)[1]}"
+        )
+    if record["slices"] > 25:
+        return f"{record['slices']} slices pass the limit of 25"
+    return None
+
+
+def finalize_enabled(repo, base):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import orch_settings
+
+    if "ORCH_REVIEW_FINALIZE_COMMANDS" in os.environ:
+        return bool(os.environ["ORCH_REVIEW_FINALIZE_COMMANDS"])
+    if not isinstance(base, str) or not SHA.fullmatch(base):
+        raise GateError("the PR response has no valid base.sha")
+    listed = gate_git("ls-tree", "--name-only", base, "--", orch_settings.REPO_FILE)
+    text = (
+        gate_git("show", f"{base}:{orch_settings.REPO_FILE}") if listed.strip() else ""
+    )
+    try:
+        return bool(
+            orch_settings.load_remote(repo, base, text)["ORCH_REVIEW_FINALIZE_COMMANDS"]
+        )
+    except (orch_settings.ConfigError, OSError) as error:
+        raise GateError(f"cannot read finalize settings: {error}") from error
+
+
+def pr_merge_base(base, head):
+    if not isinstance(base, str) or not SHA.fullmatch(base):
+        raise GateError("the PR response has no valid base.sha")
+    if gate_git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}") is None:
+        raise GateError(f"git cannot resolve live base {base}; fetch the base branch")
+    found = gate_git("merge-base", base, head)
+    if not found:
+        raise GateError(
+            f"git cannot find the merge base of live base {base} and {head}"
+        )
+    return found.strip()
+
+
+def review_disputes(body):
+    """Scoped disputes in visible prose, excluding comments, quotations and fenced examples."""
+    body = re.sub(r"<!--.*?(?:-->|$)", "", body or "", flags=re.S)
+    disputes, fence, quoted = set(), None, False
+    for line in body.splitlines():
+        listed = re.match(r"^\s*(?:[-+*]|[0-9]+[.)])\s+", line)
+        line = re.sub(r"^\s*(?:[-+*]|[0-9]+[.)])\s+", "", line).lstrip()
+        if not line:
+            quoted = False
+        if line.startswith(">"):
+            if not fence:
+                quoted = True
+            continue
+        if not fence and quoted:
+            if not listed and not re.match(r"^(?:#{1,6}\s|`{3,}|~{3,})", line):
+                continue
+            quoted = False
+        marker = re.match(r"(`{3,}|~{3,})(.*)$", line)
+        if fence:
+            if (
+                marker
+                and marker[1][0] == fence[0]
+                and len(marker[1]) >= len(fence)
+                and not marker[2].strip()
+            ):
+                fence = None
+            continue
+        if marker:
+            fence = marker[1]
+            continue
+        match = re.fullmatch(r"Sweep dispute ([0-9]+)/([^:\n]+):[ \t]+(.+)", line)
+        if match:
+            reason = re.sub(r"<[^>]*>", "", match[3]).strip(" \t*_`~")
+            reason = re.sub(r"\[([^]]*)\]\([^)]*\)", r"\1", reason)
+            if any(char.isalnum() for char in reason):
+                disputes.add((int(match[1]), match[2].strip()))
+    return disputes
+
+
+class OpenFix(str):
+    """A valid reusable record whose remaining fixes need reviewer assessment."""
+
+
+def gate(url, head, review_body=None, record_info=None):
+    """Why the PR may not be approved, else None; raises GateError on a failed read.
+
+    record_info, when supplied, receives the validated comment id for CLI output.
+    """
+    match = GATE_PR_URL.fullmatch(url)
+    if not match:
+        return f"--pr {url!r} is not a GitHub pull request URL"
+    if not SHA.fullmatch(head):
+        return f"--head {head!r} is not a full 40-character SHA"
+    repo, number = match.group(1), int(match.group(2))
+    pr = gh_json("api", f"repos/{repo}/pulls/{number}")
+    live = (pr.get("head") or {}).get("sha")
+    if live != head:
+        return f"the PR head is {live}, not {head}"
+    if not finalize_enabled(repo, (pr.get("base") or {}).get("sha")):
+        return None
+    base_ref = (pr.get("base") or {}).get("ref")
+    merge_base = pr_merge_base((pr.get("base") or {}).get("sha"), head)
+    me = gh_json("api", "user").get("login")
+    trusted = {me, (pr.get("user") or {}).get("login")} - {None}
+    if not me:
+        raise GateError("cannot read the reviewer login")
+    pages = gh_json(
+        "api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"
+    )
+    order = []
+    for comment in (c for page in pages for c in page):
+        if (comment.get("user") or {}).get("login") not in trusted:
+            continue
+        record = comment_record(comment.get("body") or "")
+        if (
+            record
+            and record.get("pr") == url
+            and record.get("head") == head
+            and record.get("kind") == "full"
+        ):
+            order.append((record, comment.get("id")))
+    if not order:
+        return f"no full orch-sweep comment by the reviewer or PR author for the exact head {head}"
+    record, cid = order[-1]
+    why = record_problem(record, head)
+    if why:
+        return why
+    why = gate_since(record["base"], head)
+    if why:
+        return why
+    if record["base"] != merge_base:
+        return f"the PR base changed since the full sweep: it swept from {record['base']}, and {base_ref} gives {merge_base}; run orch-sweep run"
+    if record_info is not None:
+        record_info["comment_id"] = cid
+    has_fixes = record["open_fix"]
+    if review_body is None and has_fixes:
+        reviews = gh_json(
+            "api", "--paginate", "--slurp", f"repos/{repo}/pulls/{number}/reviews"
+        )
+        own = [
+            r
+            for page in reviews
+            for r in page
+            if (r.get("user") or {}).get("login") == me
+            and r.get("commit_id") == head
+            and r.get("submitted_at")
+        ]
+        review_body = (
+            max(own, key=lambda r: r["submitted_at"]).get("body") if own else ""
+        )
+    disputes = review_disputes(review_body)
+    count = sum(
+        1
+        for item in record["items"]
+        if item["class"] == "fix" and (cid, item["id"]) not in disputes
+    )
+    if count:
+        return OpenFix(
+            f"the full sweep of {head} has {count} open fix findings; disputes parsed: {len(disputes)}"
+        )
+    return None
+
+
 class Parser(argparse.ArgumentParser):
     """Reports usage errors as one escaped ERROR line and exit 1; subparsers share the class."""
 
@@ -700,7 +941,28 @@ def main(argv):
     check.add_argument("--exact", action="store_true")
     check.add_argument("--session")
     check.add_argument("--no-transcripts", action="store_true")
+    approve = commands.add_parser("gate")
+    approve.add_argument("--pr", required=True)
+    approve.add_argument("--head", required=True)
     args = parser.parse_args(argv[1:])
+    if args.command == "gate":
+        record_info = {}
+        try:
+            found = gate(args.pr, args.head, record_info=record_info)
+        except GateError as error:
+            print(
+                f"ERROR: cannot check the gate: {one_line(str(error))}", file=sys.stderr
+            )
+            return 2
+        if record_info.get("comment_id"):
+            print(f"RECORD_COMMENT {record_info['comment_id']}", flush=True)
+        if found:
+            if isinstance(found, OpenFix):
+                print("RECORD_REUSABLE", flush=True)
+            print(f"ERROR: {one_line(found)}", file=sys.stderr)
+            return 1
+        print(f"OK: the sweep of {args.head} allows APPROVE")
+        return 0
     found, record = problem(args.record, args.head, args.base)
     commits = ""
     if not found and args.exact and record["head"] != args.head:

@@ -1,17 +1,17 @@
 # Orch Tabs
 
-Orch Tabs is a Chrome extension for PR tabs in `ORCH_PR_TABS_ORG`. It sorts PR tabs into named groups, jumps to a PR, opens your open PRs or PRs requesting your review, and closes tabs whose PR is merged or closed.
+Orch Tabs is a Chrome extension for PR tabs in `ORCH_PR_TABS_ORG`. It sorts PR tabs into named groups, jumps to a PR, opens your open PRs or PRs requesting your review, and closes tabs whose PR merges or closes while the tab is open.
 
 ## ✨ What it does
 
-- **Groups** every unpinned PR tab by the architect owning its checked-out head branch, or by repository name when no owner is available. Group colours are a stable hash of the name. Ownership changes are picked up on the existing check cadence. New tabs sort themselves when they load.
-- **Go to a PR**: paste a PR number or URL and press Enter. Paste a list (numbers and URLs, separated by commas, spaces or new lines) to open up to 20 at once, one tab each; a repeat counts once, the dropdown pick applies to every bare number, and one message names any item that could not be opened. In a list, new tabs open in the background, and the last one is focused only when every item worked. A number uses `ORCH_PR_TABS_ORG` and the repo picked in the dropdown below the field (`ORCH_PR_TABS_DEFAULT_REPO` until you pick; the dropdown shows while any item is a bare number and `ORCH_PR_TABS_REPOS` plus the default make two or more, and remembers your last pick); `repo#123` goes to a listed repo; a URL decides the repo, but only when its owner is `ORCH_PR_TABS_ORG`; a PR URL of another owner is rejected. An open tab for that PR is focused (its window comes forward, its group expands); otherwise the PR opens in its group.
+- **Groups** every unpinned PR tab by the architect owning its checked-out head branch, or by repository name when no owner is available. Group colours are stored by name: new groups take the first free Chrome colour, then the least-used colour once all nine are taken. A colour becomes available when its group disappears. Ownership changes are picked up on the existing check cadence. New tabs sort themselves when they load.
+- **Go to a PR**: paste a PR number or URL and press Enter. Paste a list (numbers and URLs, separated by commas, spaces or new lines) to open up to 20 at once, one tab each; a repeat counts once, the dropdown pick applies to every bare number, and one message names any item that could not be opened. In a list, new tabs open in the background, and the last one is focused only when every item worked. A number uses the repository picked in the dropdown below the field, including that repository's owner (`ORCH_PR_TABS_DEFAULT_REPO` until you pick; the dropdown shows while any item is a bare number and the configured and Settings-added repositories make two or more, and remembers your last pick); `repo#123` or `owner/repo#123` goes to a listed repo; a URL decides the repo when its owner is `ORCH_PR_TABS_ORG` or its full repository is listed in Settings. An open tab for that PR is focused (its window comes forward, its group expands); otherwise the PR opens in its group.
 - **Open PRs to review** opens up to 30 open PRs in the configured organization where your review is requested, using the native host’s GitHub login (`review-requested:@me`). It shares the cap, grouping and duplicate checks with **Open all my open PRs**.
 - Both opening actions show an indeterminate progress bar while searching, then an “opened N of M” count until the final summary. A planned PR that is already open counts toward completed progress. The PR count and groups refresh as tabs open and once more at completion. Only one batch runs at a time across both actions; repeated clicks share that batch. Opening also recognizes tabs still loading, HTTP URLs and owner/repo names in any case across windows and groups.
 - **Open all my open PRs** opens up to 30 PRs matching `ORCH_PR_TABS_OPEN_ALL`, in the order defined by that query, skipping ones already open. Over 30, the badge shows how many are left (`+N`), or an estimate (`~N`, "about N more") when not every search result was fetched. Click again for the next batch.
-- **Close merged PRs** runs the merged/closed check at once. The popup says what it closed, which merged tab stayed because it is in view, or the error.
+- **Close merged** runs the merged/closed check at once. The popup says what it closed, which merged tab stayed because it is in view, or the error.
 - **Close duplicate tabs** keeps one tab per PR and closes the rest, across all normal windows (incognito is skipped). It keeps the tab in view in the focused window if it is one of them, else a tab in view in another window, else the oldest (lowest tab ID). The popup says how many it closed. Two tabs are the same PR when owner, repo (any case) and number match, whatever the sub-page (`/files`, `/commits`), query or `#fragment`. Go to a PR and both batch opening actions use the same match, so they focus or skip an open tab instead of adding a double.
-- **Automatic close** removes every background tab whose PR is merged or closed. The tab in view stays until you leave it. The check runs 30 seconds after the extension loads or Chrome starts, then every 4 minutes while PR tabs are open. It does not run when none are open. After a failed check it waits longer, with jitter, up to 30 minutes. It returns to 4 minutes once a check succeeds.
+- **Automatic close** removes a background tab whose PR merged or closed while that tab showed it. A tab opened on an already merged or closed PR stays. The tab in view stays until you leave it. The check runs 30 seconds after the extension loads or Chrome starts, then every 4 minutes while PR tabs are open. It does not run when none are open. After a failed check it waits longer, with jitter, up to 30 minutes. It returns to 4 minutes once a check succeeds.
 - Install/startup and popup summaries start background backfill of missing titles and heads for already-open PR tabs through one shared native GitHub batch (up to 100 distinct PRs, existing host timeout). Successful ownership discovery restores architect grouping; incomplete or failed records wait at least a minute before another backfill attempt. The popup shows current tabs immediately and refreshes once hydration settles; startup grouping also uses current data without waiting. Hydration preserves open tabs, including merged ones.
 - The popup, from the toolbar button, shows how many PRs are open in how many groups, with each group's colour and count. Light and dark follow the system.
 - **Search PR tabs** filters by title, repo, PR number (with or without `#`), branch or group name. Matches expand and sort by relevance; matched label/title characters are highlighted. ArrowDown moves to the first result, Enter focuses the best existing tab, and Escape clears the query; clearing restores your expanded groups.
@@ -41,9 +41,48 @@ GitHub access goes through your local `gh` login, via a native messaging host. N
 
 After an update, run the install command, then click the reload icon on the extension card at `chrome://extensions`.
 
+## Hide files on pull request pages
+
+Open **Settings** from the popup's existing actions menu (or **Options** from its
+extension card at `chrome://extensions`). Under
+**Hide files on pull request pages**, enable **Hide matching files**. The default
+patterns are `*.stories.*`, `*_spec.rb`, and `*.spec.ts`. Add or remove patterns
+in the list; changes are saved in Chrome sync storage and apply to open PR pages.
+The feature starts disabled.
+
+Patterns match the full, case-sensitive file path. `*` matches any characters,
+including folder separators; other characters are literal. Thus `*.stories.*`
+works in any folder, while `src/*.spec.ts` restricts matching to `src/` and its
+subfolders. Empty patterns are ignored.
+
+On recognized GitHub Files changed pages, matching diff blocks and file-tree
+entries disappear completely. The **N files hidden by PR Tabs · Show them** bar
+counts distinct matching paths available in the loaded diff or file tree.
+**Show them** reveals files and keeps the bar visible as **N hidden files shown · Hide them**.
+**Hide them** applies filtering again. This toggle stays on the current page until
+reload or navigation; jumping to an anchor preserves that choice. Lazy-loaded files are checked
+automatically, and changing settings restores or hides files live.
+
+Classic and React Files changed views are supported. If GitHub changes the
+recognized markup, the extension leaves files visible and shows no bar. Reload
+an already-open PR after installing or reloading the extension to activate its
+content script. No additional permissions are required.
+
 ## 🔩 Settings and ownership
 
 `pr_tabs.org` selects the organization, `pr_tabs.default_repo` is the repo for bare numbers, `pr_tabs.repos` adds more repos to pick from (environment form: comma-separated `ORCH_PR_TABS_REPOS`), `pr_tabs.open_all` is the GitHub search behind the button, and `pr_tabs.terminal_app` is the macOS app go to pane brings forward. Their environment overrides are `ORCH_PR_TABS_ORG`, `ORCH_PR_TABS_DEFAULT_REPO`, `ORCH_PR_TABS_REPOS`, `ORCH_PR_TABS_OPEN_ALL` and `ORCH_PR_TABS_TERMINAL_APP`. Reload the extension after changing settings.
+
+The **Repositories** section in Settings lists configured repositories as **from config**.
+Add an `owner/name` repository with **Add** or Enter; duplicates are rejected regardless
+of case. Added entries are stored in Chrome local storage and have a trash button.
+They participate in the popup picker, number guessing, grouping, polling, and PR
+navigation, including repositories belonging to another owner. Config entries can
+only be removed through configuration. The opening buttons keep their configured
+GitHub search queries.
+
+Popup repository lists put previously used repositories first, most recently used
+first, followed by unused repositories alphabetically. Opening or selecting a PR
+through the extension records its repository's use in local storage.
 
 The native host asks the selected env adapter, through shared open-work discovery, for checked-out branches and their workspace owners, then reads full `https://github.com/<owner>/<repo>/pull/<number>` URLs under a case-insensitive `## Open PRs` heading in matching architect status files. It caches the results for 30 seconds. Herdr resolves the worker workspace's `owner` token to the architect workspace label.
 
