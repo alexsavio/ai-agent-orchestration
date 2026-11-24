@@ -13,10 +13,18 @@ from unittest.mock import patch
 
 from test_support import IsolatedTestCase
 
+import github_poll
 from test_github_poll_round2 import ROOT, load_prs
 
 
 class PrsWatchTests(IsolatedTestCase):
+    def test_nested_deadline_keeps_its_own_budget_inside_a_longer_one(self):
+        started = time.monotonic()
+        with github_poll.call_deadline(30):
+            with github_poll.call_deadline(1.5):
+                time.sleep(0.6)
+        self.assertLess(time.monotonic() - started, 1.5)
+
     def test_hung_child_is_killed_and_next_cycle_saves_a_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

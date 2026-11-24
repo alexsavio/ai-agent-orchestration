@@ -159,9 +159,11 @@ def call_deadline(seconds, *, expired_error=_Expired):
     previous_handler = signal.getsignal(signal.SIGALRM)
     previous_timer = signal.getitimer(signal.ITIMER_REAL)
     started = time.time()
-    inherited = 0 < previous_timer[0] <= seconds
+    outer_left = getattr(previous_handler, "remaining", None)
+    left = outer_left() if outer_left and previous_timer[0] else previous_timer[0]
+    inherited = 0 < left <= seconds
     inherited_fired = False
-    duration = previous_timer[0] if inherited else seconds
+    duration = left if inherited else seconds
     expires = started + duration
     monotonic_started = time.monotonic()
     monotonic_expires = monotonic_started + duration
@@ -179,6 +181,9 @@ def call_deadline(seconds, *, expired_error=_Expired):
                 raise _Expired from error
         raise expired_error
 
+    expired.remaining = lambda: min(
+        expires - time.time(), monotonic_expires - time.monotonic()
+    )
     signal.signal(signal.SIGALRM, expired)
     signal.setitimer(
         signal.ITIMER_REAL,
