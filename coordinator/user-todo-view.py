@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live view of the user to-do list with Dismiss and Reminder buttons under every item."""
+"""Live view of the user to-do list with Dismiss, Reminder and Answer buttons under every item."""
 
 import codecs
 import fcntl

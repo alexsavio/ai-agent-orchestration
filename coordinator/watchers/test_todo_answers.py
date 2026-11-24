@@ -489,7 +489,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(a.records()[0]["text"], other)
 
     def test_disappearing_question_cannot_retarget_legacy_input(self):
-        import contextlib
         import io
 
         module = w.todo_module()
@@ -556,7 +555,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(len(module.rendered_items(output, state)), 1)
 
     def follow_screens(self, keys, error=None):
-        import contextlib
         import io
 
         module = w.todo_module()
@@ -601,7 +599,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(received, ["x" * 61 + "界 café"])
 
     def test_buttons_main_preserves_utf8_answer_split_across_reads(self):
-        import contextlib
         import io
 
         app, view = self.view_app()
@@ -894,7 +891,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertEqual(received, ["beforeafter"])
 
     def answer_replacement_race(self, view, during_submit):
-        import contextlib
         import io
 
         module = w.todo_module()
@@ -1028,7 +1024,6 @@ class TodoAnswerTests(IsolatedTestCase):
         self.assertFalse(app.closing)
 
     def test_legacy_complete_escape_cancels_before_following_keys(self):
-        import contextlib
         import io
 
         module = w.todo_module()
