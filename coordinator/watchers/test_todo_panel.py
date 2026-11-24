@@ -343,15 +343,16 @@ class TodoPanelTests(IsolatedTestCase):
         self.assertIn("not one of the choices", out)
         self.assertEqual(a.records(), [])
 
-    def test_free_text_fails_before_187_and_the_reason_stays_on_the_item(self):
+    def test_free_text_on_an_item_without_choices_is_queued_with_no_error(self):
         key = self.key_of("Merge it")
         _, out = self.run_panel(
             "apply", self.answers_file({"id": "a1", "key": key, "answer": "yes"})
         )
-        self.assertIn("failed a1: this item has no valid choices", out)
-        self.assertEqual(a.records(), [])
-        item = next(item for item in self.items() if item["key"] == key)
-        self.assertEqual(item["error"], "this item has no valid choices")
+        self.assertIn("queued a1", out)
+        self.assertNotIn("failed", out)
+        self.assertEqual([record["answer"] for record in a.records()], ["yes"])
+        self.assertNotIn(key, [item["key"] for item in self.items()])
+        self.assertFalse(any(item["error"] for item in self.items()))
 
     def test_a_file_without_answers_is_an_error(self):
         path = self.base / "answers.json"

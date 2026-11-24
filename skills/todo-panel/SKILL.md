@@ -10,7 +10,7 @@ The panel is a private claude.ai Artifact. It shows the open items of the to-do 
 
 Run every step below in order, every time. Each step is safe to run again.
 
-Data side: `python3 ~/.claude/coordinator/todo-panel.py` (`render`, `apply`). State lives in `~/.claude/coordinator/todo-panel/`. Page files: `~/.claude/coordinator/todo-panel.html` and `todo-panel.js`. Plain items (no `[n: label]` choices) take free text, and the queue refuses them until PR #187 is merged; the panel then shows the refusal on the item.
+Data side: `python3 ~/.claude/coordinator/todo-panel.py` (`render`, `apply`). State lives in `~/.claude/coordinator/todo-panel/`. Page files: `~/.claude/coordinator/todo-panel.html` and `todo-panel.js`. Plain items (no `[n: label]` choices) take free text, and the queue accepts it.
 
 ## 1. Find the panel
 

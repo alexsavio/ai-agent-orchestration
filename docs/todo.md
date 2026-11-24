@@ -144,8 +144,6 @@ Flow:
    applied is skipped, never queued twice.
 5. `render` and a files publish with `answers.json: null` replace the panel data.
 
-Free text for an item without choices needs the check in `todo_answers.submit_locked` removed
-(PR #187). Until then such an answer fails with `this item has no valid choices` and the panel
-shows that on the item.
+Free text for an item without choices is queued like a choice answer.
 
 Page logic that needs no browser (`todo-panel.js`) is tested with `node --test tests/todo-panel.test.js`.
