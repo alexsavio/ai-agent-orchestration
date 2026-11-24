@@ -114,7 +114,6 @@ RESUME = {
     "codex": "codex resume",
     "cursor": "cursor-agent --resume",
     "cursor-agent": "cursor-agent --resume",
-    "gemini": "agy --conversation",
     "agy": "agy --conversation",
 }
 
