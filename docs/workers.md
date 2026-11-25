@@ -116,14 +116,13 @@ Codex has no automatic watcher usage sensor; its architect checks native context
 
 A gemini worker runs the `agy` CLI through `gemini-start.sh`, which starts `herdr agent start --kind agy` with `--model` from settings and `--mode auto`, and takes no extra arguments. It never passes `--dangerously-skip-permissions` (no gate at all), `--remote-agent` or `--remote-control`. agy sends the code a worker reads and the prompts it gets to Google; see docs/settings.md.
 
-`--mode auto` is the safest mode in which a worker can still edit, test and commit. agy's `--mode auto` auto-approves workspace file edits and runs terminal commands inside the terminal sandbox without prompting; a command that would leave the sandbox is automatically evaluated by agy itself, which lets safe, reversible ones through and prompts for irreversible or high-risk actions (destructive Git and file commands), unless the command matches an `allow` rule, which switches off that check. `--mode accept-edits` approves edits but still asks before every terminal command, so a worker cannot run tests or commits unattended; `--sandbox` alone (in the default mode) still asks before every edit. Auto mode turns the terminal sandbox on automatically, so `gemini-start.sh` passes no `--sandbox`. Auto mode needs the terminal sandbox and is not available for business or enterprise accounts; without it agy silently starts in default mode and asks before every edit, so a worker stalls — a gemini worker needs a personal account and a sandbox-capable host.
+`--mode auto` is the safest mode in which a worker can still edit, test and commit. Per agy's docs (not run here), `--mode auto` auto-approves workspace file edits and runs terminal commands inside the terminal sandbox without prompting; a command that would leave the sandbox is automatically evaluated by agy itself, which lets safe, reversible ones through and prompts for irreversible or high-risk actions (destructive Git and file commands), unless the command matches an `allow` rule, which switches off that check. `--mode accept-edits` approves edits but still asks before every terminal command, so a worker cannot run tests or commits unattended; `--sandbox` alone (in the default mode) still asks before every edit. Auto mode turns the terminal sandbox on automatically, so `gemini-start.sh` passes no `--sandbox`. Auto mode needs the terminal sandbox and is not available for business or enterprise accounts; without it agy silently starts in default mode and asks before every edit, so a worker stalls — a gemini worker needs a personal account and a sandbox-capable host.
 
 Merge this `permissions` object into `~/.gemini/antigravity-cli/settings.json`, keeping its other keys (`model`, `trustedWorkspaces`) and any `allow` rule you already set (the block adds none) (`command(prefix)` matches any command whose leading tokens are that prefix):
 
 ```json
 {
   "permissions": {
-    "allow": [],
     "deny": [
       "command(git push --force)",
       "command(git push -f)",
