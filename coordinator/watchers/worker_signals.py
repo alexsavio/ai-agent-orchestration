@@ -22,6 +22,7 @@ POLL_SECONDS = 1
 HEARTBEAT_MIN_SECONDS = 30
 HEARTBEAT_FRESH_SECONDS = 300
 QUESTION_RETAIN_SECONDS = 3600
+ESCALATED_RETAIN_SECONDS = 86400
 QUESTIONS_MAX = 200
 CLEANUP_MAX = 1
 CLEANUP_SECONDS = 2
@@ -156,7 +157,9 @@ def record_signal(ident, kind, new_job=False, **fields):
         return record
 
 
-def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
+def remove_question(
+    record, close_panel=True, close_timeout=CLEANUP_SECONDS, keep_record=False
+):
     """Waiters defer Q closure; the workers poll retries failed closes with the record intact."""
     identifier = record["id"]
     panel = questions_directory() / (identifier + ".md")
@@ -172,7 +175,8 @@ def remove_question(record, close_panel=True, close_timeout=CLEANUP_SECONDS):
                 return False
         except (OSError, subprocess.SubprocessError):
             return False
-    question_path(identifier).unlink(missing_ok=True)
+    if not keep_record:
+        question_path(identifier).unlink(missing_ok=True)
     answer_path(identifier).unlink(missing_ok=True)
     questions = questions_directory()
     for suffix in (
@@ -219,6 +223,12 @@ def new_question(ident, question, options, timeout, deadline=None):
                 old = read(path)
                 if old["pane"] == ident["pane"]:
                     alive = asker_alive(old)
+                    if (
+                        old.get("to_user")
+                        and not old.get("cleanup")
+                        and (old["deadline"] <= now or not alive)
+                    ):
+                        continue
                     if old.get("cleanup") and not alive:
                         continue
                     if old.get("cleanup"):
@@ -266,7 +276,9 @@ def wait_answer(record, timeout, deadline=None):
                     return text
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    remove_question(record, close_panel=False)
+                    current = read(question_path(record["id"]))
+                    if not (current and current.get("to_user")):
+                        remove_question(record, close_panel=False)
                     break
             time.sleep(min(POLL_SECONDS, remaining))
     except TimeoutError:
@@ -311,8 +323,14 @@ def answer(identifier, text, to_user=False):
                 ),
             )
             write_remind(target, time.time())
-            if open_user_question(identifier, target) in (0, 73):
-                target.with_suffix(".remind").unlink(missing_ok=True)
+            record.setdefault("to_user", time.time())
+            write(question_path(identifier), record)
+            opened = open_user_question(identifier, target)
+            if opened not in (0, 73):
+                raise ValueError(
+                    f"question panel did not open (exit {opened}); the reminder retries it"
+                )
+            target.with_suffix(".remind").unlink(missing_ok=True)
         else:
             if not text or not text.strip():
                 raise ValueError("answer text is required")
@@ -332,6 +350,17 @@ def bridge_user_answer(identifier, text):
     if not ID.fullmatch(identifier):
         return
     record = read(question_path(identifier))
+    if (
+        record
+        and record.get("to_user")
+        and not record.get("cleanup")
+        and not record.get("notice")
+        and record.get("late_answer") is None
+        and time.time() <= record["to_user"] + ESCALATED_RETAIN_SECONDS
+        and (record["deadline"] <= time.time() or not asker_alive(record))
+    ):
+        write(question_path(identifier), dict(record, late_answer=text))
+        return
     if (
         record
         and not record.get("cleanup")
@@ -384,6 +413,39 @@ def collect(rows, owners, now, snapshot_at=None, resume=None):
             )
             if record["kind"] == "question":
                 answered = answer_path(record["id"]).exists()
+                if record.get("to_user") and not record.get("cleanup"):
+                    if (
+                        record.get("late_answer") is None
+                        and answered
+                        and not asker_alive(record)
+                    ):
+                        record["late_answer"] = read_text(
+                            answer_path(record["id"])
+                        ).strip()
+                    if not record.get("notice") and not closed:
+                        notice = (
+                            "late"
+                            if record.get("late_answer") is not None
+                            else "expired"
+                            if now > record["to_user"] + ESCALATED_RETAIN_SECONDS
+                            else None
+                        )
+                        if notice:
+                            record.update(notice=notice, notice_at=now)
+                            write(path, record)
+                    if record.get("notice"):
+                        panel = questions_directory() / (record["id"] + ".md")
+                        if panel.exists() and cleanup_used < CLEANUP_MAX:
+                            cleanup_used += 1
+                            if not remove_question(record, keep_record=True):
+                                record["cleanup_tried"] = now
+                                write(path, record)
+                        if now > record["notice_at"] + DONE_EVENTS_KEEP_SECONDS:
+                            if remove_question(record, close_panel=False):
+                                path.unlink(missing_ok=True)
+                        else:
+                            events.append(dict(record, event=record["notice"]))
+                        continue
                 pending_resume = record.get("resume_answer")
                 if (
                     pending_resume
@@ -398,7 +460,10 @@ def collect(rows, owners, now, snapshot_at=None, resume=None):
                 if (
                     record.get("cleanup")
                     or closed
-                    or now > record["deadline"] + QUESTION_RETAIN_SECONDS
+                    or (
+                        now > record["deadline"] + QUESTION_RETAIN_SECONDS
+                        and not record.get("to_user")
+                    )
                 ):
                     panel = questions_directory() / (record["id"] + ".md")
                     if panel.exists():
@@ -409,8 +474,11 @@ def collect(rows, owners, now, snapshot_at=None, resume=None):
                         record.update(cleanup=True, cleanup_tried=now)
                         write(path, record)
                     remove_question(record)
-                elif not answered and now < record["deadline"]:
-                    events.append(record)
+                else:
+                    if not answered and now < record["deadline"]:
+                        events.append(record)
+                    if record.get("to_user") and not answered:
+                        events.append(dict(record, event="to_user"))
             elif closed:
                 events.extend(
                     event
@@ -543,7 +611,21 @@ def suppressed(row, raw):
     )
 
 
+def event_key(record):
+    return record["id"] + (":" + record["event"] if record.get("event") else "")
+
+
 def event_line(record):
+    event = record.get("event")
+    head = f"{record['pane']} owner={record['owner']} id={record['id']}"
+    if event == "to_user":
+        return f"WORKER QUESTION TO USER {head} file={questions_directory() / (record['id'] + '.md')}"
+    if event == "late":
+        return f"WORKER ANSWER LATE {head} answer=" + strip_controls(
+            " ".join(str(record["late_answer"]).split())
+        )
+    if event == "expired":
+        return f"WORKER QUESTION EXPIRED {head}"
     fields = (
         ("outcome", "report", "summary")
         if record["kind"] == "done"
