@@ -39,6 +39,16 @@ orch-signal answer signal-<id> "v2"
 orch-signal answer signal-<id> --to-user
 ```
 
+`answer --to-user` opens the Q panel and sends the Coordinator one
+`WORKER QUESTION TO USER <pane> owner=<ws> id=<id> file=<question file>` line. It
+exits non-zero (one stderr line) when the panel did not open. The escalated question
+stays open after the worker's ask times out, until the user answers, the worker pane
+is gone or changes owner, or 24 hours pass. A user answer after the ask ended reaches
+the owning architect as `WORKER ANSWER LATE <pane> owner=<ws> id=<id> answer=<text>`;
+the architect relays it with `herdr agent prompt`. At 24 hours the owner gets
+`WORKER QUESTION EXPIRED <pane> owner=<ws> id=<id>`. The architect still adds a
+`## Waits on the user` item.
+
 A **current job** begins with `heartbeat --new-job` and ends with `done`; every
 follow-up brief in a reused pane must begin a new job. Identical done calls are
 idempotent and print a no-op notice to stderr. A changed report, summary or outcome
