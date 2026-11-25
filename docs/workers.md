@@ -23,7 +23,7 @@ All commands, including architect `answer` and `list`, require a verified caller
 an unverifiable caller fails without writing a signal. If the sandbox blocks
 process inspection, run the command escalated. Tool shells must descend from
 the pane's foreground process (Codex workers start with `--no-daemon`). A command
-started with `&` or a `( ... &)` subshell (also with `nohup` or `setsid`) is
+started with `&` or a `( ... &)` subshell (also with `nohup`) is
 detached from its pane, so `orch-signal ask` fails with `cannot verify caller
 pane from live foreground processes`; run it in the foreground (Claude Code: the
 Bash tool's `run_in_background`).
