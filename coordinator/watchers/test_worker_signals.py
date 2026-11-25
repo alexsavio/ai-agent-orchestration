@@ -5,7 +5,6 @@ import json
 import os
 import re
 import tempfile
-import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1145,7 +1144,7 @@ class SignalTests(IsolatedTestCase):
         result = json.loads(w.cycle(state, "answers", w.collect_answers))
         self.assertFalse(s.answer_path(record["id"]).exists())
         self.assertFalse(any("discarded" in line for line in result["events"]))
-        _, records = self.live(time.time())
+        _, records = self.live(s.time.time())
         lines = [s.event_line(r) for r in records if r.get("event") == "late"]
         self.assertEqual(len(lines), 1)
         self.assertIn("answer=user choice", lines[0])
