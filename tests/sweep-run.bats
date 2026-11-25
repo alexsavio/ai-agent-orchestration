@@ -1829,3 +1829,23 @@ assert script_problem(deviation), "deviation accepted"
 PYTEST
   [ "$status" -eq 0 ]
 }
+
+@test "with codex off in providers.enabled and no --runtime the sweep runs on claude" {
+  ORCH_PROVIDERS=claude,pi run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  [ "$(field 'r["runtime"]')" = claude ]
+  [ "$(field 'r["model"]')" = sonnet ]
+}
+
+@test "with codex enabled and no --runtime the sweep still runs on codex" {
+  ORCH_PROVIDERS=claude,codex run_sweep --no-comment
+  [ "$status" -eq 0 ]
+  [ "$(field 'r["runtime"]')" = codex ]
+}
+
+@test "an explicit --runtime codex without codex on PATH names the claude runtime" {
+  rm "$TMP/bin/codex"
+  run_sweep --no-comment --runtime codex
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *'codex is not on PATH; use --runtime claude'* ]]
+}

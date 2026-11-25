@@ -22,10 +22,12 @@ Each slice starts one `finalize-code-comments` agent and one `finalize-change-fo
 
 | Runtime | Command |
 |---|---|
-| `codex` (default) | all agents use `codex exec -m <model> -C <checkout> -s read-only ...` with persistence so every recorded thread id has a transcript |
+| `codex` (default when `codex` is in `providers.enabled`) | all agents use `codex exec -m <model> -C <checkout> -s read-only ...` with persistence so every recorded thread id has a transcript |
 | `claude` | all agents use `claude -p ...` with persistence so every recorded session id has a transcript; structured answers are read from the persisted `StructuredOutput` tool call |
 
 The script writes the PR diff and each slice's diff (`git diff --no-ext-diff --no-textconv`) to a temporary folder outside the checkout and names the file in each prompt; the folder is removed when the run ends. Claude agents have no shell. Codex agents have one inside the read-only sandbox: a command can run a program from the checkout (`rg --pre`), but it cannot write files or reach the network.
+
+Without `--runtime` the run uses `codex` when `providers.enabled` includes it, else `claude`; `--runtime` always wins. When the chosen program is not on `PATH`, the error names the other runtime.
 
 The model comes from the settings: `models.codex_worker`, else `models.codex_smart`, for Codex; `sonnet` when `providers.claude` lists it or lists no tier, else the first listed tier, for Claude. `--model` overrides it. The record names it.
 
@@ -54,7 +56,7 @@ The script writes the record to `~/.cache/review-prs/sweeps/<owner>/<repo>/<numb
 
 ## The gate
 
-`orch-sweep-record gate --pr <url> --head <sha>` checks the exact live PR head and the newest full record published by the PR author or the current reviewer. Either record counts as published evidence on its author's word, including a record from a PR author who is not a collaborator. The gate does not verify transcripts or check the run nonce against an actual run, and it makes no collaborator-permission check. It validates the record's schema (including nonce format), Git ancestry, the merge base using GitHub's live `base.sha` and undisputed fix findings. Missing base objects or GitHub/Git failures exit 2; fetch the base and retry later. The reviewer's independent judgement is the guard against untruthful records; the reviewer also reads the current PR title and body independently. No local cache equality is required. More than 25 slices are refused; split the PR.
+The gate reads only a PR comment that `orch-sweep run` posted. A `/finalize-sweep` record file or a plain table comment is not evidence for it, and `orch-sweep post-review --event APPROVE` needs a passing gate, so an approval needs an `orch-sweep run` record. `orch-sweep-record gate --pr <url> --head <sha>` checks the exact live PR head and the newest full record published by the PR author or the current reviewer. Either record counts as published evidence on its author's word, including a record from a PR author who is not a collaborator. The gate does not verify transcripts or check the run nonce against an actual run, and it makes no collaborator-permission check. It validates the record's schema (including nonce format), Git ancestry, the merge base using GitHub's live `base.sha` and undisputed fix findings. Missing base objects or GitHub/Git failures exit 2; fetch the base and retry later. The reviewer's independent judgement is the guard against untruthful records; the reviewer also reads the current PR title and body independently. No local cache equality is required. More than 25 slices are refused; split the PR.
 
 The gate emits `RECORD_COMMENT <id>` for its selected validated comment, including when open fixes prevent approval. `RECORD_REUSABLE` distinguishes that refusal from missing or stale evidence. Both lines are flushed before the `ERROR:` diagnostic, so combined output keeps the reason last.
 

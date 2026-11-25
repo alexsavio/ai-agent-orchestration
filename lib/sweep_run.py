@@ -360,16 +360,28 @@ def compare(before, when):
         )
 
 
-def model_for(runtime, given):
-    """--model, else the reviewer family's worker model from the resolved settings."""
-    if given:
-        return given
+def resolved_settings():
     try:
-        values = orch_settings.resolved_global(
+        return orch_settings.resolved_global(
             orch_settings.config_path(os.environ), os.environ
         )
     except orch_settings.ConfigError as error:
         raise Failure(f"settings: {error}") from error
+
+
+def runtime_for(given):
+    """--runtime, else codex when it is an enabled provider, else claude."""
+    if given:
+        return given
+    enabled = resolved_settings().get("ORCH_PROVIDERS", "").split(",")
+    return "codex" if "codex" in enabled else "claude"
+
+
+def model_for(runtime, given):
+    """--model, else the reviewer family's worker model from the resolved settings."""
+    if given:
+        return given
+    values = resolved_settings()
     if runtime == "codex":
         for name in ("ORCH_CODEX_WORKER_MODEL", "ORCH_CODEX_SMART_MODEL"):
             value = values.get(name, "")
@@ -385,7 +397,8 @@ def model_for(runtime, given):
 def command(runtime, model, schema, out, diffs):
     executable = shutil.which(runtime)
     if not executable:
-        raise Failure(f"{runtime} is not on PATH")
+        other = "claude" if runtime == "codex" else "codex"
+        raise Failure(f"{runtime} is not on PATH; use --runtime {other}")
     executable = os.path.abspath(executable)
     if runtime == "codex":
         argv = [
@@ -973,6 +986,7 @@ def run(args):
             raise Failure(f"{label} {path} is inside the checkout; write it outside")
     session = worker_session(args.no_transcripts)
     nonce = secrets.token_hex(16)
+    args.runtime = runtime_for(args.runtime)
     model = model_for(args.runtime, args.model)
     merge_base = git("merge-base", "HEAD", args.base_ref).strip()
     pr, comments, threads, reviews = pr_data(repo, number)
@@ -1226,7 +1240,7 @@ def main(argv):
     go.add_argument("--pr", required=True)
     go.add_argument("--head", required=True)
     go.add_argument("--base-ref", required=True)
-    go.add_argument("--runtime", choices=("codex", "claude"), default="codex")
+    go.add_argument("--runtime", choices=("codex", "claude"))
     go.add_argument("--model")
     go.add_argument("--concurrency", type=int, default=4)
     go.add_argument("--agent-timeout", type=int, default=900)
