@@ -221,9 +221,13 @@ def new_question(ident, question, options, timeout, deadline=None):
             for path in directory().glob("signal-*.json"):
                 old = read(path)
                 if old["pane"] == ident["pane"]:
-                    if old.get("to_user") and not old.get("cleanup"):
-                        continue
                     alive = asker_alive(old)
+                    if (
+                        old.get("to_user")
+                        and not old.get("cleanup")
+                        and (old["deadline"] <= now or not alive)
+                    ):
+                        continue
                     if old.get("cleanup") and not alive:
                         continue
                     if old.get("cleanup"):
@@ -397,6 +401,14 @@ def collect(rows, owners, now, snapshot_at=None):
             if record["kind"] == "question":
                 answered = answer_path(record["id"]).exists()
                 if record.get("to_user") and not record.get("cleanup"):
+                    if (
+                        record.get("late_answer") is None
+                        and answered
+                        and not asker_alive(record)
+                    ):
+                        record["late_answer"] = read_text(
+                            answer_path(record["id"])
+                        ).strip()
                     if not record.get("notice") and not closed:
                         notice = (
                             "late"
@@ -412,10 +424,12 @@ def collect(rows, owners, now, snapshot_at=None):
                         panel = questions_directory() / (record["id"] + ".md")
                         if panel.exists() and cleanup_used < CLEANUP_MAX:
                             cleanup_used += 1
-                            remove_question(record, keep_record=True)
+                            if not remove_question(record, keep_record=True):
+                                record["cleanup_tried"] = now
+                                write(path, record)
                         if now > record["notice_at"] + DONE_EVENTS_KEEP_SECONDS:
-                            remove_question(record, close_panel=False)
-                            path.unlink(missing_ok=True)
+                            if remove_question(record, close_panel=False):
+                                path.unlink(missing_ok=True)
                         else:
                             events.append(dict(record, event=record["notice"]))
                         continue
@@ -506,8 +520,8 @@ def event_line(record):
     if event == "to_user":
         return f"WORKER QUESTION TO USER {head} file={questions_directory() / (record['id'] + '.md')}"
     if event == "late":
-        return f"WORKER ANSWER LATE {head} answer=" + " ".join(
-            str(record["late_answer"]).split()
+        return f"WORKER ANSWER LATE {head} answer=" + strip_controls(
+            " ".join(str(record["late_answer"]).split())
         )
     if event == "expired":
         return f"WORKER QUESTION EXPIRED {head}"

@@ -1022,14 +1022,14 @@ class SignalTests(IsolatedTestCase):
         with patch.object(s.time, "time", return_value=later):
             self.live(later)
             self.assertTrue(panel.exists())
-            self.assertIsNone(s.bridge_user_answer(q["id"], "b"))
+            self.assertIsNone(s.bridge_user_answer(q["id"], "b\nc\x1b"))
         self.assertFalse(s.answer_path(q["id"]).exists())
         self.opener.reset_mock()
         _, records = self.live(later + 1)
         state, lines = self.route(None, records)
         late = [line for line in lines if line.startswith("WORKER ANSWER LATE ")]
         self.assertEqual(
-            late, [f"WORKER ANSWER LATE pane:1 owner=owner id={q['id']} answer=b"]
+            late, [f"WORKER ANSWER LATE pane:1 owner=owner id={q['id']} answer=b c"]
         )
         self.opener.assert_called_once_with("close", q["id"], timeout=s.CLEANUP_SECONDS)
         self.assertFalse(panel.exists())
@@ -1154,3 +1154,101 @@ class SignalTests(IsolatedTestCase):
         lines = [s.event_line(r) for r in records if r.get("event") == "late"]
         self.assertEqual(len(lines), 1)
         self.assertIn("answer=user choice", lines[0])
+
+    def inbox(self):
+        spec = importlib.util.spec_from_file_location(
+            "push_inbox", w.ROOT / "notify-inbox.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_to_user_line_is_a_coordinator_action_with_a_native_target(self):
+        import alert_policy
+        import feed_actions
+
+        q = self.record(timeout=60)
+        self.escalate(q)
+        _, records = self.live(q["at"])
+        _, lines = self.route(None, records)
+        notices = alert_policy.apply({}, [dict(mode="workers", events=lines)], q["at"])
+        patterns = feed_actions.action_patterns()
+        stamped = ["stamp " + n for n in notices if "QUESTION TO USER" in n]
+        self.assertEqual(len(stamped), 1)
+        self.assertTrue(feed_actions.is_action(stamped[0], patterns))
+        coordinator = self.base / "coordinator.json"
+        routed = self.inbox().native_messages(
+            argparse.Namespace(bindings_dir=self.base, binding=coordinator),
+            stamped,
+            True,
+            patterns,
+        )
+        self.assertIn(str(coordinator), [target for target, _ in routed])
+
+    def test_late_and_expired_lines_stay_owner_only(self):
+        import feed_actions
+
+        patterns = feed_actions.action_patterns()
+        for line in (
+            "stamp workers: WORKER ANSWER LATE p owner=o id=signal-x answer=b (start)",
+            "stamp workers: WORKER QUESTION EXPIRED p owner=o id=signal-x (start)",
+        ):
+            self.assertFalse(feed_actions.is_action(line, patterns), line)
+
+    def test_new_ask_while_the_escalated_waiter_is_alive_is_refused(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        with self.assertRaisesRegex(ValueError, "pending question"):
+            self.record(timeout=60)
+        self.assertTrue(s.question_path(q["id"]).exists())
+
+    def test_failed_close_after_the_holder_time_keeps_the_record_and_retries(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        panel = s.questions_directory() / (q["id"] + ".md")
+        later = q["deadline"] + 10
+        with patch.object(s.time, "time", return_value=later):
+            s.bridge_user_answer(q["id"], "b")
+        self.opener.return_value = 1
+        self.live(later + 1)
+        self.live(later + 1 + s.DONE_EVENTS_KEEP_SECONDS + 1)
+        self.assertTrue(s.question_path(q["id"]).exists())
+        self.assertTrue(panel.exists())
+        self.opener.return_value = 0
+        self.live(later + 1 + s.DONE_EVENTS_KEEP_SECONDS + 2)
+        self.assertFalse(panel.exists())
+        self.assertFalse(s.question_path(q["id"]).exists())
+
+    def test_one_panel_that_will_not_close_does_not_starve_another(self):
+        self.work["panes"].append(dict(pane="pane:2", workspace="worker"))
+        rows = [
+            dict(pane_id="pane:1", workspace_id="worker"),
+            dict(pane_id="pane:2", workspace_id="worker"),
+        ]
+        first = self.record(timeout=60)
+        self.escalate(first)
+        with patch.dict(os.environ, HERDR_PANE_ID="pane:2"):
+            second = self.record(timeout=60)
+        self.escalate(second)
+        later = max(first["deadline"], second["deadline"]) + 10
+        with patch.object(s.time, "time", return_value=later):
+            for q in (first, second):
+                s.bridge_user_answer(q["id"], "b")
+        bad, good = sorted([first["id"], second["id"]])
+        self.opener.side_effect = lambda a, b, timeout=None: 1 if b == bad else 0
+        for step in (1, 2):
+            s.collect(rows, {"worker": "owner"}, later + step)
+        self.assertFalse((s.questions_directory() / (good + ".md")).exists())
+
+    def test_answer_written_then_asker_dies_sends_late_not_expired(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        s.answer_path(q["id"]).write_text("b")
+        current = s.read(s.question_path(q["id"]))
+        current["asker_pid"] = 999999999
+        s.write(s.question_path(q["id"]), current)
+        escalated = current["to_user"]
+        _, records = self.live(escalated + s.ESCALATED_RETAIN_SECONDS + 1)
+        kinds = [r.get("event") for r in records]
+        self.assertIn("late", kinds)
+        self.assertNotIn("expired", kinds)
