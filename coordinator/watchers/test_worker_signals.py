@@ -1393,6 +1393,22 @@ class SignalTests(IsolatedTestCase):
             s.collect(rows, {"worker": "owner"}, later + step)
         self.assertFalse((s.questions_directory() / (good + ".md")).exists())
 
+    def test_answer_first_seen_after_the_bound_expires_instead_of_late(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        after = (
+            s.read(s.question_path(q["id"]))["to_user"] + s.ESCALATED_RETAIN_SECONDS + 1
+        )
+        with patch.object(s.time, "time", return_value=after):
+            s.bridge_user_answer(q["id"], "b")
+        _, records = self.live(after)
+        _, lines = self.route(None, records)
+        self.assertEqual([line for line in lines if "ANSWER LATE" in line], [])
+        self.assertEqual(
+            [line for line in lines if line.startswith("WORKER QUESTION EXPIRED ")],
+            [f"WORKER QUESTION EXPIRED pane:1 owner=owner id={q['id']}"],
+        )
+
     def test_answer_written_then_asker_dies_sends_late_not_expired(self):
         q = self.record(timeout=60)
         self.escalate(q)

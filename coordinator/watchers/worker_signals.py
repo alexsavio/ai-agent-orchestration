@@ -356,6 +356,7 @@ def bridge_user_answer(identifier, text):
         and not record.get("cleanup")
         and not record.get("notice")
         and record.get("late_answer") is None
+        and time.time() <= record["to_user"] + ESCALATED_RETAIN_SECONDS
         and (record["deadline"] <= time.time() or not asker_alive(record))
     ):
         write(question_path(identifier), dict(record, late_answer=text))
