@@ -1268,7 +1268,7 @@ class SignalTests(IsolatedTestCase):
             all(k.startswith("workers:signal:signal-x") for k in keys.values()), keys
         )
 
-    def test_late_answer_line_routes_to_owner_and_coordinator(self):
+    def test_late_answer_line_routes_to_owner_only(self):
         import alert_policy
 
         q = self.record(timeout=60)
@@ -1289,7 +1289,8 @@ class SignalTests(IsolatedTestCase):
         self.assertEqual(len(routed), 1)
         self.assertEqual(routed[0][0], str(self.base / "architect-owner.json"))
         self.assertIn("WORKER ANSWER LATE", routed[0][1])
-        self.assertIn("herdr agent prompt", routed[0][1])
+        self.assertIn("native message channel", routed[0][1])
+        self.assertNotIn("herdr agent prompt", routed[0][1])
 
     def test_escalated_user_answer_to_dead_asker_is_late_not_discarded(self):
         record = self.record(timeout=60)

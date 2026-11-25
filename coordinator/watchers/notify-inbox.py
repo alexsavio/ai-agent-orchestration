@@ -308,7 +308,7 @@ def native_messages(args, stamped, fallback, patterns):
             by_owner.setdefault(owner.group(1), []).append(
                 native(line.split(" ", 1)[1])
                 + (
-                    ". Relay it to the worker with herdr agent prompt."
+                    ". Relay it to the worker through its native message channel."
                     if body.startswith("workers: WORKER ANSWER LATE ")
                     else f". Answer with orch-signal answer {question_id[1]} <text>."
                     if body.startswith("workers: WORKER QUESTION ")

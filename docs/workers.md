@@ -48,7 +48,10 @@ as the architect's `QUESTION <slug> <file>` registration. The command exits non-
 the worker's ask times out, until the user answers or 24 hours after
 `answer --to-user`. A user answer after the ask ended reaches the owning architect as
 `WORKER ANSWER LATE <pane> owner=<ws> id=<id> answer=<text>`; the architect relays it
-with `herdr agent prompt`. At 24 hours the owner gets
+once through the worker runtime's native message channel (the Messages rule in
+`skills/architect/SKILL.md`). Only a runtime with no such channel (pi, cursor) takes
+`herdr agent prompt`, and only after `~/.claude/coordinator/composer-state.py <pane>`
+prints `empty`. At 24 hours the owner gets
 `WORKER QUESTION EXPIRED <pane> owner=<ws> id=<id>`. A closed worker pane, an owner
 change or a cancelled ask (SIGINT, SIGTERM or SIGHUP) closes the question with no new
 line, unless a LATE or EXPIRED line was already sent. Lines already sent stand. An escalated
