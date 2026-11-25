@@ -256,3 +256,53 @@ assert sleeps == [1, 1], sleeps
             real_setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, signal.SIG_DFL)
         self.assertIs(restored, previous)
+
+    def test_outer_alarm_inside_an_inner_restore_raises_the_outer_error_once(self):
+        deadline = load_prs().github_poll.call_deadline
+
+        class Outer(BaseException):
+            count = 0
+
+            def __init__(self, *args):
+                type(self).count += 1
+                super().__init__(*args)
+
+        class Inner(BaseException):
+            pass
+
+        wall_offset = [0.0]
+        real_time = time.time
+        real_setitimer = signal.setitimer
+        hook = {"armed": False, "done": False}
+        cleanup = []
+
+        def setitimer(which, seconds, interval=0.0):
+            if hook["armed"] and not hook["done"] and seconds != 0:
+                # The first re-arm after the inner body is restore() re-arming the outer tick.
+                hook["done"] = True
+                result = real_setitimer(which, seconds, interval)
+                wall_offset[0] = 100.0
+                signal.raise_signal(signal.SIGALRM)
+                return result
+            return real_setitimer(which, seconds, interval)
+
+        try:
+            with (
+                patch.object(time, "time", lambda: real_time() + wall_offset[0]),
+                patch.object(signal, "setitimer", setitimer),
+            ):
+                with self.assertRaises(Outer):
+                    with deadline(5.0, expired_error=Outer):
+                        try:
+                            with deadline(1.0, expired_error=Inner):
+                                hook["armed"] = True
+                        finally:
+                            cleanup.append("started")
+                            time.sleep(0.4)
+                            cleanup.append("finished")
+        finally:
+            real_setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, signal.SIG_DFL)
+        self.assertTrue(hook["done"])
+        self.assertEqual(Outer.count, 1)
+        self.assertEqual(cleanup, ["started", "finished"])
