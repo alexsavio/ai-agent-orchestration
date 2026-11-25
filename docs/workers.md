@@ -22,7 +22,11 @@ matching working directory nor a live inherited pane proves caller identity.
 All commands, including architect `answer` and `list`, require a verified caller;
 an unverifiable caller fails without writing a signal. If the sandbox blocks
 process inspection, run the command escalated. Tool shells must descend from
-the pane's foreground process (Codex workers start with `--no-daemon`).
+the pane's foreground process (Codex workers start with `--no-daemon`). A command
+started with `&`, `nohup`, `setsid` or a `( ... &)` subshell is detached from its
+pane, so `orch-signal ask` fails with `cannot verify caller pane from live
+foreground processes`; run it in the foreground (Claude Code: the Bash tool's
+`run_in_background`).
 
 `orch-signal` writes `~/.claude/coordinator`, outside the Codex sandbox. Codex
 workers run every `orch-signal` command as an escalated command, like
