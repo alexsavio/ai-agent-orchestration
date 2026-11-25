@@ -1123,12 +1123,7 @@ class SignalTests(IsolatedTestCase):
         _, lines = self.route(None, records)
         notices = alert_policy.apply({}, [dict(mode="workers", events=lines)], later)
         self.assertTrue(any(f"id={q['id']}" in n and "LATE" in n for n in notices))
-        spec = importlib.util.spec_from_file_location(
-            "push_inbox", w.ROOT / "notify-inbox.py"
-        )
-        inbox = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(inbox)
-        routed = inbox.native_messages(
+        routed = self.inbox().native_messages(
             argparse.Namespace(bindings_dir=self.base, binding=None),
             ["stamp " + line for line in notices],
             False,

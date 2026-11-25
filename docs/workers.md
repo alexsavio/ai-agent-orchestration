@@ -44,12 +44,13 @@ Coordinator one `WORKER QUESTION TO USER <pane> owner=<ws> id=<id> file=<questio
 line at its next poll (the command does not send it), and the Coordinator treats it
 as the architect's `QUESTION <slug> <file>` registration. The command exits non-zero
 (one stderr line) when the panel did not open. The escalated question stays open after
-the worker's ask times out, until the user answers or 24 hours after the escalation
-pass. A user answer after the ask ended reaches the owning architect as
+the worker's ask times out, until the user answers or 24 hours after
+`answer --to-user`. A user answer after the ask ended reaches the owning architect as
 `WORKER ANSWER LATE <pane> owner=<ws> id=<id> answer=<text>`; the architect relays it
 with `herdr agent prompt`. At 24 hours the owner gets
 `WORKER QUESTION EXPIRED <pane> owner=<ws> id=<id>`. A closed worker pane, an owner
-change or a cancelled ask closes the question with no line. The architect still adds a
+change or a cancelled ask closes a question that has not yet produced a line and sends
+no new line; a TO USER, LATE or EXPIRED line already sent stands. The architect still adds a
 `## Waits on the user` item.
 
 A **current job** begins with `heartbeat --new-job` and ends with `done`; every
