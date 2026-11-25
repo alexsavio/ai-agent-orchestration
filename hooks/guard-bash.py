@@ -1892,7 +1892,7 @@ def unwrap_wrapper_options(words, wrapper):
             break
         name, equals, attached = option.partition("=")
         arity = options.get(name)
-        if arity is None and not equals and not option.startswith("--"):
+        if arity is None and not option.startswith("--"):
             for index in range(1, len(option)):
                 short_arity = options.get("-" + option[index])
                 if short_arity in (1, "optional"):

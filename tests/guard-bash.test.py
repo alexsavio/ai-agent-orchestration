@@ -3219,6 +3219,18 @@ pkill -f vite
         ("agy in env -iS", "env -iS 'agy -p hi'"),
         ("agy in env -iS attached", "env -iS'agy -p hi'"),
         ("agy in env -vS", "env -vS 'agy -p hi'"),
+        ("agy in env -S attached with an assignment", "env -S'FOO=1 agy -p hi'"),
+        ("agy bypass flag in env -S attached", "env -S'agy --remote-agent=1'"),
+        ("agy in env -iS attached with an assignment", "env -iS'PATH=/x agy -p hi'"),
+        ("pi in env -S attached with an assignment", "env -S'FOO=1 pi -p hi'"),
+        (
+            "cursor-agent in env -S attached with an assignment",
+            "env -S'FOO=1 cursor-agent -p hi'",
+        ),
+        (
+            "agy herdr start in env -S attached with an assignment",
+            "env -S'FOO=1 herdr agent start x --kind agy'",
+        ),
         ("agy run by find -exec", "timeout 5 find . -exec agy -p x \\;"),
         ("agy run by fd -x", "timeout 5 fd -x agy"),
         ("agy run by rg --pre", "timeout 5 rg --pre agy x f"),
