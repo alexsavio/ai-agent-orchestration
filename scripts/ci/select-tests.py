@@ -57,6 +57,7 @@ def platform_sensitive(path):
             "tests/test_helper.bash",
             "tests/setup_suite.bash",
             "coordinator/watchers/watcher_platform.py",
+            "lib/github_poll.py",
         }
     )
 
