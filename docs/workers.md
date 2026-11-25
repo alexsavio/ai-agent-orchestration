@@ -72,7 +72,7 @@ and empty input until `ask` exits; never end the turn while it runs. The tool
 yielding a session ID does not mean the command completed.
 Claude workers run `ask` with `run_in_background` or a Bash timeout above the
 command's `--timeout`. SIGTERM/SIGINT/SIGHUP cancel the question under the answers lock;
-a re-ask replaces a record whose recorded asker PID is dead. `answer` refuses
+a re-ask replaces a record whose recorded asker PID is dead, except an escalated question, which stays open. `answer` refuses
 a dead asker with `asker is gone`, including escalation.
 For Codex answers, a bounded receipt survives CLI consumption until the workers
 poll observes the model working or sends one native wake-up to its verified live
@@ -100,7 +100,7 @@ the supported shape. Subagent answers remain in their native threads.
 An owner may answer or escalate a question. Escalation uses the existing questions
 directory, answers lock, reminders and Q panel; the answers watcher forwards the
 user's answer to the blocked worker. If the asker has died, the bridge discards
-the answer and emits one `ANSWERS READFAIL answer discarded:` notice instead. If opening the panel fails, a due reminder
+the answer and emits one `ANSWERS READFAIL answer discarded:` notice instead, except for an escalated question: its answer becomes a `WORKER ANSWER LATE` line for the owner. If opening the panel fails, a due reminder
 retries. If `orch-signal` fails, a worker must finish with `DONE: <report path>`
 or ask with `QUESTION: <text>` so its owner can recover the result; plain
 `QUESTION:` is also the fallback when `ask` times out. `NEED SLOT:` is
@@ -108,15 +108,15 @@ unchanged. No picker opens in the worker pane.
 
 | Resource | Bound |
 |---|---|
-| Pending questions | One per pane; at most 200 question records machine-wide, including deferred panel cleanup; further asks fail clearly |
+| Pending questions | One per pane, plus any escalated question kept open after its ask ended; at most 200 question records machine-wide, including deferred panel cleanup; further asks fail clearly |
 | Ask wait | `workers.ask_timeout_s` / `ORCH_ASK_TIMEOUT_S`, default 1800 seconds; positive finite override `--timeout` |
 | Waiting ask polling | At most once per second, last sleep capped by remaining time |
 | Heartbeats | One accepted per 30 seconds; fresh for 300 seconds |
 | Pane records | One per live pane; removed after a successful snapshot confirms pane closed or owner changed |
-| Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed (Codex receipts remain until wake-up, observed working, or deadline), replaced, closed, or at deadline + 3600 seconds; a failed Q close retains a retry record; live askers wait for cleanup, while dead askers can be replaced |
+| Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed (Codex receipts remain until wake-up, observed working, or deadline), replaced, closed, or at deadline + 3600 seconds (an escalated question is kept up to 24 hours after `answer --to-user`, then for the notice window); a failed Q close retains a retry record; live askers wait for cleanup, while dead askers can be replaced |
 | Completion handoff | Latest 200 completions per pane for 3600 seconds; oldest dropped beyond cap; remaining events are emitted once before pruning a closed or re-tagged pane |
 | Q-panel cleanup | At most one close attempt per workers poll, 2-second execution timeout with bounded process-group teardown; failed attempts rotate behind other pending panels |
-| Signal dedupe state | IDs from retained live completions and unexpired pending questions only |
+| Signal dedupe state | IDs from retained live completions and unexpired pending questions and escalated questions kept open |
 | Native outbox | Existing 200 entries; merge overflow by target, drop oldest beyond cap; retry every 60 seconds, expire after 3600 seconds |
 
 Files live under `~/.claude/coordinator/worker-signals/`, never in the repo.
