@@ -3,6 +3,7 @@
 import contextlib
 import io
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -196,3 +197,62 @@ assert sleeps == [1, 1], sleeps
         save.assert_not_called()
         self.assertEqual(lookup.call_count, 1)
         self.assertIn("cycle timed out", output.getvalue())
+
+    def test_inherited_call_expiring_first_leaves_the_outer_timer_armed(self):
+        deadline = load_prs().github_poll.call_deadline
+
+        class Outer(BaseException):
+            pass
+
+        class Inner(BaseException):
+            pass
+
+        wall_offset = [0.0]
+        real_time = time.time
+        armed_after_inner = None
+        try:
+            with patch.object(time, "time", lambda: real_time() + wall_offset[0]):
+                with deadline(2.0, expired_error=Outer):
+                    wall_offset[0] = 1.9
+                    with self.assertRaises(Inner):
+                        with deadline(10.0, expired_error=Inner):
+                            # The wall clock steps back, so only the inner clock has passed.
+                            wall_offset[0] = 0.0
+                            time.sleep(2)
+                    armed_after_inner = signal.getitimer(signal.ITIMER_REAL)[0]
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, signal.SIG_DFL)
+        self.assertGreater(armed_after_inner, 0, "the outer call has no timer left")
+
+    def test_alarm_error_during_restore_still_restores_the_previous_handler(self):
+        deadline = load_prs().github_poll.call_deadline
+
+        class Boom(BaseException):
+            pass
+
+        def previous(_signum, _frame):
+            pass
+
+        signal.signal(signal.SIGALRM, previous)
+        real_setitimer = signal.setitimer
+        disarms = []
+
+        def setitimer(which, seconds, interval=0.0):
+            if seconds == 0 and not disarms[2:]:
+                disarms.append(seconds)
+                if len(disarms) == 2:
+                    # The second disarm is the first step of restore().
+                    signal.raise_signal(signal.SIGALRM)
+            return real_setitimer(which, seconds, interval)
+
+        try:
+            with patch.object(signal, "setitimer", setitimer):
+                with self.assertRaises(Boom):
+                    with deadline(0.2, expired_error=Boom):
+                        time.sleep(2)
+            restored = signal.getsignal(signal.SIGALRM)
+        finally:
+            real_setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, signal.SIG_DFL)
+        self.assertIs(restored, previous)

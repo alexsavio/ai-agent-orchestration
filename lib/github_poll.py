@@ -183,6 +183,7 @@ def call_deadline(seconds, *, expired_error=_Expired):
                 previous_handler(signum, frame)
             except TimeoutError as error:
                 raise _Expired from error
+            inherited_fired = False
         raise expired_error
 
     expired._poll_deadline = (expires, monotonic_expires)
@@ -221,7 +222,7 @@ def call_deadline(seconds, *, expired_error=_Expired):
     finally:
         try:
             restore()
-        except _Expired:
+        except BaseException:
             restore()
             raise
 
