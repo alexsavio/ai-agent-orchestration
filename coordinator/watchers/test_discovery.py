@@ -648,7 +648,7 @@ class CallerPaneTests(IsolatedTestCase):
                 "refusing inherited identity"
             )
         )
-        for detached in ("&", "nohup", "setsid"):
+        for detached in ("started with &", "( ... &)"):
             self.assertIn(detached, message)
         self.assertIn("run_in_background", message)
         self.assertIn("foreground", message.split("identity", 1)[1])

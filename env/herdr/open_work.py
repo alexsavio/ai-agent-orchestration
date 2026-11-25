@@ -155,6 +155,6 @@ def caller_pane(command, panes):
             return pane
     raise ValueError(
         "cannot verify caller pane from live foreground processes; refusing inherited identity"
-        " (a command started with &, nohup, setsid or a ( ... &) subshell is detached from its pane:"
+        " (a command started with & or a ( ... &) subshell, also with nohup or setsid, is detached from its pane:"
         " run it in the foreground; in Claude Code use the Bash tool's run_in_background, not a shell &)"
     )
