@@ -1247,3 +1247,31 @@ class SignalTests(IsolatedTestCase):
         kinds = [r.get("event") for r in records]
         self.assertIn("late", kinds)
         self.assertNotIn("expired", kinds)
+
+    def test_answer_given_to_a_live_waiter_never_becomes_a_late_line(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        s.bridge_user_answer(q["id"], "b")
+        state, lines = self.route(None, self.live(q["at"] + 0.5)[1])
+        self.assertEqual([line for line in lines if "ANSWER LATE" in line], [])
+        self.assertEqual(s.wait_answer(q, 5), "b")
+        current = s.read(s.question_path(q["id"]))
+        current["asker_pid"] = 999999999
+        s.write(s.question_path(q["id"]), current)
+        for step in (1, 2, 3):
+            _, records = self.live(q["at"] + 1 + step)
+            state, lines = self.route(state, records)
+            self.assertEqual([line for line in lines if "ANSWER LATE" in line], [])
+        self.assertFalse(s.question_path(q["id"]).exists())
+        self.assertFalse((s.questions_directory() / (q["id"] + ".md")).exists())
+
+    def test_new_ask_after_the_escalated_asker_died_leaves_the_escalation_open(self):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        current = s.read(s.question_path(q["id"]))
+        current["asker_pid"] = 999999999
+        s.write(s.question_path(q["id"]), current)
+        other = self.record(timeout=60)
+        self.assertNotEqual(other["id"], q["id"])
+        self.assertFalse(s.read(s.question_path(q["id"])).get("cleanup"))
+        self.assertTrue((s.questions_directory() / (q["id"] + ".md")).exists())
