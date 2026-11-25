@@ -67,10 +67,36 @@ calls less than 30 seconds apart are ignored. Ordinary heartbeats cannot undo do
 Completion and question messages go through the workers producer, shared notifier,
 `bindings/architect-<owner>.json` and its existing outbox. Delivery is normally
 within one workers poll (60 seconds). There is no second notifier or cursor.
+Codex workers must keep polling a running `exec_command` session with `write_stdin`
+and empty input until `ask` exits; never end the turn while it runs. The tool
+yielding a session ID does not mean the command completed.
 Claude workers run `ask` with `run_in_background` or a Bash timeout above the
 command's `--timeout`. SIGTERM/SIGINT/SIGHUP cancel the question under the answers lock;
 a re-ask replaces a record whose recorded asker PID is dead. `answer` refuses
 a dead asker with `asker is gone`, including escalation.
+For Codex answers, a bounded receipt survives CLI consumption until the workers
+poll observes the model working or sends one native wake-up to its verified live
+session while idle/done. The wake-up names the ask ID and tells the worker to read
+its running session output; it includes the answer for recovery if the tool
+session is no longer readable after a restart. A worker that already read the
+answer ignores the wake-up. No pane input is injected. Failed native sends are
+reported on stderr and retried by the next workers poll; receipt retention ends
+at the question deadline. At most one wake-up is attempted per workers poll;
+failed attempts rotate behind other pending receipts. The CLI remains the normal
+answer channel.
+Codex subagent waits are also bounded: `No agents completed yet` or a wait
+timeout does not establish completion. Check `list_agents` and keep calling
+`wait_agent` until the required children finish; never end the turn with pending
+children. As a fallback, the workers poll reads only a verified idle worker's own
+session metadata and child completion events, then sends a native wake-up for
+new child completions after the parent's idle turn ended. Active parents and old
+completions do not trigger it. Receipts are scoped to the live parent session,
+bounded to 64 recent children, and pruned when the pane closes.
+The Codex SQLite/rollout store is undocumented and may change. Unknown schemas or
+rollout shapes disable this fallback and log once per failure episode;
+`test_codex_store_shape_wakes_idle_parent_once` in `test_codex_subagents.py` pins
+the supported shape. Subagent answers remain in their native threads.
+
 An owner may answer or escalate a question. Escalation uses the existing questions
 directory, answers lock, reminders and Q panel; the answers watcher forwards the
 user's answer to the blocked worker. If the asker has died, the bridge discards
@@ -87,7 +113,7 @@ unchanged. No picker opens in the worker pane.
 | Waiting ask polling | At most once per second, last sleep capped by remaining time |
 | Heartbeats | One accepted per 30 seconds; fresh for 300 seconds |
 | Pane records | One per live pane; removed after a successful snapshot confirms pane closed or owner changed |
-| Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed, replaced, closed, or at deadline + 3600 seconds; a failed Q close retains a retry record; live askers wait for cleanup, while dead askers can be replaced |
+| Question/answer files | Worker consumption returns immediately; Q closure is deferred to the workers poll. Removed when consumed (Codex receipts remain until wake-up, observed working, or deadline), replaced, closed, or at deadline + 3600 seconds; a failed Q close retains a retry record; live askers wait for cleanup, while dead askers can be replaced |
 | Completion handoff | Latest 200 completions per pane for 3600 seconds; oldest dropped beyond cap; remaining events are emitted once before pruning a closed or re-tagged pane |
 | Q-panel cleanup | At most one close attempt per workers poll, 2-second execution timeout with bounded process-group teardown; failed attempts rotate behind other pending panels |
 | Signal dedupe state | IDs from retained live completions and unexpired pending questions only |
