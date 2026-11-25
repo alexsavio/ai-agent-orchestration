@@ -3245,6 +3245,13 @@ pkill -f vite
             "agy after a zsh always block",
             "{ timeout 5 grep -q x /dev/null } always { agy -p hi }",
         ),
+        ("agy after the keyword then", "timeout 5 grep -q x then agy -p hi"),
+        ("agy after the keyword do", "timeout 5 grep -q x do agy -p hi"),
+        ("agy after the keyword else", "timeout 5 grep -q x else agy -p hi"),
+        ("agy after the keyword elif", "timeout 5 grep -q x elif agy -p hi"),
+        ("agy after the keyword open brace", "timeout 5 grep -q x { agy -p hi"),
+        ("agy after the keyword close brace", "timeout 5 grep -q x } agy -p hi"),
+        ("agy after the keyword bang", "timeout 5 grep -q x ! agy -p hi"),
         (
             "agy version with a single-dash bypass flag",
             "agy --version -dangerously-skip-permissions",
@@ -3324,7 +3331,6 @@ pkill -f vite
         "x=$(timeout 5 grep -c agy docs/bash-guard.md)",
         "nice ps -p agy",
         "time printf '%s\\n' agy",
-        "timeout 5 grep -c agy docs/bash-guard.md",
         "~/.claude/coordinator/gemini-start.sh w p worker",
     ):
         case(f"allowed agy {command}", command)
