@@ -1017,14 +1017,14 @@ def reduce_workers(before, raw):
     events += waiting_events
     signal_events = raw.get("signal_events", [])
     signal_ids = (
-        [record["id"] for record in signal_events]
+        [worker_signals.event_key(record) for record in signal_events]
         if "signal_events" in raw
         else previous.get("signal_ids", [])
     )
     events += [
         worker_signals.event_line(record)
         for record in signal_events
-        if record["id"] not in previous.get("signal_ids", [])
+        if worker_signals.event_key(record) not in previous.get("signal_ids", [])
     ]
     result = dict(
         bad={key: value for key, value in bad.items() if key in present},
@@ -2199,6 +2199,7 @@ def cycle_pass(base, mode, collector, failures, budget):
                         (
                             "WORKER DONE ",
                             "WORKER QUESTION ",
+                            "WORKER ANSWER ",
                             "TODO ANSWER ",
                             "TODO AUTO-CLOSED ",
                             "SLOT ",

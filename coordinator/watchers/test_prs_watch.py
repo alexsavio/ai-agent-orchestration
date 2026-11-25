@@ -3,7 +3,6 @@
 import contextlib
 import io
 import os
-import signal
 import subprocess
 import sys
 import tempfile
@@ -14,57 +13,45 @@ from unittest.mock import patch
 
 from test_support import IsolatedTestCase
 
-import github_poll
 from test_github_poll_round2 import ROOT, load_prs
 
 
 class PrsWatchTests(IsolatedTestCase):
-    def test_nested_deadline_keeps_its_own_budget_inside_a_longer_one(self):
-        started = time.monotonic()
-        with github_poll.call_deadline(30):
-            with github_poll.call_deadline(1.5):
-                time.sleep(0.6)
-        self.assertLess(time.monotonic() - started, 1.5)
+    def test_successive_cycles_allow_calls_longer_than_the_alarm_tick(self):
+        prs = load_prs()
+        waits = []
 
-    def test_nested_deadline_ignores_a_disarmed_outer_timer(self):
-        class Outer(BaseException):
-            pass
+        def fetch(_scope):
+            for duration in (2, 0.3):
 
-        finished = []
-        with self.assertRaises(Outer):
-            with github_poll.call_deadline(0.5, expired_error=Outer):
-                signal.setitimer(signal.ITIMER_REAL, 0)
-                with github_poll.call_deadline(3):
-                    time.sleep(0.8)
-                    finished.append(True)
-        self.assertEqual(finished, [True])
+                def invoke(_env, _fds):
+                    time.sleep(duration)
+                    return subprocess.CompletedProcess(["gh"], 0, "", "")
 
-    def test_nested_deadline_stops_at_an_outer_deadline_the_wall_clock_passed(self):
-        class Outer(BaseException):
-            pass
+                prs.github_poll.run(["gh"], invoke, timeout=prs.GH_TIMEOUT_S)
+            return [], "reviewer"
 
-        real = time.time
-        started = time.monotonic()
-        with self.assertRaises(Outer):
-            with github_poll.call_deadline(5, expired_error=Outer):
-                remaining = signal.getsignal(signal.SIGALRM).remaining
-                with patch.object(time, "time", lambda: real() + 100):
-                    self.assertLess(remaining(), 0)
-                    with github_poll.call_deadline(1.0):
-                        time.sleep(0.6)
-        self.assertLess(time.monotonic() - started, 0.5)
+        def sleep(delay):
+            waits.append(delay)
+            if len(waits) == 3:
+                raise KeyboardInterrupt
+            time.sleep(0.3)
 
-    def test_outer_remaining_follows_the_monotonic_clock(self):
-        real = time.monotonic
-        with github_poll.call_deadline(10):
-            remaining = signal.getsignal(signal.SIGALRM).remaining
-            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
-            try:
-                with patch.object(time, "monotonic", lambda: real() + 9):
-                    left = remaining()
-            finally:
-                signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGALRM})
-        self.assertLess(left, 1.5)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(os.environ, GITHUB_POLL_STATE_DIR=directory),
+            patch.object(prs.github_poll, "SPACING", 0),
+            patch.object(prs, "load_state", return_value={}),
+            patch.object(prs, "fetch", side_effect=fetch),
+            patch.object(prs, "save_state") as save,
+            patch.object(prs, "time", SimpleNamespace(sleep=sleep)),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                prs.cmd_watch(SimpleNamespace(interval=1), "", "")
+        self.assertEqual(save.call_count, 3, output.getvalue())
+        self.assertEqual(waits, [1, 1, 1])
+        self.assertNotIn("failing", output.getvalue())
 
     def test_hung_child_is_killed_and_next_cycle_saves_a_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -75,6 +62,8 @@ class PrsWatchTests(IsolatedTestCase):
                 "import os, sys, time\n"
                 "from pathlib import Path\n"
                 f"pid = Path({str(root / 'hung.pid')!r})\n"
+                # Cross an alarm tick before readiness, regardless of spawn speed.
+                "time.sleep(0.4)\n"
                 "if not pid.exists():\n"
                 "    pid.write_text(str(os.getpid()))\n"
                 "    time.sleep(60)\n"

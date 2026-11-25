@@ -159,13 +159,17 @@ def call_deadline(seconds, *, expired_error=_Expired):
     previous_handler = signal.getsignal(signal.SIGALRM)
     previous_timer = signal.getitimer(signal.ITIMER_REAL)
     started = time.time()
-    outer_left = getattr(previous_handler, "remaining", None)
-    left = outer_left() if outer_left else previous_timer[0]
-    inherited = previous_timer[0] > 0 and left <= seconds
-    inherited_fired = False
-    duration = left if inherited else seconds
-    expires = started + duration
     monotonic_started = time.monotonic()
+    previous_remaining = previous_timer[0]
+    if endpoints := getattr(previous_handler, "_poll_deadline", None):
+        # A poller's periodic alarm is a clock-check tick, not its deadline.
+        previous_remaining = max(
+            0.001, min(endpoints[0] - started, endpoints[1] - monotonic_started)
+        )
+    inherited = 0 < previous_remaining <= seconds
+    inherited_fired = False
+    duration = previous_remaining if inherited else seconds
+    expires = started + duration
     monotonic_expires = monotonic_started + duration
 
     def expired(signum, frame):
@@ -181,9 +185,7 @@ def call_deadline(seconds, *, expired_error=_Expired):
                 raise _Expired from error
         raise expired_error
 
-    expired.remaining = lambda: min(
-        expires - time.time(), monotonic_expires - time.monotonic()
-    )
+    expired._poll_deadline = (expires, monotonic_expires)
     signal.signal(signal.SIGALRM, expired)
     signal.setitimer(
         signal.ITIMER_REAL,
