@@ -197,3 +197,19 @@ class SubagentWakeTests(IsolatedTestCase):
         self.work["panes"] = []
         self.poll()
         self.assertEqual(list(state.iterdir()), [])
+
+    def test_store_is_opened_read_only(self):
+        real = sqlite3.connect
+        opened = []
+
+        def read_only_connect(*args, **kwargs):
+            db = real(*args, **kwargs)
+            with self.assertRaisesRegex(sqlite3.OperationalError, "readonly"):
+                db.execute("CREATE TABLE probe (x)")
+            opened.append(args[0])
+            return db
+
+        with patch("sqlite3.connect", side_effect=read_only_connect):
+            self.poll()
+        self.assertTrue(opened)
+        self.queue.assert_called_once()
