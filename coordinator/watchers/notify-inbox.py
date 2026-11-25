@@ -100,17 +100,24 @@ def binding_data(path):
     return value
 
 
-def binding(path):
-    value = binding_data(path)
-    pid = int(value["pid"])
-    os.kill(pid, 0)
-    session = json.loads((Path.home() / ".claude/sessions" / f"{pid}.json").read_text())
+def owns_session(value):
+    session = json.loads(
+        (Path.home() / ".claude/sessions" / f"{int(value['pid'])}.json").read_text()
+    )
+    if not isinstance(session, dict):
+        raise ValueError("session file is not an object")
     if (
         value["session_id"] != session.get("sessionId")
         or value["proc_start"] != session.get("procStart")
         or value["socket"] != session.get("messagingSocketPath")
     ):
         raise ValueError("session binding changed; owner must rebind")
+
+
+def binding(path):
+    value = binding_data(path)
+    os.kill(int(value["pid"]), 0)
+    owns_session(value)
     return Path(value["socket"]), value["token"]
 
 
@@ -131,7 +138,10 @@ def stale_binding_alerts(args, cursor):
             value = binding_data(path)
             try:
                 os.kill(int(value["pid"]), 0)
-            except ProcessLookupError:
+                owns_session(value)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                raise
+            except (ProcessLookupError, ValueError, FileNotFoundError):
                 fingerprint = hashlib.sha256(
                     json.dumps(value, sort_keys=True).encode()
                 ).hexdigest()
@@ -141,7 +151,14 @@ def stale_binding_alerts(args, cursor):
                     events.append(
                         f"bindings: BINDING STALE {architect} {match[1]} (start)"
                     )
-        except (OSError, ValueError, KeyError, TypeError):
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            OverflowError,
+            RecursionError,
+        ):
             if path.name in old:
                 current[path.name] = old[path.name]
     if current:
