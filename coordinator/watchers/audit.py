@@ -525,7 +525,7 @@ def pr_lines(pr, page_nodes=100, settings=None):
         emit("RED", ",".join(red))
     if count:
         emit("THREADS", f"{count} unresolved")
-    bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer")
+    bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "")
     reviews = [
         r for r in pr["reviews"]["nodes"] if (r.get("author") or {}).get("login") == bot
     ]

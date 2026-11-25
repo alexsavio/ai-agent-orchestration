@@ -59,6 +59,8 @@ The buckets, first match wins:
 
 Three short columns: PR, Title (≤60 chars), Author · status. Your own authored PRs and bot README-sync titles are hidden.
 
+`pr.bot_reviewer_login` only controls the watchers' COPILOT events; it does not change how this skill identifies bot reviewers.
+
 After the tables, add only what the buckets do not already say: months-old parked PRs, or which Ready PRs you just dispatched.
 
 ## Watch

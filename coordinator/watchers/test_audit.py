@@ -86,6 +86,17 @@ class AuditTests(IsolatedTestCase):
         )
         self.assertEqual(self.lines(), [])
 
+    def test_empty_bot_reviewer_login_disables_copilot_events(self):
+        self.pr["reviews"]["nodes"] = [
+            dict(
+                author=dict(login="copilot-pull-request-reviewer", __typename="Bot"),
+                body="Needs a closer look\nFix this",
+            )
+        ]
+        with patch.dict(os.environ):
+            os.environ.pop("ORCH_BOT_REVIEWER_LOGIN", None)
+            self.assertFalse(any(line.startswith("COPILOT ") for line in self.lines()))
+
     def test_copilot_no_summary_and_deleted_author(self):
         self.pr["reviews"]["nodes"] = [
             dict(author=None, body="Needs a closer look"),

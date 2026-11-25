@@ -1249,22 +1249,18 @@ def collect_pulls(command, before, clock=time.monotonic):
         try:
             # The 100-review connection is metadata for dedupe; bodies/classification keep the six-review window.
             display_pr = dict(pr, reviews=pr.get("recentReviews", pr["reviews"]))
+            bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "")
             visible_bot_reviews = [
                 review["id"]
                 for review in pr["reviews"]["nodes"]
-                if (review.get("author") or {}).get("login")
-                == os.environ.get(
-                    "ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer"
-                )
+                if (review.get("author") or {}).get("login") == bot
             ]
             # Every qualifying human review is remembered, so a later edit cannot resurface an older one.
             visible_bot_reviews += [
                 review["id"]
                 for review in audit.commented_reviews(
                     display_pr,
-                    os.environ.get(
-                        "ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer"
-                    ),
+                    bot,
                 )
             ]
             visible_approvals = [
@@ -1407,7 +1403,7 @@ def pull_identities(pr, lines):
             for review in pr["latestOpinionatedReviews"]["nodes"]
             if review["state"] == "APPROVED"
         ]
-    bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "copilot-pull-request-reviewer")
+    bot = os.environ.get("ORCH_BOT_REVIEWER_LOGIN", "")
     reviews = [
         row
         for row in pr["reviews"]["nodes"]
