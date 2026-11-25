@@ -638,6 +638,21 @@ class CallerPaneTests(IsolatedTestCase):
             with self.assertRaisesRegex(ValueError, "cannot verify caller pane"):
                 self.adapter.caller_pane(self.command, self.panes[:1])
 
+    def test_unverified_caller_error_names_the_detached_cause_and_fix(self):
+        with self.assertRaises(ValueError) as caught:
+            self.adapter.caller_pane(self.command, self.panes[:1])
+        message = str(caught.exception)
+        self.assertTrue(
+            message.startswith(
+                "cannot verify caller pane from live foreground processes; "
+                "refusing inherited identity"
+            )
+        )
+        for detached in ("started with &", "( ... &)"):
+            self.assertIn(detached, message)
+        self.assertIn("run_in_background", message)
+        self.assertIn("foreground", message.split("identity", 1)[1])
+
     def test_denied_ps_requests_escalation_and_never_probes_a_pane(self):
         for error in (
             PermissionError("denied"),
