@@ -995,6 +995,21 @@ class SignalTests(IsolatedTestCase):
         _, records = self.live(q["at"] + 5)
         self.assertEqual(self.route(state, records)[1], [])
 
+    def test_escalation_seen_first_after_the_waiter_deadline_still_emits_the_event(
+        self,
+    ):
+        q = self.record(timeout=60)
+        self.escalate(q)
+        _, records = self.live(q["deadline"] + 5)
+        _, lines = self.route(None, records)
+        self.assertEqual(
+            [line for line in lines if line.startswith("WORKER QUESTION TO USER ")],
+            [
+                f"WORKER QUESTION TO USER pane:1 owner=owner id={q['id']} "
+                f"file={s.questions_directory() / (q['id'] + '.md')}"
+            ],
+        )
+
     def test_escalated_question_outlives_waiter_and_late_answer_reaches_owner(self):
         q = self.record(timeout=60)
         self.escalate(q)
@@ -1096,7 +1111,7 @@ class SignalTests(IsolatedTestCase):
             all(k.startswith("workers:signal:signal-x") for k in keys.values()), keys
         )
 
-    def test_late_answer_and_expiry_lines_route_to_owner_and_coordinator(self):
+    def test_late_answer_line_routes_to_owner_and_coordinator(self):
         import alert_policy
 
         q = self.record(timeout=60)

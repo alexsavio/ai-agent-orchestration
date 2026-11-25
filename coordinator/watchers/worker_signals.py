@@ -436,9 +436,10 @@ def collect(rows, owners, now, snapshot_at=None):
                         record.update(cleanup=True, cleanup_tried=now)
                         write(path, record)
                     remove_question(record)
-                elif not answered and now < record["deadline"]:
-                    events.append(record)
-                    if record.get("to_user"):
+                else:
+                    if not answered and now < record["deadline"]:
+                        events.append(record)
+                    if record.get("to_user") and not answered:
                         events.append(dict(record, event="to_user"))
             elif closed:
                 events.extend(

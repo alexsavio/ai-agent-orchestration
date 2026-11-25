@@ -43,7 +43,7 @@ orch-signal answer signal-<id> --to-user
 `WORKER QUESTION TO USER <pane> owner=<ws> id=<id> file=<question file>` line. It
 exits non-zero (one stderr line) when the panel did not open. The escalated question
 stays open after the worker's ask times out, until the user answers, the worker pane
-is gone or changes owner, or 24 hours pass. A user answer after the ask ended reaches
+is gone or changes owner, or 24 hours after the escalation pass. A user answer after the ask ended reaches
 the owning architect as `WORKER ANSWER LATE <pane> owner=<ws> id=<id> answer=<text>`;
 the architect relays it with `herdr agent prompt`. At 24 hours the owner gets
 `WORKER QUESTION EXPIRED <pane> owner=<ws> id=<id>`. The architect still adds a
