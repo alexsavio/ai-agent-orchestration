@@ -255,9 +255,18 @@ def context_facts(line):
 
 
 def worker_facts(line):
-    signal = re.match(r"WORKER (?:DONE|QUESTION) \S+ owner=\S+ id=(\S+)", line)
+    signal = re.match(
+        r"WORKER (DONE|QUESTION|QUESTION TO USER|QUESTION EXPIRED|ANSWER LATE)"
+        r" \S+ owner=\S+ id=(\S+)",
+        line,
+    )
     if signal:
-        item = fact("workers:signal:" + signal.group(1), line, terminal=True)
+        kind = "" if signal.group(1) in ("DONE", "QUESTION") else ":" + signal.group(1)
+        item = fact(
+            "workers:signal:" + signal.group(2) + kind.replace(" ", "-"),
+            line,
+            terminal=True,
+        )
         item["text"] = line
         return [item]
     review = re.fullmatch(
