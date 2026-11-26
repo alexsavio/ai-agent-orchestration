@@ -930,11 +930,16 @@ def worker_session(no_transcripts):
         pane = os.environ.get("HERDR_PANE_ID")
         if not pane:
             raise ValueError("HERDR_PANE_ID is missing")
+        timeout = int(os.environ.get("ORCH_HERDR_SESSION_TIMEOUT_S", "10"))
+        if timeout <= 0:
+            raise ValueError(
+                "ORCH_HERDR_SESSION_TIMEOUT_S must be between 1 and a positive integer"
+            )
         done = subprocess.run(
             ["herdr", "agent", "get", pane],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=timeout,
         )
         if done.returncode:
             raise ValueError("Herdr could not identify the worker")
