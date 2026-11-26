@@ -29,7 +29,7 @@ If step 1 saved an answers file, run one Bash call on its own (no `&&`, `;` or p
 python3 ~/.claude/coordinator/todo-panel.py apply <saved answers.json path>
 ```
 
-It prints one line per answer: `queued`, `failed <reason>` or `skipped` (an id already applied; never queued twice). The reasons are kept and shown on the item at the next render. Apply uses the item's generation from the last render, so an item that changed since then fails with a stale reason instead of sending a wrong answer. The changed item has a new key, so the next render shows it without that reason; tell the user in your answer.
+It prints one line per answer: `queued`, `failed <reason>` or `skipped` (an id among the latest 1,000 applied; it is not queued again). The reasons are kept and shown on the item at the next render. Apply uses the item's generation from the last render, so an item that changed since then fails with a stale reason instead of sending a wrong answer. The changed item has a new key, so the next render shows it without that reason; tell the user in your answer.
 
 ## 3. Render and publish
 
@@ -46,7 +46,7 @@ Publish with the Artifact tool:
 - `files`: `{"todo-panel.js": "todo-panel.js", "items.json": "items.json", "answers.json": null}`. The `null` clears the answers you just applied.
 - With a URL: pass `url`. First publish only: pass `capabilities: {"artifact": {}, "comments": {}}`, `icon: "checklist"` and a one-sentence `description`. Never pass `capabilities` or `icon` on a later publish.
 
-If the publish is refused because a newer version exists, the user's Submit landed after your read, and publishing now would clear answers you have not applied. Go back to step 1, read the new `answers.json`, apply it, render and publish again. Step 2 skips ids it already applied.
+If the publish is refused because a newer version exists, the user's Submit landed after your read, and publishing now would clear answers you have not applied. Go back to step 1, read the new `answers.json`, apply it, render and publish again. Step 2 skips ids among the latest 1,000 it applied.
 
 ## 4. Save
 
