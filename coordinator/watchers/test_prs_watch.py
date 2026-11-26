@@ -210,6 +210,8 @@ assert sleeps == [1, 1], sleeps
         wall_offset = [0.0]
         real_time = time.time
         armed_after_inner = None
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        previous_timer = signal.setitimer(signal.ITIMER_REAL, 0)
         try:
             with patch.object(time, "time", lambda: real_time() + wall_offset[0]):
                 with deadline(2.0, expired_error=Outer):
@@ -222,7 +224,9 @@ assert sleeps == [1, 1], sleeps
                     armed_after_inner = signal.getitimer(signal.ITIMER_REAL)[0]
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, signal.SIG_DFL)
+            signal.signal(signal.SIGALRM, previous_handler)
+            if previous_timer[0]:
+                signal.setitimer(signal.ITIMER_REAL, *previous_timer)
         self.assertGreater(armed_after_inner, 0, "the outer call has no timer left")
 
     def test_alarm_error_during_restore_still_restores_the_previous_handler(self):
@@ -234,6 +238,8 @@ assert sleeps == [1, 1], sleeps
         def previous(_signum, _frame):
             pass
 
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        previous_timer = signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
         real_setitimer = signal.setitimer
         disarms = []
@@ -254,7 +260,9 @@ assert sleeps == [1, 1], sleeps
             restored = signal.getsignal(signal.SIGALRM)
         finally:
             real_setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, signal.SIG_DFL)
+            signal.signal(signal.SIGALRM, previous_handler)
+            if previous_timer[0]:
+                real_setitimer(signal.ITIMER_REAL, *previous_timer)
         self.assertIs(restored, previous)
 
     def test_outer_alarm_inside_an_inner_restore_raises_the_outer_error_once(self):
@@ -275,6 +283,8 @@ assert sleeps == [1, 1], sleeps
         real_setitimer = signal.setitimer
         hook = {"armed": False, "done": False}
         cleanup = []
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        previous_timer = signal.setitimer(signal.ITIMER_REAL, 0)
 
         def setitimer(which, seconds, interval=0.0):
             if hook["armed"] and not hook["done"] and seconds != 0:
@@ -302,7 +312,9 @@ assert sleeps == [1, 1], sleeps
                             cleanup.append("finished")
         finally:
             real_setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, signal.SIG_DFL)
+            signal.signal(signal.SIGALRM, previous_handler)
+            if previous_timer[0]:
+                real_setitimer(signal.ITIMER_REAL, *previous_timer)
         self.assertTrue(hook["done"])
         self.assertEqual(Outer.count, 1)
         self.assertEqual(cleanup, ["started", "finished"])
