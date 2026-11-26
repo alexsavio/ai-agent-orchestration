@@ -1078,6 +1078,17 @@ EOF
   [ "$status" -eq 0 ] || { printf 'status=%s\n%s\n' "$status" "$stderr"; return 1; }
 }
 
+@test "a bad ORCH_HERDR_SESSION_TIMEOUT_S stops the run even without transcripts" {
+  ORCH_HERDR_SESSION_TIMEOUT_S=0 run_sweep --no-comment --no-transcripts
+  [ "$status" -eq 1 ] || { printf 'status=%s\n%s\n' "$status" "$stderr"; return 1; }
+  [[ "$stderr" == *'ORCH_HERDR_SESSION_TIMEOUT_S must be a positive integer'* ]] || { printf '%s\n' "$stderr"; return 1; }
+  [ ! -e "$TMP/agent.calls" ]
+  ORCH_HERDR_SESSION_TIMEOUT_S=abc run_sweep --no-comment --no-transcripts
+  [ "$status" -eq 1 ] || { printf 'status=%s\n%s\n' "$status" "$stderr"; return 1; }
+  [[ "$stderr" == *'ORCH_HERDR_SESSION_TIMEOUT_S must be a positive integer'* ]] || { printf '%s\n' "$stderr"; return 1; }
+  [ ! -e "$TMP/agent.calls" ]
+}
+
 @test "validator reasons survive the record comment and bounded outcome history" {
   FAKE_FINDINGS=1 FAKE_VERDICT=FALSE run_sweep
   [ "$status" -eq 0 ]

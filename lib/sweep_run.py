@@ -927,14 +927,17 @@ def cache_path(repo, number, head):
 
 def worker_session(no_transcripts):
     try:
+        timeout = int(os.environ.get("ORCH_HERDR_SESSION_TIMEOUT_S", "10"))
+    except ValueError:
+        raise Failure(
+            "ORCH_HERDR_SESSION_TIMEOUT_S must be a positive integer"
+        ) from None
+    if timeout <= 0:
+        raise Failure("ORCH_HERDR_SESSION_TIMEOUT_S must be a positive integer")
+    try:
         pane = os.environ.get("HERDR_PANE_ID")
         if not pane:
             raise ValueError("HERDR_PANE_ID is missing")
-        timeout = int(os.environ.get("ORCH_HERDR_SESSION_TIMEOUT_S", "10"))
-        if timeout <= 0:
-            raise ValueError(
-                "ORCH_HERDR_SESSION_TIMEOUT_S must be between 1 and a positive integer"
-            )
         done = subprocess.run(
             ["herdr", "agent", "get", pane],
             capture_output=True,
